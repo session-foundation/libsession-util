@@ -49,6 +49,26 @@ TEST_CASE(
     std::filesystem::remove(path, ec);
 }
 
+TEST_CASE("schema_extension: migrations order by name, not filename", "[core][schema]") {
+    auto path = std::filesystem::temp_directory_path() /
+                fmt::format("{}.db", session::random::unique_id("test_schema", 7));
+    std::filesystem::remove(path);
+
+    // tests/schema/ holds 001_ordering.sql plus 001_ordering+002.sql, which ALTERs the table the
+    // first one creates.  '+' sorts below '.', so ordering by filename would run the addendum
+    // first and Core construction would throw here rather than reaching the checks below.
+    Core core{path, schema_extension{"testext", session::test::schema::MIGRATIONS}};
+
+    CHECK(TestHelper::migration_applied(core, "testext:001_ordering"));
+    CHECK(TestHelper::migration_applied(core, "testext:001_ordering+002"));
+
+    auto cols = TestHelper::db_conn(core).get_columns("ext_ordering");
+    CHECK(std::ranges::any_of(cols, [](const auto& c) { return c.name == "added_later"; }));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 TEST_CASE("schema_extension: rejects unusable owners", "[core][schema]") {
     auto path = std::filesystem::temp_directory_path() /
                 fmt::format("{}.db", session::random::unique_id("test_schema", 7));

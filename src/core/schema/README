@@ -1,12 +1,40 @@
 Any files in this directory beginning with a number and ending with .cpp or .sql are one-time
 migrations: they are processed in ascii-sorted order against the `migrations_applied` table: if the
-migration doesn't exist there then the migration is executed when the and the entry is inserted into
+migration doesn't exist there then the migration is executed and the entry is inserted into
 `migrations_applied`.
+
+The sort is over the migration *name* -- the filename without its extension, which is what gets
+recorded in `migrations_applied` -- not over the filename.  This matters when one name is a prefix
+of another: sorting filenames would order `001_foo+002.sql` before `001_foo.sql`, because '+' sorts
+below '.'.  Sorting names makes it a prefix comparison, so the shorter name always runs first
+regardless of what follows it.
 
 It is recommended that migrations defined here use the format `NNN_description_of_migration.sql`,
 such as `000_device_tables.sql`.  Updates that depend on earlier migrations having happend must then
 ensure that they use a larger `NNN` value than the update that they depend on.  Migrations that
 depend on no other database components at all should start at 000.
+
+
+Iterating on a branch
+---------------------
+
+While developing a schema change you generally want to keep applying updates to a database you have
+already been using, rather than recreating it after every edit.  To do that, name the first
+migration what the finished one will be called, and add addenda alongside it as you go:
+
+    001_new_feature.sql
+    001_new_feature+001.sql
+    001_new_feature+002.sql
+
+Before merging, fold the addenda back into `001_new_feature.sql` and delete them.  Because your
+database already recorded `001_new_feature` when you first created that file, the squashed migration
+is seen as applied and is not re-run: your development database survives the squash.  The orphaned
+`001_new_feature+NNN` rows left in `migrations_applied` are ignored, since only names present in the
+registry are ever consulted.
+
+If you skip this and name the first file something you later rename, the squash will leave your
+development database out of step and you will have to recreate it -- a nuisance rather than a
+problem, but easily avoided.
 
 There are two sorts of migrations permitted here: SQL and C++.
 

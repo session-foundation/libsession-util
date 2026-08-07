@@ -35,7 +35,21 @@ function(session_schema_dir)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ".")
 
     file(GLOB SCHEMA_FILES "[0-9]*.sql" "[0-9]*.cpp")
-    list(SORT SCHEMA_FILES)
+
+    # Order migrations by the name recorded in migrations_applied, not by filename: the extension
+    # is not part of a migration's identity, and including it flips the order whenever one name is
+    # a prefix of another, since "001_foo+002.sql" sorts before "001_foo.sql" ('+' is 0x2B, '.' is
+    # 0x2E).
+    #
+    # Decorate, sort, undecorate.  The separator has to sort below every character a name can
+    # contain or the prefix case breaks again one level down, so it is a control character rather
+    # than any punctuation.
+    string(ASCII 1 SCHEMA_SEP)
+    list(TRANSFORM SCHEMA_FILES REPLACE "^(.*/)([^/]*)\\.(sql|cpp)$" "\\2${SCHEMA_SEP}\\1\\2.\\3"
+        OUTPUT_VARIABLE SCHEMA_DECORATED)
+    list(SORT SCHEMA_DECORATED)
+    list(TRANSFORM SCHEMA_DECORATED REPLACE "^[^${SCHEMA_SEP}]*${SCHEMA_SEP}" ""
+        OUTPUT_VARIABLE SCHEMA_FILES)
 
     set(DECLARATIONS "")
     set(SCHEMA_ENTRIES "")
