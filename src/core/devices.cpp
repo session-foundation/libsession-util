@@ -1094,7 +1094,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
     auto active_keys = active_device_keys();
 
-    auto devices_nonce = hash::blake2b_pers<24>(PERS_DEV_NONCE, ciphertext_raw);
+    auto devices_nonce = hash::blake2b_key_pers<24>(A, PERS_DEV_NONCE, ciphertext_raw);
 
     cleared_b32 ml_ss, aB, ki, key_base;
 
