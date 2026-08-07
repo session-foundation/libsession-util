@@ -912,10 +912,7 @@ DecryptGroupMessage decrypt_group_message(
     //
     // Removing any null padding bytes from the end
     //
-    if (auto it = std::find_if(
-                plain.rbegin(), plain.rend(), [](std::byte b) { return b != std::byte{0}; });
-        it != plain.rend())
-        plain.resize(plain.size() - std::distance(plain.rbegin(), it));
+    trim_trailing(plain);
 
     //
     // Now what we have less should be a bt_dict
@@ -1042,10 +1039,7 @@ std::vector<std::byte> decrypt_push_notification(
         throw std::runtime_error{"Failed to decrypt; perhaps the secret key is invalid?"};
 
     // Removing any null padding bytes from the end
-    if (auto it = std::find_if(
-                buf.rbegin(), buf.rend(), [](std::byte b) { return b != std::byte{0}; });
-        it != buf.rend())
-        buf.resize(buf.size() - std::distance(buf.rbegin(), it));
+    trim_trailing(buf);
 
     return buf;
 }

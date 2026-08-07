@@ -3,12 +3,29 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ranges>
 #include <session/format.hpp>
 #include <string_view>
 
 using namespace session::literals;
 
 namespace session {
+
+// Trims any run of trailing `trim` values off the end of a resizable container, in place.  A
+// container consisting entirely of `trim` values is left empty.
+//
+// Typically used to strip the null padding off a decrypted payload:
+//
+//     trim_trailing(plaintext);
+template <std::ranges::bidirectional_range Container>
+    requires std::ranges::sized_range<Container> &&
+             std::equality_comparable<std::ranges::range_value_t<Container>>
+void trim_trailing(Container& c, const std::ranges::range_value_t<Container>& trim = {}) {
+    auto trailing = std::ranges::distance(
+            c | std::views::reverse |
+            std::views::take_while([&trim](const auto& v) { return v == trim; }));
+    c.resize(c.size() - trailing);
+}
 
 // Copies `msg` into `buf`, truncating if necessary, always null-terminating.  Returns the number
 // of bytes written INCLUDING the null terminator (i.e. the number of bytes of `buf` that were

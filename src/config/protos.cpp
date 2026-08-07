@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../internal-util.hpp"
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
 #include "session/session_encrypt.hpp"
@@ -143,12 +144,10 @@ std::vector<std::byte> unwrap_config(
     if (!(content.back() == std::byte{0x00} || content.back() == std::byte{0x80}))
         throw std::runtime_error{"Incoming config data doesn't have required padding"};
 
-    if (auto it = std::find_if(
-                content.rbegin(), content.rend(), [](std::byte c) { return c != std::byte{0}; });
-        it != content.rend() && *it == std::byte{0x80})
-        content.resize(content.size() - std::distance(content.rbegin(), it) - 1);
-    else
+    trim_trailing(content);
+    if (content.empty() || content.back() != std::byte{0x80})
         throw std::runtime_error{"Incoming config data has invalid padding"};
+    content.pop_back();  // the 0x80 padding terminator itself
 
     SessionProtos::Content config{};
     if (!config.ParseFromArray(content.data(), content.size()))
