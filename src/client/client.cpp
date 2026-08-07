@@ -63,6 +63,93 @@ static int64_t account_id(sqlite::Connection& c, std::span<const std::byte, 33> 
     return c.prepared_get<int64_t>("SELECT id FROM accounts WHERE session_id = ?", session_id);
 }
 
+// The conversations column a given kind occupies, plus the queries that resolve or create the row
+// in the table that column references.
+struct ConvoKind {
+    std::string_view column;
+    std::string_view find;
+    std::string_view create;
+};
+
+static ConvoKind kind_of(ConversationId::Type type) {
+    switch (type) {
+        case ConversationId::Type::dm:
+            return {"dm",
+                    "SELECT id FROM accounts WHERE session_id = ?",
+                    "INSERT OR IGNORE INTO accounts (session_id) VALUES (?)"};
+        case ConversationId::Type::group:
+            return {"closed_group",
+                    "SELECT id FROM groups WHERE group_id = ?",
+                    "INSERT OR IGNORE INTO groups (group_id) VALUES (?)"};
+        case ConversationId::Type::community:
+            return {"community",
+                    "SELECT id FROM communities WHERE base_url = ? AND room = ?",
+                    "INSERT OR IGNORE INTO communities (base_url, room) VALUES (?, ?)"};
+    }
+    throw std::logic_error{"unhandled conversation kind"};
+}
+
+// Invokes `run` with a ConvoKind query and whichever bind parameters that kind's identity takes:
+// one blob for a DM or group, two strings for a community.
+template <typename R>
+static R with_identity_binds(const ConversationId& id, std::string_view query, auto&& run) {
+    if (id.type() == ConversationId::Type::community) {
+        auto [url, room] = id.community();
+        return run(std::string{query}, url, room);
+    }
+    auto raw = id.type() == ConversationId::Type::dm ? id.session_id() : id.group_id();
+    return run(std::string{query}, raw);
+}
+
+// Returns the identity row id for what a conversation is with, creating it if absent.  Must be
+// called inside the caller's transaction.
+static int64_t identity_id(sqlite::Connection& c, const ConversationId& id) {
+    auto kind = kind_of(id.type());
+    with_identity_binds<int>(id, kind.create, [&](const std::string& q, const auto&... b) {
+        return c.prepared_exec(q, b...);
+    });
+    return with_identity_binds<int64_t>(id, kind.find, [&](const std::string& q, const auto&... b) {
+        return c.prepared_get<int64_t>(q, b...);
+    });
+}
+
+// Rebuilds a ConversationId from whichever identity a conversation row joined to.  Exactly one is
+// set -- that is what the table's CHECK constraint enforces -- so the throw is unreachable unless
+// the database has been corrupted or written behind our back.
+static ConversationId subject_to_id(
+        int64_t convo,
+        const std::optional<sqlite::blob_guts<b33>>& sid,
+        const std::optional<sqlite::blob_guts<b33>>& gid,
+        const std::optional<std::string>& url,
+        const std::optional<std::string>& room) {
+    if (sid)
+        return ConversationId::dm(*sid);
+    if (gid)
+        return ConversationId::group(*gid);
+    if (url && room)
+        return ConversationId::community(*url, *room);
+    throw std::runtime_error{"conversation {} has no subject"_format(convo)};
+}
+
+static constexpr auto SUBJECT_JOIN = R"(
+    FROM conversations c
+    LEFT JOIN accounts a ON a.id = c.dm
+    LEFT JOIN groups g ON g.id = c.closed_group
+    LEFT JOIN communities m ON m.id = c.community
+)"sv;
+
+static ConversationId conversation_id_at(sqlite::Connection& c, int64_t convo) {
+    auto [sid, gid, url, room] = c.prepared_get<
+            std::optional<sqlite::blob_guts<b33>>,
+            std::optional<sqlite::blob_guts<b33>>,
+            std::optional<std::string>,
+            std::optional<std::string>>(
+            "SELECT a.session_id, g.group_id, m.base_url, m.room {} WHERE c.id = ?"_format(
+                    SUBJECT_JOIN),
+            convo);
+    return subject_to_id(convo, sid, gid, url, room);
+}
+
 struct ConvoRow {
     int64_t id;
     bool created;
@@ -73,37 +160,42 @@ struct ConvoRow {
 // whatever change prompted it.
 static ConvoRow ensure_conversation(
         sqlite::Connection& c, const ConversationId& id, sys_ms activity) {
-    auto key = id.to_string();
+    auto kind = kind_of(id.type());
+    auto subject = identity_id(c, id);
     auto ms = to_ms(activity);
 
-    // A DM's peer gets an accounts row up front so the conversation can resolve a display name
-    // even before any message arrives.
-    std::optional<int64_t> peer;
-    if (id.type() == ConversationId::Type::dm)
-        peer = account_id(c, id.session_id());
-
     bool created = c.prepared_exec(
-                           "INSERT OR IGNORE INTO conversations"
-                           " (key, type, peer, created, last_activity) VALUES (?, ?, ?, ?, ?)",
-                           key,
-                           static_cast<int>(id.type()),
-                           peer,
+                           R"(
+        INSERT OR IGNORE INTO conversations ({}, created, last_activity) VALUES (?, ?, ?)
+    )"_format(kind.column),
+                           subject,
                            ms,
                            ms) > 0;
     if (!created)
         c.prepared_exec(
-                "UPDATE conversations SET last_activity = ? WHERE key = ? AND last_activity < ?",
-                ms,
-                key,
+                R"(
+            UPDATE conversations SET last_activity = ?2
+            WHERE {} = ?1 AND last_activity < ?2
+        )"_format(kind.column),
+                subject,
                 ms);
 
-    return {c.prepared_get<int64_t>("SELECT id FROM conversations WHERE key = ?", key), created};
+    return {c.prepared_get<int64_t>(
+                    "SELECT id FROM conversations WHERE {} = ?"_format(kind.column), subject),
+            created};
 }
 
 // Returns the conversation row id, or nullopt if we have no such conversation.
 static std::optional<int64_t> find_conversation(sqlite::Connection& c, const ConversationId& id) {
-    auto key = id.to_string();
-    return c.prepared_maybe_get<int64_t>("SELECT id FROM conversations WHERE key = ?", key);
+    auto kind = kind_of(id.type());
+    auto subject = with_identity_binds<std::optional<int64_t>>(
+            id, kind.find, [&](const std::string& q, const auto&... b) {
+                return c.prepared_maybe_get<int64_t>(q, b...);
+            });
+    if (!subject)
+        return std::nullopt;
+    return c.prepared_maybe_get<int64_t>(
+            "SELECT id FROM conversations WHERE {} = ?"_format(kind.column), *subject);
 }
 
 core::callbacks Client::_intercept_callbacks(core::callbacks app) {
@@ -140,7 +232,9 @@ void Client::_init() {
     // resumed and its outcome is unknowable.  Say so rather than guessing either way.
     auto c = core.database().conn();
     c.prepared_exec(
-            "UPDATE messages SET send_state = ? WHERE send_state IN (?, ?)",
+            R"(
+        UPDATE messages SET send_state = ? WHERE send_state IN (?, ?)
+    )",
             static_cast<int>(SendState::interrupted),
             static_cast<int>(SendState::pending),
             static_cast<int>(SendState::sending));
@@ -173,24 +267,35 @@ void Client::_emit(const Change& change) {
 
 // -- Conversations ----------------------------------------------------------------------------
 
-static constexpr auto CONVO_COLUMNS =
-        "SELECT c.key, coalesce(a.display_name, ''), c.last_activity,"
-        " coalesce((SELECT m.body FROM messages m WHERE m.conversation = c.id"
-        "            ORDER BY m.timestamp DESC, m.id DESC LIMIT 1), ''),"
-        " (SELECT COUNT(*) FROM messages m WHERE m.conversation = c.id"
-        "   AND m.outgoing = 0 AND m.timestamp > c.last_read)"
-        " FROM conversations c LEFT JOIN accounts a ON a.id = c.peer"sv;
+// Only a DM has a name source so far; groups and communities gain one with the features.
+static const auto CONVO_COLUMNS = R"(
+    SELECT c.id, a.session_id, g.group_id, m.base_url, m.room,
+           a.display_name, c.last_activity,
+           coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
+                      ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
+           c.unread_count
+    {}
+)"_format(SUBJECT_JOIN);
 
 template <typename... Bind>
 static std::vector<Conversation> query_conversations(
         sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<Conversation> out;
-    for (auto [key, name, activity, preview, unread] :
-         c.prepared_results<std::string, std::string, int64_t, std::string, int>(query, bind...))
+    for (auto [convo, sid, gid, url, room, name, activity, preview, unread] :
+         c.prepared_results<
+                 int64_t,
+                 std::optional<sqlite::blob_guts<b33>>,
+                 std::optional<sqlite::blob_guts<b33>>,
+                 std::optional<std::string>,
+                 std::optional<std::string>,
+                 std::optional<std::string>,
+                 int64_t,
+                 std::string,
+                 int>(query, bind...))
         out.push_back(
                 Conversation{
-                        .id = ConversationId::parse(key),
-                        .display_name = std::move(name),
+                        .id = subject_to_id(convo, sid, gid, url, room),
+                        .display_name = name.value_or(""),
                         .last_message = std::move(preview),
                         .last_activity = from_epoch_ms(activity),
                         .unread = unread});
@@ -204,10 +309,10 @@ std::vector<Conversation> Client::conversations() {
 
 std::optional<Conversation> Client::conversation(const ConversationId& id) {
     auto c = core.database().conn();
-    // `key` must outlive the query: string binds go through sqlite3_bind_*_nocopy, so binding a
-    // temporary here would leave the statement pointing at freed memory when it steps.
-    auto key = id.to_string();
-    auto found = query_conversations(c, "{} WHERE c.key = ?"_format(CONVO_COLUMNS), key);
+    auto convo = find_conversation(c, id);
+    if (!convo)
+        return std::nullopt;
+    auto found = query_conversations(c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -227,7 +332,6 @@ Conversation Client::create_conversation(const ConversationId& id) {
 }
 
 void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
-    auto key = id.to_string();
     int changed = 0;
     {
         auto c = core.database().conn();
@@ -244,16 +348,25 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
             // "Everything" means every message that exists now, not every message that ever will:
             // parking the watermark at infinity would silently mark all future arrivals read.
             auto newest = c.prepared_get<std::optional<int64_t>>(
-                    "SELECT max(timestamp) FROM messages"
-                    " WHERE conversation = ? AND outgoing = 0",
+                    R"(
+                SELECT max(timestamp) FROM messages WHERE conversation = ? AND outgoing = 0
+            )",
                     *convo);
             if (!newest)
                 return;
             target = *newest;
         }
 
+        // Moving last_read changes what counts as unread without touching any message, so the
+        // triggers cannot see it; recompute here, where it is rare, rather than per list query.
         changed = c.prepared_exec(
-                "UPDATE conversations SET last_read = ?1 WHERE id = ?2 AND last_read < ?1",
+                R"(
+            UPDATE conversations
+            SET last_read = ?1,
+                unread_count = (SELECT COUNT(*) FROM messages
+                                 WHERE conversation = ?2 AND outgoing = 0 AND timestamp > ?1)
+            WHERE id = ?2 AND last_read < ?1
+        )",
                 target,
                 *convo);
         tx.commit();
@@ -264,21 +377,24 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
 
 // -- Messages ---------------------------------------------------------------------------------
 
-static constexpr auto MESSAGE_COLUMNS =
-        "SELECT m.id, c.key, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body,"
-        " m.send_state"
-        " FROM messages m"
-        " JOIN conversations c ON c.id = m.conversation"
-        " JOIN accounts a ON a.id = m.sender"sv;
+// No join back to conversations: every row of a given query belongs to one conversation, so its
+// ConversationId is resolved once by the caller rather than rebuilt per row.
+static constexpr auto MESSAGE_COLUMNS = R"(
+    SELECT m.id, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body, m.send_state
+    FROM messages m
+    JOIN accounts a ON a.id = m.sender
+)"sv;
 
 template <typename... Bind>
 static std::vector<Message> query_messages(
-        sqlite::Connection& c, const std::string& query, const Bind&... bind) {
+        sqlite::Connection& c,
+        const ConversationId& convo,
+        const std::string& query,
+        const Bind&... bind) {
     std::vector<Message> out;
-    for (auto [id, key, swarm_hash, sender, outgoing, ts, body, send_state] :
+    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state] :
          c.prepared_results<
                  int64_t,
-                 std::string,
                  std::optional<std::string>,
                  sqlite::blob_guts<b33>,
                  int,
@@ -287,7 +403,7 @@ static std::vector<Message> query_messages(
                  std::optional<int>>(query, bind...))
         out.push_back(
                 Message{.id = id,
-                        .conversation = ConversationId::parse(key),
+                        .conversation = convo,
                         .sender = sender,
                         .outgoing = outgoing != 0,
                         .timestamp = from_epoch_ms(ts),
@@ -309,8 +425,10 @@ std::vector<Message> Client::messages(
     if (!before)
         return query_messages(
                 c,
-                "{} WHERE m.conversation = ? ORDER BY m.timestamp DESC, m.id DESC LIMIT ?"_format(
-                        MESSAGE_COLUMNS),
+                id,
+                R"(
+            {} WHERE m.conversation = ? ORDER BY m.timestamp DESC, m.id DESC LIMIT ?
+        )"_format(MESSAGE_COLUMNS),
                 *convo,
                 limit);
 
@@ -318,9 +436,12 @@ std::vector<Message> Client::messages(
     // value so this does not depend on the SQLite version's row-value support.
     return query_messages(
             c,
-            "{} WHERE m.conversation = ?"
-            " AND (m.timestamp < ?2 OR (m.timestamp = ?2 AND m.id < ?3))"
-            " ORDER BY m.timestamp DESC, m.id DESC LIMIT ?4"_format(MESSAGE_COLUMNS),
+            id,
+            R"(
+        {} WHERE m.conversation = ?1
+             AND (m.timestamp < ?2 OR (m.timestamp = ?2 AND m.id < ?3))
+           ORDER BY m.timestamp DESC, m.id DESC LIMIT ?4
+    )"_format(MESSAGE_COLUMNS),
             *convo,
             to_ms(before->timestamp),
             before->id,
@@ -329,7 +450,13 @@ std::vector<Message> Client::messages(
 
 std::optional<Message> Client::message(int64_t id) {
     auto c = core.database().conn();
-    auto found = query_messages(c, "{} WHERE m.id = ?"_format(MESSAGE_COLUMNS), id);
+    auto convo =
+            c.prepared_maybe_get<int64_t>("SELECT conversation FROM messages WHERE id = ?", id);
+    if (!convo)
+        return std::nullopt;
+
+    auto found = query_messages(
+            c, conversation_id_at(c, *convo), "{} WHERE m.id = ?"_format(MESSAGE_COLUMNS), id);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -364,9 +491,11 @@ int64_t Client::send_message(const ConversationId& id, std::string_view body) {
         created = convo.created;
 
         c.prepared_exec(
-                "INSERT INTO messages"
-                " (conversation, content_hash, sender, outgoing, timestamp, body, send_state)"
-                " VALUES (?, ?, ?, 1, ?, ?, ?)",
+                R"(
+            INSERT INTO messages
+                (conversation, content_hash, sender, outgoing, timestamp, body, send_state)
+            VALUES (?, ?, ?, 1, ?, ?, ?)
+        )",
                 convo.id,
                 cid,
                 account_id(c, self),
@@ -376,7 +505,7 @@ int64_t Client::send_message(const ConversationId& id, std::string_view body) {
         client_id = c.sql.getLastInsertRowid();
 
         c.prepared_exec(
-                "INSERT INTO message_content (message, content) VALUES (?, ?)", client_id, raw);
+                "INSERT INTO message_raw_content (message, content) VALUES (?, ?)", client_id, raw);
         tx.commit();
     }
 
@@ -438,10 +567,11 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         // Delivery is at-least-once -- the swarm cursor advances per batch, so a crash mid-batch
         // re-delivers it -- and either unique index is enough to recognise the redelivery.
         inserted = c.prepared_exec(
-                           "INSERT OR IGNORE INTO messages"
-                           " (conversation, content_hash, swarm_hash, sender, outgoing, timestamp,"
-                           "  body)"
-                           " VALUES (?, ?, ?, ?, 0, ?, ?)",
+                           R"(
+            INSERT OR IGNORE INTO messages
+                (conversation, content_hash, swarm_hash, sender, outgoing, timestamp, body)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+        )",
                            convo.id,
                            cid,
                            msg.hash,
@@ -451,17 +581,29 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         if (inserted) {
             client_id = c.sql.getLastInsertRowid();
             c.prepared_exec(
-                    "INSERT INTO message_content (message, content) VALUES (?, ?)",
+                    "INSERT INTO message_raw_content (message, content) VALUES (?, ?)",
                     client_id,
                     std::span<const std::byte>{msg.content});
+
+            // Whether an arrival is unread is this layer's decision, not the trigger's.  Today
+            // that is just "newer than the watermark"; mutes and message requests will land here.
+            c.prepared_exec(
+                    R"(
+                UPDATE conversations SET unread_count = unread_count + 1
+                WHERE id = ?1 AND ?2 > last_read
+            )",
+                    convo.id,
+                    to_ms(ts));
         }
 
         // `IS NOT` rather than `!=`: the column is NULL until a name is known, and `NULL != 'x'`
         // is NULL, so `!=` would never fire for the first name we learn.
         if (!name.empty())
             renamed = c.prepared_exec(
-                              "UPDATE accounts SET display_name = ?1"
-                              " WHERE id = ?2 AND display_name IS NOT ?1",
+                              R"(
+                UPDATE accounts SET display_name = ?1
+                WHERE id = ?2 AND display_name IS NOT ?1
+            )",
                               name,
                               sender) > 0;
 
@@ -493,24 +635,27 @@ void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
 
 void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus status) {
     auto state = state_for(status);
-    std::optional<std::string> convo;
+    std::optional<ConversationId> convo;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
         if (c.prepared_exec(
-                    "UPDATE messages SET send_state = ? WHERE id = ? AND send_state IS NOT ?",
+                    R"(
+            UPDATE messages SET send_state = ? WHERE id = ? AND send_state IS NOT ?
+        )",
                     static_cast<int>(state),
                     client_id,
-                    static_cast<int>(state)) > 0)
-            convo = c.prepared_maybe_get<std::string>(
-                    "SELECT c.key FROM messages m JOIN conversations c ON c.id = m.conversation"
-                    " WHERE m.id = ?",
-                    client_id);
+                    static_cast<int>(state)) > 0) {
+            auto convo_row = c.prepared_maybe_get<int64_t>(
+                    "SELECT conversation FROM messages WHERE id = ?", client_id);
+            if (convo_row)
+                convo = conversation_id_at(c, *convo_row);
+        }
         tx.commit();
     }
 
     if (convo)
-        _emit({ChangeType::message_updated, ConversationId::parse(*convo), client_id});
+        _emit({ChangeType::message_updated, *convo, client_id});
 }
 
 }  // namespace session::client

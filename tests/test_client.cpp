@@ -168,7 +168,7 @@ TEST_CASE("Client: applies its migrations under the client owner", "[client][sch
     CHECK(has_table("accounts"));
     CHECK(has_table("conversations"));
     CHECK(has_table("messages"));
-    CHECK(has_table("message_content"));
+    CHECK(has_table("message_raw_content"));
     // Client's tables live in Core's database, not a second file.
     CHECK(has_table("globals"));
 }
@@ -360,6 +360,89 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     c->create_conversation(empty);
     CHECK_NOTHROW(c->mark_read(empty));
     CHECK(c->conversation(empty)->unread == 0);
+}
+
+TEST_CASE("Client: cached counts stay in step with the messages table", "[client][convos]") {
+    TempClient c;
+    SenderKeys alice, bob;
+    auto convo = ConversationId::dm(alice.session_id);
+    auto other = ConversationId::dm(bob.session_id);
+
+    auto conn = c->core.database().conn();
+
+    // The cached counters alongside what counting the rows actually yields.  Nothing in the public
+    // API can tell a counter from a subquery, which is exactly why drift needs asserting directly.
+    auto counts = [&](std::span<const std::byte, 33> sid) {
+        return conn.prepared_get<int64_t, int64_t, int64_t, int64_t>(
+                R"(
+            SELECT c.count, c.unread_count,
+                   (SELECT COUNT(*) FROM messages WHERE conversation = c.id),
+                   (SELECT COUNT(*) FROM messages
+                     WHERE conversation = c.id AND outgoing = 0 AND timestamp > c.last_read)
+            FROM conversations c
+            JOIN accounts a ON a.id = c.dm
+            WHERE a.session_id = ?
+        )",
+                sid);
+    };
+
+    deliver(*c, alice, "one", from_epoch_ms(1000), "h1");
+    deliver(*c, alice, "two", from_epoch_ms(2000), "h2");
+    deliver(*c, alice, "three", from_epoch_ms(3000), "h3");
+    deliver(*c, bob, "elsewhere", from_epoch_ms(1500), "h4");
+
+    SECTION("arrivals update both") {
+        auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
+        CHECK(n == actual_n);
+        CHECK(unread == actual_unread);
+        CHECK(n == 3);
+        CHECK(unread == 3);
+        CHECK(c->conversation(convo)->unread == 3);
+    }
+
+    SECTION("marking read moves unread without touching the total") {
+        c->mark_read(convo, from_epoch_ms(2000));
+        auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
+        CHECK(n == actual_n);
+        CHECK(unread == actual_unread);
+        CHECK(n == 3);
+        CHECK(unread == 1);
+    }
+
+    SECTION("count tracks deletes made behind the application's back") {
+        auto id = c->messages(convo).front().id;
+        conn.prepared_exec("DELETE FROM messages WHERE id = ?", id);
+
+        auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
+        CHECK(n == actual_n);
+        CHECK(n == 2);
+
+        // unread_count is the application's to maintain, so a raw delete leaves it behind -- that
+        // is the deliberate split, not a bug.  Whatever next recomputes it puts it right.
+        CHECK(unread == 3);
+        CHECK(actual_unread == 2);
+
+        c->mark_read(convo, from_epoch_ms(1000));
+        auto [n2, unread2, actual_n2, actual_unread2] = counts(alice.session_id);
+        CHECK(unread2 == actual_unread2);
+    }
+
+    SECTION("count follows a message moved between conversations") {
+        auto convo_row = conn.prepared_get<int64_t>(
+                "SELECT c.id FROM conversations c JOIN accounts a ON a.id = c.dm"
+                " WHERE a.session_id = ?",
+                bob.session_id);
+        auto id = c->messages(convo).front().id;
+        conn.prepared_exec("UPDATE messages SET conversation = ? WHERE id = ?", convo_row, id);
+
+        auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
+        CHECK(n == actual_n);
+        CHECK(n == 2);
+
+        auto [n2, unread2, actual_n2, actual_unread2] = counts(bob.session_id);
+        CHECK(n2 == actual_n2);
+        CHECK(n2 == 2);
+    }
 }
 
 TEST_CASE("Client: explicit conversation creation", "[client][convos]") {

@@ -13,25 +13,40 @@ CREATE TABLE accounts (
     display_name TEXT                   -- NULL when no name is known; never an empty string
 ) STRICT;
 
+CREATE TABLE groups (
+    id INTEGER PRIMARY KEY,
+    group_id BLOB NOT NULL UNIQUE       -- 33 bytes, 0x03-prefixed
+) STRICT;
+
+CREATE TABLE communities (
+    id INTEGER PRIMARY KEY,
+    base_url TEXT NOT NULL,             -- lowercased, no trailing slash
+    room TEXT NOT NULL,                 -- lowercased
+    UNIQUE (base_url, room)
+) STRICT;
+
 CREATE TABLE conversations (
     id INTEGER PRIMARY KEY,
-    -- The conversation's identity in a single uniform form, whatever its kind:
-    --   DM         66 hex characters -- the 0x05-prefixed 33-byte session ID
-    --   group      66 hex characters -- the 0x03-prefixed 33-byte group ID
-    --   community  "community:", then the server URL (lowercased, no trailing slash), "/", then
-    --              the room token (lowercased)
-    -- This is also the form a user pastes or bookmarks, so it must stay stable.
-    key TEXT NOT NULL UNIQUE,
-    type INTEGER NOT NULL,              -- 0 = DM, 1 = group, 2 = community
-    -- The remote account, for DMs; NULL for groups and communities, which are keyed on something
-    -- other than an account.
-    peer INTEGER REFERENCES accounts(id),
+    -- What the conversation is with.  Exactly one of these is set, and which one it is *is* the
+    -- conversation's kind -- there is no separate type column that could disagree with it.  Each
+    -- is UNIQUE so a given peer, group or room has at most one conversation; SQLite treats NULLs
+    -- as distinct, so the unused columns do not collide across rows.
+    -- ("closed_group" rather than "group" because the latter is a SQL keyword.)
+    dm INTEGER UNIQUE REFERENCES accounts(id),
+    closed_group INTEGER UNIQUE REFERENCES groups(id),
+    community INTEGER UNIQUE REFERENCES communities(id),
     created INTEGER NOT NULL,           -- ms since epoch
     last_activity INTEGER NOT NULL,     -- ms since epoch; conversation list ordering
     -- Read watermark: incoming messages with a strictly greater timestamp are unread.  A
     -- timestamp rather than a per-message flag because that is what ConvoInfoVolatile syncs, so
     -- adopting it here costs nothing later.
-    last_read INTEGER NOT NULL DEFAULT 0
+    last_read INTEGER NOT NULL DEFAULT 0,
+    -- Cached rather than counted per query: a conversation list is redrawn far more often than its
+    -- messages change.  `count` is maintained by the triggers below; `unread_count` is maintained
+    -- by the application, for the reason given there.
+    count INTEGER NOT NULL DEFAULT 0,
+    unread_count INTEGER NOT NULL DEFAULT 0,
+    CHECK ((dm IS NOT NULL) + (closed_group IS NOT NULL) + (community IS NOT NULL) = 1)
 ) STRICT;
 
 CREATE INDEX conversations_activity ON conversations(last_activity DESC);
@@ -73,10 +88,35 @@ CREATE INDEX messages_unread ON messages(conversation, timestamp) WHERE outgoing
 -- there is no message id on the wire.  Needed until a real identifier ships.
 CREATE INDEX messages_wire_key ON messages(conversation, sender, timestamp);
 
+-- `count` is a structural fact about the messages table, so triggers can own it outright: there is
+-- no judgement involved in how many rows a conversation has.
+--
+-- `unread_count` deliberately is *not* maintained here.  What counts as unread is policy, not
+-- structure -- mutes, message requests, tombstones, a message arriving with a timestamp older than
+-- the read watermark -- and that policy will grow.  Encoding it in triggers would scatter it
+-- across SQL that is awkward to test and invisible from the code that decides it, so the
+-- application maintains unread_count wherever it changes what has been read.
+CREATE TRIGGER messages_insert AFTER INSERT ON messages
+BEGIN
+    UPDATE conversations SET count = count + 1 WHERE id = NEW.conversation;
+END;
+
+CREATE TRIGGER messages_delete AFTER DELETE ON messages
+BEGIN
+    UPDATE conversations SET count = count - 1 WHERE id = OLD.conversation;
+END;
+
+CREATE TRIGGER messages_move AFTER UPDATE OF conversation ON messages
+WHEN OLD.conversation != NEW.conversation
+BEGIN
+    UPDATE conversations SET count = count - 1 WHERE id = OLD.conversation;
+    UPDATE conversations SET count = count + 1 WHERE id = NEW.conversation;
+END;
+
 -- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
 -- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
 -- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
-CREATE TABLE message_content (
+CREATE TABLE message_raw_content (
     message INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     content BLOB NOT NULL
 ) STRICT;
