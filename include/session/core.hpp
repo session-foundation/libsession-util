@@ -148,7 +148,46 @@ namespace quic = oxen::quic;
 
 namespace detail {
     class CoreComponent;
-}
+
+    /// Extracts an option of type T from a pack; returns the first match wrapped in optional, or
+    /// nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
+    ///
+    /// Public so that a layer wrapping the Core constructor (such as session::client::Client, which
+    /// must find and chain the caller's `callbacks` before forwarding the rest) can pick options
+    /// out of the pack without duplicating this.
+    template <typename T, typename... Opts>
+    constexpr auto maybe_instance(Opts&&... opts) {
+        using Ret = std::optional<T>;
+        if constexpr (sizeof...(Opts) == 0)
+            return Ret{std::nullopt};
+        else {
+            auto finder = []<typename Opt, typename... More>(
+                                  auto&& self, Opt&& o, More&&... more) -> Ret {
+                if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
+                    return std::make_optional<T>(std::forward<Opt>(o));
+                else if constexpr (sizeof...(More) > 0)
+                    return self(self, std::forward<More>(more)...);
+                else
+                    return std::nullopt;
+            };
+            return finder(finder, std::forward<Opts>(opts)...);
+        }
+    }
+
+    /// Collects every option of type T from a pack, in the order given.  Unlike maybe_instance this
+    /// is for options that may meaningfully be repeated.
+    template <typename T, typename... Opts>
+    std::vector<T> all_instances(Opts&&... opts) {
+        std::vector<T> found;
+        (
+                [&]<typename Opt>(Opt&& o) {
+                    if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
+                        found.push_back(std::forward<Opt>(o));
+                }(std::forward<Opts>(opts)),
+                ...);
+        return found;
+    }
+}  // namespace detail
 
 /// Wraps a predefined 32-byte account seed to pass to the Core constructor, overriding any seed
 /// already stored in the database.  Used when restoring an existing account from a seed.
@@ -315,41 +354,6 @@ class Core {
             std::chrono::milliseconds ttl,
             std::function<void(bool success)> on_complete);
 
-    // Extracts an option of type T from a pack; returns the first match wrapped in optional, or
-    // nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
-    template <typename T, typename... Opts>
-    static constexpr auto _maybe_instance(Opts&&... opts) {
-        using Ret = std::optional<T>;
-        if constexpr (sizeof...(Opts) == 0)
-            return Ret{std::nullopt};
-        else {
-            auto finder = []<typename Opt, typename... More>(
-                                  auto&& self, Opt&& o, More&&... more) -> Ret {
-                if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
-                    return std::make_optional<T>(std::forward<Opt>(o));
-                else if constexpr (sizeof...(More) > 0)
-                    return self(self, std::forward<More>(more)...);
-                else
-                    return std::nullopt;
-            };
-            return finder(finder, std::forward<Opts>(opts)...);
-        }
-    }
-
-    // Collects every option of type T from a pack, in the order given.  Unlike _maybe_instance
-    // this is for options that may meaningfully be repeated.
-    template <typename T, typename... Opts>
-    static std::vector<T> _all_instances(Opts&&... opts) {
-        std::vector<T> found;
-        (
-                [&]<typename Opt>(Opt&& o) {
-                    if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
-                        found.push_back(std::forward<Opt>(o));
-                }(std::forward<Opts>(opts)),
-                ...);
-        return found;
-    }
-
     // Constructs a sqlite::Database from the subset of opts that satisfy sqlite::DatabaseOption.
     template <CoreOption... Opts>
     static sqlite::Database _make_db(std::filesystem::path path, Opts&&... opts) {
@@ -372,11 +376,11 @@ class Core {
     // - database options: see sqlite::DatabaseOption (encryption, behaviour flags, etc.)
     template <CoreOption... Opts>
     Core(std::filesystem::path db_path, Opts&&... opts) :
-            callbacks{_maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
+            callbacks{detail::maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
                               .value_or(core::callbacks{})},
             db{_make_db(std::move(db_path), std::forward<Opts>(opts)...)} {
-        _schema_extensions = _all_instances<schema_extension>(std::forward<Opts>(opts)...);
-        if (auto s = _maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
+        _schema_extensions = detail::all_instances<schema_extension>(std::forward<Opts>(opts)...);
+        if (auto s = detail::maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
             globals._predefined_seed = std::move(s->bytes);
         init();
     }
@@ -462,6 +466,18 @@ class Core {
 
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }
+
+    /// The account database, for a layer built on top of Core that keeps its own tables alongside
+    /// Core's — the same layer that supplies a schema_extension to create them.
+    ///
+    /// `database().conn()` hands back the connection the calling thread already holds, if any, so a
+    /// write made from inside a Core callback joins the transaction Core has open rather than
+    /// deadlocking against it.  That sharing is the whole reason this is exposed: opening a second
+    /// Database on the same file would not have that property.
+    ///
+    /// This grants no access to Core's own tables' invariants.  Reading Core's tables is fine;
+    /// writing them behind Core's back is not, and Core does not defend against it.
+    sqlite::Database& database() { return db; }
 
     // Global value storage.  This are used by some components, but can also be used by the
     // application to persist settings.
