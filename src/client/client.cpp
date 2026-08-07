@@ -1,9 +1,10 @@
-#include <SessionProtos.pb.h>
 #include <SQLiteCpp/Transaction.h>
+#include <SessionProtos.pb.h>
 
 #include <oxen/log.hpp>
 #include <session/client.hpp>
 #include <session/format.hpp>
+#include <session/hash.hpp>
 #include <session/sqlite.hpp>
 #include <stdexcept>
 
@@ -14,8 +15,22 @@ static auto cat = log::Cat("client");
 
 using namespace std::literals;
 
+// Domain separation for the message content hash.  The sender is hashed alongside the content
+// because the sender is not inside the Content protobuf -- it rides in the envelope (v1) or is
+// recovered from the signature (v2) -- so without it two participants sending byte-identical
+// content in the same millisecond would collide.
+static constexpr auto CONTENT_HASH_PERS = "SessionMsgIdHash"_b2b_pers;
+
 static int64_t to_ms(sys_ms t) {
     return t.time_since_epoch().count();
+}
+
+/// The message's stable cross-client identity: BLAKE2b over the sender and the unpadded serialised
+/// Content.  Both sides of a conversation compute the same value from bytes they already hold at
+/// libsession's public API boundary, with no protocol change and no round trip.
+static std::array<std::byte, 32> content_hash(
+        std::span<const std::byte, 33> sender, std::span<const std::byte> content) {
+    return hash::blake2b_pers<32>(CONTENT_HASH_PERS, sender, content);
 }
 
 static SendState state_for(core::MessageSendStatus status) {
@@ -41,27 +56,54 @@ static bool is_terminal(core::MessageSendStatus status) {
     }
 }
 
-// Creates the conversation row if it is missing, and moves last_activity forward to `activity` if
-// that is newer.  Returns true if the row was created.  Must be called inside a transaction along
-// with whatever change prompted it.
-static bool ensure_conversation(
+// Returns the accounts row id for a session ID, creating it if this is the first time we have seen
+// the account.  Must be called inside the caller's transaction.
+static int64_t account_id(sqlite::Connection& c, std::span<const std::byte, 33> session_id) {
+    c.prepared_exec("INSERT OR IGNORE INTO accounts (session_id) VALUES (?)", session_id);
+    return c.prepared_get<int64_t>("SELECT id FROM accounts WHERE session_id = ?", session_id);
+}
+
+struct ConvoRow {
+    int64_t id;
+    bool created;
+};
+
+// Creates the conversation row if it is missing and moves last_activity forward to `activity` if
+// that is newer, returning its row id.  Must be called inside the caller's transaction along with
+// whatever change prompted it.
+static ConvoRow ensure_conversation(
         sqlite::Connection& c, const ConversationId& id, sys_ms activity) {
     auto key = id.to_string();
     auto ms = to_ms(activity);
+
+    // A DM's peer gets an accounts row up front so the conversation can resolve a display name
+    // even before any message arrives.
+    std::optional<int64_t> peer;
+    if (id.type() == ConversationId::Type::dm)
+        peer = account_id(c, id.session_id());
+
     bool created = c.prepared_exec(
-                           "INSERT OR IGNORE INTO conversations (id, type, created, last_activity)"
-                           " VALUES (?, ?, ?, ?)",
+                           "INSERT OR IGNORE INTO conversations"
+                           " (key, type, peer, created, last_activity) VALUES (?, ?, ?, ?, ?)",
                            key,
                            static_cast<int>(id.type()),
+                           peer,
                            ms,
                            ms) > 0;
     if (!created)
         c.prepared_exec(
-                "UPDATE conversations SET last_activity = ? WHERE id = ? AND last_activity < ?",
+                "UPDATE conversations SET last_activity = ? WHERE key = ? AND last_activity < ?",
                 ms,
                 key,
                 ms);
-    return created;
+
+    return {c.prepared_get<int64_t>("SELECT id FROM conversations WHERE key = ?", key), created};
+}
+
+// Returns the conversation row id, or nullopt if we have no such conversation.
+static std::optional<int64_t> find_conversation(sqlite::Connection& c, const ConversationId& id) {
+    auto key = id.to_string();
+    return c.prepared_maybe_get<int64_t>("SELECT id FROM conversations WHERE key = ?", key);
 }
 
 core::callbacks Client::_intercept_callbacks(core::callbacks app) {
@@ -71,8 +113,8 @@ core::callbacks Client::_intercept_callbacks(core::callbacks app) {
     // fire during construction (device_link_request does) without touching Client.
     auto cb = std::move(app);
 
-    cb.message_received = [this, chain = std::move(cb.message_received)](
-                                  core::ReceivedMessage&& msg) {
+    cb.message_received = [this,
+                           chain = std::move(cb.message_received)](core::ReceivedMessage&& msg) {
         // Persist first, then notify: a throwing callback is a bug Core can only log, so Client
         // must never rely on an exception to reject a batch.
         if (chain) {
@@ -132,34 +174,32 @@ void Client::_emit(const Change& change) {
 // -- Conversations ----------------------------------------------------------------------------
 
 static constexpr auto CONVO_COLUMNS =
-        "SELECT c.id, c.display_name, c.last_activity, c.draft,"
+        "SELECT c.key, coalesce(a.display_name, ''), c.last_activity,"
         " coalesce((SELECT m.body FROM messages m WHERE m.conversation = c.id"
         "            ORDER BY m.timestamp DESC, m.id DESC LIMIT 1), ''),"
         " (SELECT COUNT(*) FROM messages m WHERE m.conversation = c.id"
         "   AND m.outgoing = 0 AND m.timestamp > c.last_read)"
-        " FROM conversations c"sv;
+        " FROM conversations c LEFT JOIN accounts a ON a.id = c.peer"sv;
 
 template <typename... Bind>
 static std::vector<Conversation> query_conversations(
         sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<Conversation> out;
-    for (auto [id, name, activity, draft, preview, unread] :
-         c.prepared_results<std::string, std::string, int64_t, std::string, std::string, int>(
-                 query, bind...))
-        out.push_back(Conversation{
-                .id = ConversationId::parse(id),
-                .display_name = std::move(name),
-                .last_message = std::move(preview),
-                .last_activity = from_epoch_ms(activity),
-                .unread = unread,
-                .draft = std::move(draft)});
+    for (auto [key, name, activity, preview, unread] :
+         c.prepared_results<std::string, std::string, int64_t, std::string, int>(query, bind...))
+        out.push_back(
+                Conversation{
+                        .id = ConversationId::parse(key),
+                        .display_name = std::move(name),
+                        .last_message = std::move(preview),
+                        .last_activity = from_epoch_ms(activity),
+                        .unread = unread});
     return out;
 }
 
 std::vector<Conversation> Client::conversations() {
     auto c = core.database().conn();
-    return query_conversations(
-            c, "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
+    return query_conversations(c, "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
 }
 
 std::optional<Conversation> Client::conversation(const ConversationId& id) {
@@ -167,7 +207,7 @@ std::optional<Conversation> Client::conversation(const ConversationId& id) {
     // `key` must outlive the query: string binds go through sqlite3_bind_*_nocopy, so binding a
     // temporary here would leave the statement pointing at freed memory when it steps.
     auto key = id.to_string();
-    auto found = query_conversations(c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), key);
+    auto found = query_conversations(c, "{} WHERE c.key = ?"_format(CONVO_COLUMNS), key);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -178,7 +218,7 @@ Conversation Client::create_conversation(const ConversationId& id) {
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
-        created = ensure_conversation(c, id, clock_now_ms());
+        created = ensure_conversation(c, id, clock_now_ms()).created;
         tx.commit();
     }
     if (created)
@@ -193,6 +233,10 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
         int64_t target;
         if (up_to)
             target = to_ms(*up_to);
@@ -202,7 +246,7 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
             auto newest = c.prepared_get<std::optional<int64_t>>(
                     "SELECT max(timestamp) FROM messages"
                     " WHERE conversation = ? AND outgoing = 0",
-                    key);
+                    *convo);
             if (!newest)
                 return;
             target = *newest;
@@ -211,24 +255,7 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
         changed = c.prepared_exec(
                 "UPDATE conversations SET last_read = ?1 WHERE id = ?2 AND last_read < ?1",
                 target,
-                key);
-        tx.commit();
-    }
-    if (changed > 0)
-        _emit({ChangeType::conversation_updated, id, std::nullopt});
-}
-
-void Client::set_draft(const ConversationId& id, std::string_view draft) {
-    int changed;
-    {
-        auto c = core.database().conn();
-        SQLite::Transaction tx{c.sql};
-        ensure_conversation(c, id, clock_now_ms());
-        changed = c.prepared_exec(
-                "UPDATE conversations SET draft = ? WHERE id = ? AND draft != ?",
-                draft,
-                id.to_string(),
-                draft);
+                *convo);
         tx.commit();
     }
     if (changed > 0)
@@ -238,38 +265,18 @@ void Client::set_draft(const ConversationId& id, std::string_view draft) {
 // -- Messages ---------------------------------------------------------------------------------
 
 static constexpr auto MESSAGE_COLUMNS =
-        "SELECT id, conversation, hash, sender, outgoing, timestamp, body, send_state"
-        " FROM messages"sv;
-
-using MessageRow = std::tuple<
-        int64_t,
-        std::string,
-        std::optional<std::string>,
-        sqlite::blob_guts<b33>,
-        int,
-        int64_t,
-        std::string,
-        std::optional<int>>;
-
-static Message to_message(MessageRow&& row) {
-    auto& [id, convo, hash, sender, outgoing, ts, body, send_state] = row;
-    return Message{
-            .id = id,
-            .conversation = ConversationId::parse(convo),
-            .sender = sender,
-            .outgoing = outgoing != 0,
-            .timestamp = from_epoch_ms(ts),
-            .body = std::move(body),
-            .send_state = send_state ? std::optional{static_cast<SendState>(*send_state)}
-                                     : std::nullopt,
-            .hash = std::move(hash)};
-}
+        "SELECT m.id, c.key, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body,"
+        " m.send_state"
+        " FROM messages m"
+        " JOIN conversations c ON c.id = m.conversation"
+        " JOIN accounts a ON a.id = m.sender"sv;
 
 template <typename... Bind>
 static std::vector<Message> query_messages(
         sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<Message> out;
-    for (auto row : c.prepared_results<
+    for (auto [id, key, swarm_hash, sender, outgoing, ts, body, send_state] :
+         c.prepared_results<
                  int64_t,
                  std::string,
                  std::optional<std::string>,
@@ -278,30 +285,43 @@ static std::vector<Message> query_messages(
                  int64_t,
                  std::string,
                  std::optional<int>>(query, bind...))
-        out.push_back(to_message(std::move(row)));
+        out.push_back(
+                Message{.id = id,
+                        .conversation = ConversationId::parse(key),
+                        .sender = sender,
+                        .outgoing = outgoing != 0,
+                        .timestamp = from_epoch_ms(ts),
+                        .body = std::move(body),
+                        .send_state = send_state
+                                            ? std::optional{static_cast<SendState>(*send_state)}
+                                            : std::nullopt,
+                        .hash = std::move(swarm_hash)});
     return out;
 }
 
 std::vector<Message> Client::messages(
         const ConversationId& id, int limit, std::optional<MessageCursor> before) {
     auto c = core.database().conn();
-    // Named for the same nocopy-binding reason as in conversation().
-    auto key = id.to_string();
+    auto convo = find_conversation(c, id);
+    if (!convo)
+        return {};
+
     if (!before)
         return query_messages(
                 c,
-                "{} WHERE conversation = ? ORDER BY timestamp DESC, id DESC LIMIT ?"_format(
+                "{} WHERE m.conversation = ? ORDER BY m.timestamp DESC, m.id DESC LIMIT ?"_format(
                         MESSAGE_COLUMNS),
-                key,
+                *convo,
                 limit);
 
     // Strictly-older-than comparison on (timestamp, id), spelled out rather than as an SQL row
     // value so this does not depend on the SQLite version's row-value support.
     return query_messages(
             c,
-            "{} WHERE conversation = ? AND (timestamp < ?2 OR (timestamp = ?2 AND id < ?3))"
-            " ORDER BY timestamp DESC, id DESC LIMIT ?4"_format(MESSAGE_COLUMNS),
-            key,
+            "{} WHERE m.conversation = ?"
+            " AND (m.timestamp < ?2 OR (m.timestamp = ?2 AND m.id < ?3))"
+            " ORDER BY m.timestamp DESC, m.id DESC LIMIT ?4"_format(MESSAGE_COLUMNS),
+            *convo,
             to_ms(before->timestamp),
             before->id,
             limit);
@@ -309,7 +329,7 @@ std::vector<Message> Client::messages(
 
 std::optional<Message> Client::message(int64_t id) {
     auto c = core.database().conn();
-    auto found = query_messages(c, "{} WHERE id = ?"_format(MESSAGE_COLUMNS), id);
+    auto found = query_messages(c, "{} WHERE m.id = ?"_format(MESSAGE_COLUMNS), id);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -331,25 +351,32 @@ int64_t Client::send_message(const ConversationId& id, std::string_view body) {
     data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
 
     auto serialised = content.SerializeAsString();
+    auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
+    auto cid = content_hash(self, raw);
 
     bool created;
     int64_t client_id;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
-        created = ensure_conversation(c, id, now);
+
+        auto convo = ensure_conversation(c, id, now);
+        created = convo.created;
+
         c.prepared_exec(
                 "INSERT INTO messages"
-                " (conversation, sender, outgoing, timestamp, body, send_state, content)"
-                " VALUES (?, ?, 1, ?, ?, ?, ?)",
-                id.to_string(),
-                std::span<const std::byte>{self},
+                " (conversation, content_hash, sender, outgoing, timestamp, body, send_state)"
+                " VALUES (?, ?, ?, 1, ?, ?, ?)",
+                convo.id,
+                cid,
+                account_id(c, self),
                 to_ms(now),
                 body,
-                static_cast<int>(SendState::pending),
-                std::span{
-                        reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()});
+                static_cast<int>(SendState::pending));
         client_id = c.sql.getLastInsertRowid();
+
+        c.prepared_exec(
+                "INSERT INTO message_content (message, content) VALUES (?, ?)", client_id, raw);
         tx.commit();
     }
 
@@ -372,8 +399,7 @@ int64_t Client::send_message(const ConversationId& id, std::string_view body) {
 
 void Client::_on_message_received(core::ReceivedMessage&& msg) {
     SessionProtos::Content content;
-    if (!content.ParseFromArray(
-                msg.content.data(), static_cast<int>(msg.content.size()))) {
+    if (!content.ParseFromArray(msg.content.data(), static_cast<int>(msg.content.size()))) {
         log::warning(cat, "Dropping message {}: Content protobuf did not parse", msg.hash);
         return;
     }
@@ -386,7 +412,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     if (data.body().empty())
         return;
 
-    auto convo = ConversationId::dm(msg.sender_session_id);
+    auto convo_id = ConversationId::dm(msg.sender_session_id);
 
     // The signed timestamp is the authenticated one; the swarm's upload time is not.
     auto ts = content.has_sigtimestamp()
@@ -397,47 +423,57 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     if (data.has_profile() && data.profile().has_displayname())
         name = data.profile().displayname();
 
+    auto cid = content_hash(msg.sender_session_id, msg.content);
+
     bool created = false, inserted = false, renamed = false;
     int64_t client_id = 0;
-    auto key = convo.to_string();
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
-        created = ensure_conversation(c, convo, ts);
+        auto convo = ensure_conversation(c, convo_id, ts);
+        created = convo.created;
+        auto sender = account_id(c, msg.sender_session_id);
 
-        // Delivery is at-least-once — the swarm cursor advances per batch, so a crash mid-batch
-        // re-delivers it — and the swarm hash is what makes a redelivery recognisable.
+        // Delivery is at-least-once -- the swarm cursor advances per batch, so a crash mid-batch
+        // re-delivers it -- and either unique index is enough to recognise the redelivery.
         inserted = c.prepared_exec(
                            "INSERT OR IGNORE INTO messages"
-                           " (conversation, hash, sender, outgoing, timestamp, body, content)"
-                           " VALUES (?, ?, ?, 0, ?, ?, ?)",
-                           key,
+                           " (conversation, content_hash, swarm_hash, sender, outgoing, timestamp,"
+                           "  body)"
+                           " VALUES (?, ?, ?, ?, 0, ?, ?)",
+                           convo.id,
+                           cid,
                            msg.hash,
-                           std::span<const std::byte>{msg.sender_session_id},
+                           sender,
                            to_ms(ts),
-                           data.body(),
-                           std::span<const std::byte>{msg.content}) > 0;
-        if (inserted)
+                           data.body()) > 0;
+        if (inserted) {
             client_id = c.sql.getLastInsertRowid();
+            c.prepared_exec(
+                    "INSERT INTO message_content (message, content) VALUES (?, ?)",
+                    client_id,
+                    std::span<const std::byte>{msg.content});
+        }
 
+        // `IS NOT` rather than `!=`: the column is NULL until a name is known, and `NULL != 'x'`
+        // is NULL, so `!=` would never fire for the first name we learn.
         if (!name.empty())
             renamed = c.prepared_exec(
-                              "UPDATE conversations SET display_name = ?"
-                              " WHERE id = ? AND display_name != ?",
+                              "UPDATE accounts SET display_name = ?1"
+                              " WHERE id = ?2 AND display_name IS NOT ?1",
                               name,
-                              key,
-                              name) > 0;
+                              sender) > 0;
 
         tx.commit();
     }
 
     if (created)
-        _emit({ChangeType::conversation_added, convo, std::nullopt});
+        _emit({ChangeType::conversation_added, convo_id, std::nullopt});
     if (inserted)
-        _emit({ChangeType::new_message, convo, client_id});
+        _emit({ChangeType::new_message, convo_id, client_id});
     if (inserted || renamed)
-        _emit({ChangeType::conversation_updated, convo, std::nullopt});
+        _emit({ChangeType::conversation_updated, convo_id, std::nullopt});
 }
 
 void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
@@ -467,7 +503,9 @@ void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus statu
                     client_id,
                     static_cast<int>(state)) > 0)
             convo = c.prepared_maybe_get<std::string>(
-                    "SELECT conversation FROM messages WHERE id = ?", client_id);
+                    "SELECT c.key FROM messages m JOIN conversations c ON c.id = m.conversation"
+                    " WHERE m.id = ?",
+                    client_id);
         tx.commit();
     }
 

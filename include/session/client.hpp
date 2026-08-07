@@ -117,9 +117,6 @@ struct Conversation {
     /// Count of incoming messages newer than the read watermark.
     int unread = 0;
 
-    /// Unsent text the user was composing.
-    std::string draft;
-
     /// The display name if known, otherwise the conversation's string id — a reasonable default
     /// for a caller that has no better fallback of its own.
     std::string name_or_id() const { return display_name.empty() ? id.to_string() : display_name; }
@@ -171,9 +168,6 @@ class Client {
     ///
     /// Never moves the watermark backwards.
     void mark_read(const ConversationId& id, std::optional<sys_ms> up_to = std::nullopt);
-
-    /// Stores unsent composition text for a conversation.
-    void set_draft(const ConversationId& id, std::string_view draft);
 
     // -- Messages -----------------------------------------------------------------------------
 

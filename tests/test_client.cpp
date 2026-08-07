@@ -91,10 +91,8 @@ void deliver(
 // ── ConversationId ──────────────────────────────────────────────────────────────────────────────
 
 TEST_CASE("ConversationId: round-trips through its string form", "[client][convo_id]") {
-    constexpr auto sid =
-            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-    constexpr auto gid =
-            "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
 
     auto dm = ConversationId::dm(sid);
     CHECK(dm.type() == ConversationId::Type::dm);
@@ -130,8 +128,7 @@ TEST_CASE("ConversationId: normalises community URLs and rooms", "[client][convo
 }
 
 TEST_CASE("ConversationId: rejects bad input and mistyped access", "[client][convo_id]") {
-    constexpr auto sid =
-            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     constexpr auto bad_prefix =
             "07fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
 
@@ -168,8 +165,10 @@ TEST_CASE("Client: applies its migrations under the client owner", "[client][sch
                         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name)
                 .has_value();
     };
+    CHECK(has_table("accounts"));
     CHECK(has_table("conversations"));
     CHECK(has_table("messages"));
+    CHECK(has_table("message_content"));
     // Client's tables live in Core's database, not a second file.
     CHECK(has_table("globals"));
 }
@@ -217,6 +216,40 @@ TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][rece
     // A genuinely different message from the same sender still lands.
     deliver(*c, sender, "and again", from_epoch_ms(6000), "notdup");
     CHECK(c->messages(convo).size() == 2);
+}
+
+TEST_CASE(
+        "Client: identical content under a different swarm hash is deduped", "[client][receive]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    // The same message re-encrypted for a different recipient -- our own other device, say --
+    // lands in a different swarm with a different hash.  The swarm hash cannot recognise that;
+    // the content hash can, because it is computed above the encryption layer.
+    deliver(*c, sender, "said once", from_epoch_ms(5000), "hash_from_their_swarm");
+    deliver(*c, sender, "said once", from_epoch_ms(5000), "hash_from_our_swarm");
+
+    CHECK(c->messages(convo).size() == 1);
+    CHECK(c->conversation(convo)->unread == 1);
+
+    // Same body a millisecond later is a different message, not a redelivery.
+    deliver(*c, sender, "said once", from_epoch_ms(5001), "third_hash");
+    CHECK(c->messages(convo).size() == 2);
+}
+
+TEST_CASE("Client: display name is unset rather than empty until known", "[client][convos]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "hi", from_epoch_ms(1000), "h1");
+
+    // No profile has been seen, so the column holds NULL rather than an empty string.
+    auto stored = c->core.database().conn().prepared_get<std::optional<std::string>>(
+            "SELECT display_name FROM accounts WHERE session_id = ?", sender.session_id);
+    CHECK_FALSE(stored.has_value());
+    CHECK(c->conversation(convo)->display_name.empty());
 }
 
 TEST_CASE("Client: a later profile name updates the conversation", "[client][receive]") {
@@ -329,10 +362,9 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     CHECK(c->conversation(empty)->unread == 0);
 }
 
-TEST_CASE("Client: drafts and explicit conversation creation", "[client][convos]") {
+TEST_CASE("Client: explicit conversation creation", "[client][convos]") {
     TempClient c;
-    constexpr auto sid =
-            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     auto convo = ConversationId::dm(sid);
 
     CHECK_FALSE(c->conversation(convo).has_value());
@@ -346,11 +378,6 @@ TEST_CASE("Client: drafts and explicit conversation creation", "[client][convos]
     // Creating an existing conversation is not an error and does not duplicate it.
     c->create_conversation(convo);
     CHECK(c->conversations().size() == 1);
-
-    c->set_draft(convo, "half a thought");
-    CHECK(c->conversation(convo)->draft == "half a thought");
-    c->set_draft(convo, "");
-    CHECK(c->conversation(convo)->draft.empty());
 }
 
 // ── Paging ──────────────────────────────────────────────────────────────────────────────────────
@@ -464,10 +491,8 @@ TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
 
 TEST_CASE("Client: sending to a non-DM conversation is rejected", "[client][send]") {
     TempClient c;
-    constexpr auto gid =
-            "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-    CHECK_THROWS_AS(
-            c->send_message(ConversationId::group(gid), "hi"), std::invalid_argument);
+    constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    CHECK_THROWS_AS(c->send_message(ConversationId::group(gid), "hi"), std::invalid_argument);
 }
 
 TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[client][send]") {
