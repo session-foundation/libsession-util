@@ -61,6 +61,16 @@ static network::Request swarm_request(
     return req;
 }
 
+// Builds the value a storage server signs for `endpoint` ("store", "retrieve", ...) against the
+// given namespace and request timestamp.  The default namespace contributes nothing at all rather
+// than a literal "0"; signing the 0 gets the request rejected with a 401.
+static std::string ns_signature_value(
+        std::string_view endpoint, int16_t ns_val, int64_t timestamp_ms) {
+    if (ns_val == 0)
+        return "{}{}"_format(endpoint, timestamp_ms);
+    return "{}{}{}"_format(endpoint, ns_val, timestamp_ms);
+}
+
 static cleared_b32 seed_from_words(
         std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
     auto n = words.size();
@@ -148,8 +158,10 @@ void Core::set_poll_interval(std::chrono::milliseconds interval) {
 
 void Core::_poll() {
     auto net = _network;
-    if (!net)
+    if (!net) {
+        log::debug(cat, "Not polling: no network attached");
         return;
+    }
 
     constexpr std::array namespaces = {
             config::Namespace::Default,
@@ -168,19 +180,23 @@ void Core::_poll() {
             auto ns_val = static_cast<int16_t>(namespaces[i]);
             if (!ns_requires_auth(ns_val))
                 continue;
-            std::string to_sign = "retrieve{}{}"_format(ns_val, now_ms);
+            auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
             auto sig = ed25519::sign(seed.ed25519_secret(), to_span(to_sign));
             ns_sig[i] = "{:b}"_format(sig);
         }
     }
+
+    log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
 
     net->get_swarm(
             globals.pubkey_x25519(),
             false,
             [this, net, namespaces, ed25519_hex, now_ms, ns_sig = std::move(ns_sig)](
                     auto, auto swarm) {
-                if (swarm.empty())
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot poll: no swarm nodes available");
                     return;
+                }
 
                 auto& node = swarm.front();
 
@@ -215,6 +231,14 @@ void Core::_poll() {
                 }
 
                 auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
+
+                log::debug(
+                        cat,
+                        "Retrieving {} namespaces from {}: {}",
+                        namespaces.size(),
+                        node.remote_pubkey.hex(),
+                        body_str);
+
                 net->send_request(
                         swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
                         [this, sn_pubkey = node.remote_pubkey, namespaces](
@@ -251,10 +275,19 @@ void Core::_handle_poll_response(
         auto& results = *it;
         auto conn = db.conn();
         for (size_t i = 0; i < namespaces.size() && i < results.size(); ++i) {
+            auto ns = namespaces[i];
+            auto ns_val = static_cast<int16_t>(ns);
+
             const auto& res = results[i];
             auto code_it = res.find("code");
-            if (code_it == res.end() || code_it->get<int>() != 200)
+            if (code_it == res.end() || code_it->get<int>() != 200) {
+                log::warning(
+                        cat,
+                        "Retrieve of namespace {} failed: {}",
+                        ns_val,
+                        res.dump());
                 continue;
+            }
             auto body_it = res.find("body");
             if (body_it == res.end())
                 continue;
@@ -262,8 +295,11 @@ void Core::_handle_poll_response(
             if (msgs_it == body_it->end() || !msgs_it->is_array())
                 continue;
 
-            auto ns = namespaces[i];
-            auto ns_val = static_cast<int16_t>(ns);
+            log::debug(
+                    cat,
+                    "Retrieved {} message(s) from namespace {}",
+                    msgs_it->size(),
+                    ns_val);
 
             // Decode each message; keep the decoded bytes alive until after
             // receive_messages() returns, since SwarmMessage::data spans
@@ -565,7 +601,7 @@ void Core::_send_to_swarm(
     auto ns_val = static_cast<int16_t>(ns);
     auto now_ms = epoch_ms(clock_now_ms());
 
-    std::string to_sign = "store{}{}"_format(ns_val, now_ms);
+    auto to_sign = ns_signature_value("store", ns_val, now_ms);
     b64 sig;
     {
         auto seed = globals.account_seed();
