@@ -268,11 +268,37 @@ TEST_CASE("Client: a message to ourselves is a conversation with ourselves", "[c
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id == ConversationId::dm(me));
     CHECK(convos[0].unread == 0);
+    CHECK(convos[0].note_to_self);
+    CHECK(c->is_note_to_self(convos[0].id));
 
     auto msgs = c->messages(convos[0].id);
     REQUIRE(msgs.size() == 2);
     CHECK(msgs[0].outgoing);
     CHECK(msgs[1].outgoing);
+}
+
+TEST_CASE("Client: note to self is reported, not left to the caller", "[client][convos]") {
+    TempClient c;
+    SenderKeys peer;
+
+    auto self = c->create_conversation(ConversationId::dm(own_sid(*c)));
+    CHECK(self.note_to_self);
+    CHECK(c->conversation(self.id)->note_to_self);
+    CHECK(c->is_note_to_self(self.id));
+
+    auto other = c->create_conversation(ConversationId::dm(peer.session_id));
+    CHECK_FALSE(other.note_to_self);
+    CHECK_FALSE(c->conversation(other.id)->note_to_self);
+    CHECK_FALSE(c->is_note_to_self(other.id));
+
+    // A group or community is never note-to-self, whatever its id happens to be.
+    constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    CHECK_FALSE(c->is_note_to_self(ConversationId::group(gid)));
+    CHECK_FALSE(c->is_note_to_self(ConversationId::community("http://example.com", "room")));
+
+    // The list form agrees with the single-conversation form.
+    for (const auto& convo : c->conversations())
+        CHECK(convo.note_to_self == c->is_note_to_self(convo.id));
 }
 
 TEST_CASE("Client: syncTarget from another sender is ignored", "[client][receive]") {

@@ -117,6 +117,13 @@ struct Conversation {
     /// Count of incoming messages newer than the read watermark.
     int unread = 0;
 
+    /// True for the conversation with our own account — Session's "Note to Self".  It is an
+    /// ordinary DM rather than a kind of its own, so this is the only thing distinguishing it, and
+    /// it is reported here so that displaying it differently does not require the caller to know
+    /// our session ID or to compare it themselves.  What to call it is still the caller's
+    /// decision: `display_name` is whatever our own profile says, not a localised label.
+    bool note_to_self = false;
+
     /// The display name if known, otherwise the conversation's string id — a reasonable default
     /// for a caller that has no better fallback of its own.
     std::string name_or_id() const { return display_name.empty() ? id.to_string() : display_name; }
@@ -175,12 +182,23 @@ class Client {
 
     /// A single conversation, or nullopt if it does not exist locally.
     std::optional<Conversation> conversation(const ConversationId& id);
-    void conversation(const ConversationId& id, std::function<void(std::optional<Conversation>)> cb);
+    void conversation(
+            const ConversationId& id, std::function<void(std::optional<Conversation>)> cb);
 
     /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
     /// does this implicitly; this is for opening an empty conversation with someone first.
     Conversation create_conversation(const ConversationId& id);
     void create_conversation(const ConversationId& id, std::function<void(Conversation)> cb);
+
+    /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
+    /// answer as `Conversation::note_to_self`, for a caller holding only an id.
+    ///
+    /// Unlike the accessors around it this touches no database and is not dispatched onto Core's
+    /// loop: it compares against our session ID, which is fixed once the account exists.  So it is
+    /// callable from any thread, including a render loop, and does not need a callback form.
+    ///
+    /// @throws core::no_account if no account has been created or restored yet.
+    bool is_note_to_self(const ConversationId& id);
 
     /// Marks incoming messages up to and including `up_to` as read, moving the unread watermark
     /// forward.  Passing nullopt marks everything currently stored as read — which is not the same

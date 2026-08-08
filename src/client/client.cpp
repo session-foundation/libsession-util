@@ -311,6 +311,13 @@ Conversation Client::create_conversation(const ConversationId& id) {
     return core.loop().call_get([this, &id] { return _create_conversation(id); });
 }
 
+// Not dispatched onto the loop: reads nothing but the session ID, which cannot change underneath
+// it.  See the declaration.
+bool Client::is_note_to_self(const ConversationId& id) {
+    return id.type() == ConversationId::Type::dm &&
+           std::ranges::equal(id.session_id(), core.globals.session_id());
+}
+
 void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
     core.loop().call_get([this, &id, up_to] {
         _mark_read(id, up_to);
@@ -404,9 +411,14 @@ static const auto CONVO_COLUMNS = R"(
     {}
 )"_format(SUBJECT_JOIN);
 
+// `self` is our own session ID, for flagging the Note to Self conversation; it is not part of the
+// query because the row does not know whose database it is in.
 template <typename... Bind>
 static std::vector<Conversation> query_conversations(
-        sqlite::Connection& c, const std::string& query, const Bind&... bind) {
+        sqlite::Connection& c,
+        std::span<const std::byte, 33> self,
+        const std::string& query,
+        const Bind&... bind) {
     std::vector<Conversation> out;
     for (auto [convo, sid, gid, url, room, name, activity, preview, unread] :
          c.prepared_results<
@@ -425,13 +437,18 @@ static std::vector<Conversation> query_conversations(
                         .display_name = name.value_or(""),
                         .last_message = std::move(preview),
                         .last_activity = from_epoch_ms(activity),
-                        .unread = unread});
+                        .unread = unread,
+                        .note_to_self =
+                                sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
     return out;
 }
 
 std::vector<Conversation> Client::_conversations() {
     auto c = core.database().conn();
-    return query_conversations(c, "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
+    return query_conversations(
+            c,
+            core.globals.session_id(),
+            "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
 }
 
 std::optional<Conversation> Client::_conversation(const ConversationId& id) {
@@ -439,7 +456,8 @@ std::optional<Conversation> Client::_conversation(const ConversationId& id) {
     auto convo = find_conversation(c, id);
     if (!convo)
         return std::nullopt;
-    auto found = query_conversations(c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
+    auto found = query_conversations(
+            c, core.globals.session_id(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
