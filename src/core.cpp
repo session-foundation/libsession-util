@@ -281,11 +281,7 @@ void Core::_handle_poll_response(
             const auto& res = results[i];
             auto code_it = res.find("code");
             if (code_it == res.end() || code_it->get<int>() != 200) {
-                log::warning(
-                        cat,
-                        "Retrieve of namespace {} failed: {}",
-                        ns_val,
-                        res.dump());
+                log::warning(cat, "Retrieve of namespace {} failed: {}", ns_val, res.dump());
                 continue;
             }
             auto body_it = res.find("body");
@@ -295,11 +291,7 @@ void Core::_handle_poll_response(
             if (msgs_it == body_it->end() || !msgs_it->is_array())
                 continue;
 
-            log::debug(
-                    cat,
-                    "Retrieved {} message(s) from namespace {}",
-                    msgs_it->size(),
-                    ns_val);
+            log::debug(cat, "Retrieved {} message(s) from namespace {}", msgs_it->size(), ns_val);
 
             // Decode each message; keep the decoded bytes alive until after
             // receive_messages() returns, since SwarmMessage::data spans
