@@ -5,6 +5,7 @@
 #include <session/client.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
+#include <oxen/quic/loop.hpp>
 #include <session/sqlite.hpp>
 #include <stdexcept>
 
@@ -243,6 +244,7 @@ void Client::_init() {
 // -- Change notification ----------------------------------------------------------------------
 
 Subscription Client::subscribe(std::function<void(const Change&)> handler) {
+    std::lock_guard lock{_signals->mutex};
     auto id = _signals->next_id++;
     _signals->handlers.emplace(id, std::move(handler));
     return Subscription{_signals, id};
@@ -252,9 +254,12 @@ void Client::_emit(const Change& change) {
     // Iterate over a copy of the handler list: a handler is allowed to subscribe or unsubscribe
     // (including its own subscription) from inside the callback.
     std::vector<std::function<void(const Change&)>> handlers;
-    handlers.reserve(_signals->handlers.size());
-    for (const auto& [id, h] : _signals->handlers)
-        handlers.push_back(h);
+    {
+        std::lock_guard lock{_signals->mutex};
+        handlers.reserve(_signals->handlers.size());
+        for (const auto& [id, h] : _signals->handlers)
+            handlers.push_back(h);
+    }
 
     for (const auto& h : handlers) {
         try {
@@ -263,6 +268,125 @@ void Client::_emit(const Change& change) {
             log::error(cat, "client change handler threw: {}", e.what());
         }
     }
+}
+
+// -- Asynchronous interface ---------------------------------------------------------------------
+
+void Client::_require_dm(const ConversationId& id) {
+    // Checked on the calling thread so caller error surfaces at the call site rather than inside
+    // the loop, where the callback form would only be able to log it.
+    if (id.type() != ConversationId::Type::dm)
+        throw std::invalid_argument{
+                "send_message: only DM conversations are supported so far (got type {})"_format(
+                        static_cast<int>(id.type()))};
+}
+
+void Client::_dispatch(std::function<void()> work) {
+    core.loop().call([work = std::move(work)] {
+        try {
+            work();
+        } catch (const std::exception& e) {
+            // Nowhere to throw to: the caller's stack is gone, and letting this escape would take
+            // the event loop with it.
+            log::error(cat, "Client operation failed: {}", e.what());
+        }
+    });
+}
+
+// Blocking forms: call_get runs the job on the loop and waits, or runs it inline when the caller is
+// already there.  Exceptions propagate back to the caller, which is the whole advantage of this
+// form over the callback one.
+
+std::vector<Conversation> Client::conversations() {
+    return core.loop().call_get([this] { return _conversations(); });
+}
+
+std::optional<Conversation> Client::conversation(const ConversationId& id) {
+    return core.loop().call_get([this, &id] { return _conversation(id); });
+}
+
+Conversation Client::create_conversation(const ConversationId& id) {
+    return core.loop().call_get([this, &id] { return _create_conversation(id); });
+}
+
+void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
+    core.loop().call_get([this, &id, up_to] {
+        _mark_read(id, up_to);
+        return 0;
+    });
+}
+
+std::vector<Message> Client::messages(
+        const ConversationId& id, int limit, std::optional<MessageCursor> before) {
+    return core.loop().call_get([this, &id, limit, before] { return _messages(id, limit, before); });
+}
+
+std::optional<Message> Client::message(int64_t id) {
+    return core.loop().call_get([this, id] { return _message(id); });
+}
+
+int64_t Client::send_message(const ConversationId& id, std::string_view body) {
+    _require_dm(id);
+    return core.loop().call_get([this, &id, body] { return _send_message(id, body); });
+}
+
+// Callback forms: dispatch and return, delivering the result on the loop thread.
+
+void Client::conversations(std::function<void(std::vector<Conversation>)> cb) {
+    _dispatch([this, cb = std::move(cb)] { cb(_conversations()); });
+}
+
+void Client::conversation(
+        const ConversationId& id, std::function<void(std::optional<Conversation>)> cb) {
+    _dispatch([this, id, cb = std::move(cb)] { cb(_conversation(id)); });
+}
+
+void Client::create_conversation(const ConversationId& id, std::function<void(Conversation)> cb) {
+    _dispatch([this, id, cb = std::move(cb)] { cb(_create_conversation(id)); });
+}
+
+void Client::mark_read(const ConversationId& id, std::function<void()> cb) {
+    mark_read(id, std::nullopt, std::move(cb));
+}
+
+void Client::mark_read(
+        const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb) {
+    _dispatch([this, id, up_to, cb = std::move(cb)] {
+        _mark_read(id, up_to);
+        if (cb)
+            cb();
+    });
+}
+
+void Client::messages(const ConversationId& id, std::function<void(std::vector<Message>)> cb) {
+    messages(id, 50, std::nullopt, std::move(cb));
+}
+
+void Client::messages(
+        const ConversationId& id, int limit, std::function<void(std::vector<Message>)> cb) {
+    messages(id, limit, std::nullopt, std::move(cb));
+}
+
+void Client::messages(
+        const ConversationId& id,
+        int limit,
+        std::optional<MessageCursor> before,
+        std::function<void(std::vector<Message>)> cb) {
+    _dispatch([this, id, limit, before, cb = std::move(cb)] { cb(_messages(id, limit, before)); });
+}
+
+void Client::message(int64_t id, std::function<void(std::optional<Message>)> cb) {
+    _dispatch([this, id, cb = std::move(cb)] { cb(_message(id)); });
+}
+
+void Client::send_message(
+        const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb) {
+    _require_dm(id);
+    _dispatch([this, id, body = std::string{body}, cb = std::move(cb)] {
+        auto msg_id = _send_message(id, body);
+        if (cb)
+            cb(msg_id);
+    });
 }
 
 // -- Conversations ----------------------------------------------------------------------------
@@ -302,12 +426,12 @@ static std::vector<Conversation> query_conversations(
     return out;
 }
 
-std::vector<Conversation> Client::conversations() {
+std::vector<Conversation> Client::_conversations() {
     auto c = core.database().conn();
     return query_conversations(c, "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
 }
 
-std::optional<Conversation> Client::conversation(const ConversationId& id) {
+std::optional<Conversation> Client::_conversation(const ConversationId& id) {
     auto c = core.database().conn();
     auto convo = find_conversation(c, id);
     if (!convo)
@@ -318,7 +442,7 @@ std::optional<Conversation> Client::conversation(const ConversationId& id) {
     return std::move(found.front());
 }
 
-Conversation Client::create_conversation(const ConversationId& id) {
+Conversation Client::_create_conversation(const ConversationId& id) {
     bool created;
     {
         auto c = core.database().conn();
@@ -328,10 +452,10 @@ Conversation Client::create_conversation(const ConversationId& id) {
     }
     if (created)
         _emit({ChangeType::conversation_added, id, std::nullopt});
-    return *conversation(id);
+    return *_conversation(id);
 }
 
-void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
+void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
     int changed = 0;
     {
         auto c = core.database().conn();
@@ -415,7 +539,7 @@ static std::vector<Message> query_messages(
     return out;
 }
 
-std::vector<Message> Client::messages(
+std::vector<Message> Client::_messages(
         const ConversationId& id, int limit, std::optional<MessageCursor> before) {
     auto c = core.database().conn();
     auto convo = find_conversation(c, id);
@@ -448,7 +572,7 @@ std::vector<Message> Client::messages(
             limit);
 }
 
-std::optional<Message> Client::message(int64_t id) {
+std::optional<Message> Client::_message(int64_t id) {
     auto c = core.database().conn();
     auto convo =
             c.prepared_maybe_get<int64_t>("SELECT conversation FROM messages WHERE id = ?", id);
@@ -462,7 +586,7 @@ std::optional<Message> Client::message(int64_t id) {
     return std::move(found.front());
 }
 
-int64_t Client::send_message(const ConversationId& id, std::string_view body) {
+int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     if (id.type() != ConversationId::Type::dm)
         throw std::invalid_argument{
                 "send_message: only DM conversations are supported so far (got type {})"_format(

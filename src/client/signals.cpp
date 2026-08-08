@@ -15,8 +15,10 @@ Subscription& Subscription::operator=(Subscription&& other) noexcept {
 
 void Subscription::reset() {
     if (_id != 0) {
-        if (auto reg = _registry.lock())
+        if (auto reg = _registry.lock()) {
+            std::lock_guard lock{reg->mutex};
             reg->handlers.erase(_id);
+        }
         _id = 0;
     }
     _registry.reset();

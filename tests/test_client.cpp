@@ -1,5 +1,6 @@
 #include <SessionProtos.pb.h>
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <session/client.hpp>
 #include <session/clock.hpp>
@@ -7,7 +8,10 @@
 #include <session/crypto/ed25519.hpp>
 #include <session/format.hpp>
 #include <session/random.hpp>
+#include <oxen/quic/loop.hpp>
 #include <session/session_protocol.hpp>
+#include <future>
+#include <thread>
 
 #include "schema_fingerprint.hpp"
 #include "test_helper.hpp"
@@ -84,7 +88,13 @@ void deliver(
             std::as_bytes(std::span{plaintext}), from.ed_sk, ts, own_sid(to), std::nullopt);
 
     core::SwarmMessage sm{encoded, std::move(hash), ts, from_epoch_ms(1'000'000'000'000)};
-    to.core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+
+    // Core delivers arriving messages from its event loop, so do the same here rather than writing
+    // the database from the test thread: the connection pool is single-threaded by design.
+    to.core.loop().call_get([&] {
+        to.core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+        return 0;
+    });
 }
 
 }  // namespace
@@ -788,4 +798,55 @@ TEST_CASE("Client: Core is usable directly through the Client", "[client][callba
     c->core.globals.set("client_test_key", "value"sv);
     c.reopen();
     CHECK(c->core.globals.get_text("client_test_key") == "value");
+}
+
+// ── Threading ───────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: reads are safe while messages arrive on another thread", "[client][threads]") {
+    // An application reads conversations and history from its UI thread while Core's poll thread
+    // writes arriving messages.  Those are two connections from the shared pool against a WAL
+    // database, so readers should not block behind the writer nor see SQLITE_BUSY -- but that is a
+    // claim about configuration, and nothing exercised it until this.
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    constexpr int N = 300;
+    std::atomic<bool> writing{true};
+    std::atomic<int> reads{0};
+    std::exception_ptr writer_err, reader_err;
+
+    std::thread writer{[&] {
+        try {
+            for (int i = 1; i <= N; i++)
+                deliver(*c, sender, "msg{}"_format(i), from_epoch_ms(i * 1000), "h{}"_format(i));
+        } catch (...) {
+            writer_err = std::current_exception();
+        }
+        writing = false;
+    }};
+
+    std::thread reader{[&] {
+        try {
+            while (writing) {
+                for (const auto& convo_row : c->conversations())
+                    c->messages(convo_row.id, 50);
+                reads++;
+            }
+        } catch (...) {
+            reader_err = std::current_exception();
+        }
+    }};
+
+    writer.join();
+    reader.join();
+
+    // Rethrown on this thread: Catch2's assertion macros are not safe to use from the others.
+    if (writer_err)
+        std::rethrow_exception(writer_err);
+    if (reader_err)
+        std::rethrow_exception(reader_err);
+
+    CHECK(reads > 0);  // the reader really did run alongside, rather than after
+    CHECK(c->messages(convo, N + 10).size() == N);
 }

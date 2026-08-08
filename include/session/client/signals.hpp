@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <session/client/conversation_id.hpp>
 
@@ -38,7 +39,13 @@ struct Change {
 namespace detail {
     /// Shared registry of change listeners.  Held by shared_ptr so that a Subscription outliving
     /// its Client unsubscribes harmlessly instead of writing through a dangling pointer.
+    ///
+    /// Guarded by a mutex because these are the one part of Client not confined to the event loop:
+    /// changes are emitted from the loop thread, while subscribing and unsubscribing happen
+    /// wherever the application does them -- including a Subscription destructor running on a UI
+    /// thread.
     struct SignalRegistry {
+        std::mutex mutex;
         uint64_t next_id = 1;
         std::map<uint64_t, std::function<void(const Change&)>> handlers;
     };

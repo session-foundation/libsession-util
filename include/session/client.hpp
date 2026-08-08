@@ -149,30 +149,48 @@ class Client {
     /// Client-based application uses this for everything below the conversation layer.
     core::Core core;
 
-    // -- Conversations ------------------------------------------------------------------------
+    // -- Conversations and messages ---------------------------------------------------------------
+    //
+    // Each of these comes in two forms, and neither touches the database on the calling thread:
+    // both hand the work to Core's event loop, which is the only thread that ever touches it.  That
+    // is not a stylistic choice -- the connection pool is not safe to use from two threads at once,
+    // and reading from one while Core's poll thread writes deadlocks rather than merely racing.
+    //
+    // The blocking form waits for the loop and returns the result, which is what a single-threaded
+    // program or a worker thread wants; it costs nothing when the caller is already on the loop,
+    // since the job then runs inline.  The callback form returns immediately and invokes `cb` on
+    // the loop thread, which is what a UI thread wants -- it must not block on the loop, and it has
+    // to marshal the result back to itself anyway.
+    //
+    // Argument validation happens on the calling thread, before anything is dispatched, so misuse
+    // still throws where the mistake is.  In the callback form a later failure (a disk error, say)
+    // is logged rather than thrown, since by then there is no caller stack to reach.
 
     /// All conversations, most recently active first.
     ///
     /// Currently that means every conversation.  Once message requests exist this returns only
     /// approved ones, with the rest reached through their own accessor.
     std::vector<Conversation> conversations();
+    void conversations(std::function<void(std::vector<Conversation>)> cb);
 
     /// A single conversation, or nullopt if it does not exist locally.
     std::optional<Conversation> conversation(const ConversationId& id);
+    void conversation(const ConversationId& id, std::function<void(std::optional<Conversation>)> cb);
 
     /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
     /// does this implicitly; this is for opening an empty conversation with someone first.
     Conversation create_conversation(const ConversationId& id);
+    void create_conversation(const ConversationId& id, std::function<void(Conversation)> cb);
 
     /// Marks incoming messages up to and including `up_to` as read, moving the unread watermark
-    /// forward.  Passing nullopt (the default) marks everything currently stored as read — which
-    /// is not the same as parking the watermark at infinity: a message that arrives afterwards is
-    /// still unread, even if its timestamp is older than the one we just read to.
+    /// forward.  Passing nullopt marks everything currently stored as read — which is not the same
+    /// as parking the watermark at infinity: a message that arrives afterwards is still unread,
+    /// even if its timestamp is older than the one we just read to.
     ///
     /// Never moves the watermark backwards.
     void mark_read(const ConversationId& id, std::optional<sys_ms> up_to = std::nullopt);
-
-    // -- Messages -----------------------------------------------------------------------------
+    void mark_read(const ConversationId& id, std::function<void()> cb);
+    void mark_read(const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb);
 
     /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
     /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
@@ -181,19 +199,30 @@ class Client {
             const ConversationId& id,
             int limit = 50,
             std::optional<MessageCursor> before = std::nullopt);
+    void messages(const ConversationId& id, std::function<void(std::vector<Message>)> cb);
+    void messages(
+            const ConversationId& id, int limit, std::function<void(std::vector<Message>)> cb);
+    void messages(
+            const ConversationId& id,
+            int limit,
+            std::optional<MessageCursor> before,
+            std::function<void(std::vector<Message>)> cb);
 
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
     std::optional<Message> message(int64_t id);
+    void message(int64_t id, std::function<void(std::optional<Message>)> cb);
 
     /// Sends a text message, storing it immediately and dispatching it via Core.
     ///
-    /// Returns the Client message id of the stored row, which is what subsequent
-    /// ChangeType::message_updated signals will carry as delivery progresses.  Creates the
-    /// conversation if it does not already exist.
+    /// Yields the Client message id of the stored row, which is what subsequent
+    /// ChangeType::message_updated signals carry as delivery progresses.  Creates the conversation
+    /// if it does not already exist.
     ///
     /// @throws std::invalid_argument if the conversation is not a DM (groups and communities are
-    /// not implemented yet).
+    /// not implemented yet); thrown on the calling thread, before anything is dispatched.
     int64_t send_message(const ConversationId& id, std::string_view body);
+    void send_message(
+            const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb);
 
     // -- Change notification ------------------------------------------------------------------
 
@@ -226,6 +255,23 @@ class Client {
     // Status updates that arrived from send_dm() before it returned, i.e. before we knew the core
     // send id to map.  Drained by send_message() once the mapping is registered.
     std::unordered_map<int64_t, core::MessageSendStatus> _early_status;
+
+    // The actual work, all of it assuming it is already on the loop thread.  The public methods
+    // above are dispatches onto that thread and nothing else; these are where the database is
+    // touched, and are also what Client's own handlers call, since those already run there.
+    std::vector<Conversation> _conversations();
+    std::optional<Conversation> _conversation(const ConversationId& id);
+    Conversation _create_conversation(const ConversationId& id);
+    void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
+    std::vector<Message> _messages(
+            const ConversationId& id, int limit, std::optional<MessageCursor> before);
+    std::optional<Message> _message(int64_t id);
+    int64_t _send_message(const ConversationId& id, std::string_view body);
+
+    // Runs `work` on the loop thread, logging rather than propagating anything it throws: an
+    // exception escaping there has no caller to reach and would take the loop with it.
+    void _dispatch(std::function<void()> work);
+    void _require_dm(const ConversationId& id);
 
     core::callbacks _intercept_callbacks(core::callbacks app);
     void _init();
