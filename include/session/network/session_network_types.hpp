@@ -166,6 +166,16 @@ struct Request {
     /// Any extra request details which may modify the structure of the request.
     RequestDetails details;
 
+    /// The account whose swarm this request addresses, when it addresses one: the X25519 pubkey of
+    /// a session ID, group ID, etc.  Set it for anything sent to a swarm member *about* that
+    /// account, and leave it unset for a request merely aimed at a node (a snode cache refresh, a
+    /// clock resync), which no swarm membership applies to.
+    ///
+    /// Required to recover from a 421: the storage server rejects a request whose pubkey is not in
+    /// its swarm, and recovering means re-resolving the swarm of *this account*, which cannot be
+    /// derived from the node we happened to ask.
+    std::optional<session::network::x25519_pubkey> swarm_pubkey;
+
     /// The time the request was created, this is used primarily for determining whether the
     /// `overall_timeout` has been exceeded.
     std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
