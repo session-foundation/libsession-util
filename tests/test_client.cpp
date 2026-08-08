@@ -2,15 +2,15 @@
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <future>
+#include <oxen/quic/loop.hpp>
 #include <session/client.hpp>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/crypto/ed25519.hpp>
 #include <session/format.hpp>
 #include <session/random.hpp>
-#include <oxen/quic/loop.hpp>
 #include <session/session_protocol.hpp>
-#include <future>
 #include <thread>
 
 #include "schema_fingerprint.hpp"
@@ -68,6 +68,17 @@ b33 own_sid(Client& c) {
     return out;
 }
 
+/// `c`'s own sending keys, for building the copy of an outgoing message that Session stores on the
+/// sender's own swarm.
+SenderKeys self_keys(Client& c) {
+    SenderKeys k;
+    auto seed = c.core.globals.account_seed();
+    std::ranges::copy(seed.ed25519_secret(), k.ed_sk.begin());
+    std::ranges::copy(seed.ed25519_secret().last<32>(), k.ed_pk.begin());
+    std::ranges::copy(c.core.globals.session_id(), k.session_id.begin());
+    return k;
+}
+
 /// Builds, encrypts and delivers a v1 DM into `to` as if it had arrived from the swarm.
 void deliver(
         Client& to,
@@ -75,13 +86,16 @@ void deliver(
         std::string_view body,
         sys_ms ts,
         std::string hash,
-        std::string_view display_name = "") {
+        std::string_view display_name = "",
+        std::optional<b33> sync_target = std::nullopt) {
     SessionProtos::Content content;
     content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()));
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
     if (!display_name.empty())
         data->mutable_profile()->set_displayname(std::string{display_name});
+    if (sync_target)
+        data->set_synctarget(oxenc::to_hex(sync_target->begin(), sync_target->end()));
 
     auto plaintext = content.SerializeAsString();
     auto encoded = encode_dm_v1(
@@ -211,6 +225,69 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
 
     CHECK(c->message(msgs[0].id)->body == "hello there");
     CHECK_FALSE(c->message(msgs[0].id + 1000).has_value());
+}
+
+TEST_CASE(
+        "Client: our own sent message lands in the recipient's conversation", "[client][receive]") {
+    TempClient c;
+    SenderKeys peer;
+
+    // A one-to-one message is stored on both swarms, so this is what our own send looks like coming
+    // back to us: sender is us, and the conversation it belongs to is only in syncTarget.
+    deliver(*c,
+            self_keys(*c),
+            "sent from my phone",
+            from_epoch_ms(5000),
+            "sync1",
+            "",
+            peer.session_id);
+
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 1);
+    CHECK(convos[0].id == ConversationId::dm(peer.session_id));
+    CHECK(convos[0].unread == 0);
+
+    auto msgs = c->messages(convos[0].id);
+    REQUIRE(msgs.size() == 1);
+    CHECK(msgs[0].body == "sent from my phone");
+    CHECK(msgs[0].outgoing);
+    CHECK(msgs[0].sender == own_sid(*c));
+    CHECK(msgs[0].send_state == SendState::sent);
+}
+
+TEST_CASE("Client: a message to ourselves is a conversation with ourselves", "[client][receive]") {
+    TempClient c;
+    auto me = own_sid(*c);
+
+    // Note to Self is not a distinct kind of conversation, in Session or here: it is the DM whose
+    // peer is our own account, which is what both spellings below resolve to.
+    deliver(*c, self_keys(*c), "targeted", from_epoch_ms(5000), "self1", "", me);
+    deliver(*c, self_keys(*c), "untargeted", from_epoch_ms(6000), "self2");
+
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 1);
+    CHECK(convos[0].id == ConversationId::dm(me));
+    CHECK(convos[0].unread == 0);
+
+    auto msgs = c->messages(convos[0].id);
+    REQUIRE(msgs.size() == 2);
+    CHECK(msgs[0].outgoing);
+    CHECK(msgs[1].outgoing);
+}
+
+TEST_CASE("Client: syncTarget from another sender is ignored", "[client][receive]") {
+    TempClient c;
+    SenderKeys peer, elsewhere;
+
+    deliver(*c, peer, "not yours to file", from_epoch_ms(5000), "h1", "", elsewhere.session_id);
+
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 1);
+    CHECK(convos[0].id == ConversationId::dm(peer.session_id));
+
+    auto msgs = c->messages(convos[0].id);
+    REQUIRE(msgs.size() == 1);
+    CHECK_FALSE(msgs[0].outgoing);
 }
 
 TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][receive]") {

@@ -1,11 +1,13 @@
 #include <SQLiteCpp/Transaction.h>
 #include <SessionProtos.pb.h>
+#include <oxenc/hex.h>
 
+#include <algorithm>
 #include <oxen/log.hpp>
+#include <oxen/quic/loop.hpp>
 #include <session/client.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
-#include <oxen/quic/loop.hpp>
 #include <session/sqlite.hpp>
 #include <stdexcept>
 
@@ -318,7 +320,8 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
 
 std::vector<Message> Client::messages(
         const ConversationId& id, int limit, std::optional<MessageCursor> before) {
-    return core.loop().call_get([this, &id, limit, before] { return _messages(id, limit, before); });
+    return core.loop().call_get(
+            [this, &id, limit, before] { return _messages(id, limit, before); });
 }
 
 std::optional<Message> Client::message(int64_t id) {
@@ -665,7 +668,35 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     if (data.body().empty())
         return;
 
-    auto convo_id = ConversationId::dm(msg.sender_session_id);
+    // A one-to-one message is stored on both participants' swarms, so our own sent messages come
+    // back to us from our own swarm.  For those the sender is us, which says nothing about which
+    // conversation they belong to; the recipient is carried in syncTarget instead.
+    //
+    // syncTarget is only honoured on a self-send.  Session's other clients honour it on any
+    // incoming message, which lets a peer file their message into a conversation they are not part
+    // of; there is no case where a message from someone else needs it, so this does not.
+    bool outgoing = std::ranges::equal(msg.sender_session_id, core.globals.session_id());
+
+    b33 convo_with = msg.sender_session_id;
+    if (outgoing && data.has_synctarget()) {
+        const auto& target = data.synctarget();
+        if (target.size() != 66 || !oxenc::is_hex(target)) {
+            log::warning(
+                    cat,
+                    "Dropping message {}: syncTarget is not a session ID: {}",
+                    msg.hash,
+                    target);
+            return;
+        }
+        oxenc::from_hex(target.begin(), target.end(), reinterpret_cast<char*>(convo_with.data()));
+    }
+
+    if (convo_with[0] != std::byte{0x05}) {
+        log::warning(
+                cat, "Dropping message {}: conversation target is not a 0x05 session ID", msg.hash);
+        return;
+    }
+    auto convo_id = ConversationId::dm(convo_with);
 
     // The signed timestamp is the authenticated one; the swarm's upload time is not.
     auto ts = content.has_sigtimestamp()
@@ -703,15 +734,21 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         inserted = c.prepared_exec(
                            R"(
             INSERT OR IGNORE INTO messages
-                (conversation, content_hash, swarm_hash, sender, outgoing, timestamp, body)
-            VALUES (?, ?, ?, ?, 0, ?, ?)
+                (conversation, content_hash, swarm_hash, sender, outgoing, timestamp, body,
+                 send_state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         )",
                            convo.id,
                            cid,
                            msg.hash,
                            sender,
+                           outgoing ? 1 : 0,
                            to_ms(ts),
-                           data.body()) > 0;
+                           data.body(),
+                           // Retrieving it from a swarm is proof it got there, whichever device
+                           // put it there.
+                           outgoing ? std::optional<int>{static_cast<int>(SendState::sent)}
+                                    : std::optional<int>{}) > 0;
         if (inserted) {
             client_id = c.sql.getLastInsertRowid();
             c.prepared_exec(
@@ -721,18 +758,23 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
 
             // Whether an arrival is unread is this layer's decision, not the trigger's.  Today
             // that is just "newer than the watermark"; mutes and message requests will land here.
-            c.prepared_exec(
-                    R"(
+            if (!outgoing)
+                c.prepared_exec(
+                        R"(
                 UPDATE conversations SET unread_count = unread_count + 1
                 WHERE id = ?1 AND ?2 > last_read
             )",
-                    convo.id,
-                    to_ms(ts));
+                        convo.id,
+                        to_ms(ts));
         }
 
+        // Skipped for a self-send: the LokiProfile on one of those is our own, which belongs to the
+        // UserProfile config rather than to anything observed on the wire, and `name` here is used
+        // to name the conversation partner.
+        //
         // `IS NOT` rather than `!=`: the column is NULL until a name is known, and `NULL != 'x'`
         // is NULL, so `!=` would never fire for the first name we learn.
-        if (!name.empty())
+        if (!outgoing && !name.empty())
             renamed = c.prepared_exec(
                               R"(
                 UPDATE accounts SET display_name = ?1
