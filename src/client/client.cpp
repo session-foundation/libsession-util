@@ -664,6 +664,8 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     _emit({ChangeType::new_message, id, client_id});
     _emit({ChangeType::conversation_updated, id, std::nullopt});
 
+    log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
+
     auto core_id = core.send_dm(id.session_id(), content, now);
     _send_ids[core_id] = client_id;
 

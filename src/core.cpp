@@ -694,6 +694,16 @@ void Core::_send_to_swarm(
                         on_complete(false);
                     return;
                 }
+                // The two values a 421 turns on: which swarm we resolved, and which of its nodes we
+                // picked.  Read this against the "Storing ... of <pubkey>" line above -- a store
+                // rejected as misdirected means those two pubkeys are not the same account.
+                log::debug(
+                        cat,
+                        "Storing to swarm of {} via {} ({} nodes)",
+                        x25519_pub.hex(),
+                        swarm.front().to_string(),
+                        swarm.size());
+
                 net->send_request(
                         swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
                         [on_complete = std::move(on_complete)](
@@ -763,13 +773,26 @@ void Core::_do_send_dm(
         auto seed = globals.account_seed();
         auto ed_sec = seed.ed25519_secret();
 
-        if (pfs_x25519)
+        std::string_view version;
+        if (pfs_x25519) {
             payload = encrypt_for_recipient_v2(
                     ed_sec, recipient, *pfs_x25519, *pfs_mlkem768, content, pro_privkey);
-        else if (force_v2)
+            version = "v2 PFS";
+        } else if (force_v2) {
             payload = encrypt_for_recipient_v2_nopfs(ed_sec, recipient, content, pro_privkey);
-        else
+            version = "v2 nopfs";
+        } else {
             payload = encode_dm_v1(content, ed_sec, sent_timestamp, recipient, pro_privkey);
+            version = "v1";
+        }
+
+        log::debug(
+                cat,
+                "send_dm: message {} encrypted for {} as {} ({}B)",
+                message_id,
+                oxenc::to_hex(recipient),
+                version,
+                payload.size());
     } catch (const std::exception& e) {
         log::warning(cat, "send_dm: encryption failed for message {}: {}", message_id, e.what());
         fire_status(MessageSendStatus::encrypt_failed);
@@ -842,6 +865,13 @@ int64_t Core::send_dm(
         std::chrono::milliseconds ttl,
         bool force_v2) {
     auto id = _next_message_id++;
+
+    log::debug(
+            cat,
+            "send_dm: message {} to {} ({}B content)",
+            id,
+            oxenc::to_hex(recipient_session_id),
+            content.size());
 
     // Check cache state to decide whether we can send immediately or must queue.
     auto conn = db.conn();
