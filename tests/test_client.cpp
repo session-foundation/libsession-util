@@ -277,6 +277,24 @@ TEST_CASE("Client: a message to ourselves is a conversation with ourselves", "[c
     CHECK(msgs[1].outgoing);
 }
 
+TEST_CASE("Client: reads answer emptily before an account exists", "[client][convos]") {
+    // An application opening the database under defer_account renders before onboarding has run, so
+    // every read has to survive having no identity: "no account" and "no conversations" are the
+    // same answer.  Only writes may insist on one.
+    TempClient c{core::defer_account{}};
+    REQUIRE_FALSE(c->core.globals.have_account());
+
+    constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    auto convo = ConversationId::dm(sid);
+
+    CHECK(c->conversations().empty());
+    CHECK_FALSE(c->conversation(convo).has_value());
+    CHECK(c->messages(convo).empty());
+    CHECK_FALSE(c->message(1).has_value());
+    CHECK_FALSE(c->is_note_to_self(convo));
+    CHECK_NOTHROW(c->mark_read(convo));
+}
+
 TEST_CASE("Client: note to self is reported, not left to the caller", "[client][convos]") {
     TempClient c;
     SenderKeys peer;

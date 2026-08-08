@@ -197,7 +197,8 @@ class Client {
     /// loop: it compares against our session ID, which is fixed once the account exists.  So it is
     /// callable from any thread, including a render loop, and does not need a callback form.
     ///
-    /// @throws core::no_account if no account has been created or restored yet.
+    /// False rather than throwing when there is no account yet: with no identity, nothing can be a
+    /// conversation with ourselves.
     bool is_note_to_self(const ConversationId& id);
 
     /// Marks incoming messages up to and including `up_to` as read, moving the unread watermark
@@ -277,6 +278,7 @@ class Client {
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
+    std::span<const std::byte> _self_or_none();
     std::vector<Conversation> _conversations();
     std::optional<Conversation> _conversation(const ConversationId& id);
     Conversation _create_conversation(const ConversationId& id);

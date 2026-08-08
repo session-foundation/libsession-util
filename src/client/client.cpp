@@ -315,7 +315,7 @@ Conversation Client::create_conversation(const ConversationId& id) {
 // it.  See the declaration.
 bool Client::is_note_to_self(const ConversationId& id) {
     return id.type() == ConversationId::Type::dm &&
-           std::ranges::equal(id.session_id(), core.globals.session_id());
+           std::ranges::equal(id.session_id(), _self_or_none());
 }
 
 void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
@@ -412,11 +412,12 @@ static const auto CONVO_COLUMNS = R"(
 )"_format(SUBJECT_JOIN);
 
 // `self` is our own session ID, for flagging the Note to Self conversation; it is not part of the
-// query because the row does not know whose database it is in.
+// query because the row does not know whose database it is in.  Empty when there is no account
+// yet, under which circumstance nothing can be a conversation with ourselves.
 template <typename... Bind>
 static std::vector<Conversation> query_conversations(
         sqlite::Connection& c,
-        std::span<const std::byte, 33> self,
+        std::span<const std::byte> self,
         const std::string& query,
         const Bind&... bind) {
     std::vector<Conversation> out;
@@ -443,12 +444,19 @@ static std::vector<Conversation> query_conversations(
     return out;
 }
 
+// Our own session ID, or empty when no account exists yet.  Reads are expected to work before
+// onboarding under defer_account -- "no account" and "no conversations" are the same answer -- so
+// nothing on a read path may reach for the identity unconditionally.
+std::span<const std::byte> Client::_self_or_none() {
+    if (!core.globals.have_account())
+        return {};
+    return core.globals.session_id();
+}
+
 std::vector<Conversation> Client::_conversations() {
     auto c = core.database().conn();
     return query_conversations(
-            c,
-            core.globals.session_id(),
-            "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
+            c, _self_or_none(), "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
 }
 
 std::optional<Conversation> Client::_conversation(const ConversationId& id) {
@@ -457,7 +465,7 @@ std::optional<Conversation> Client::_conversation(const ConversationId& id) {
     if (!convo)
         return std::nullopt;
     auto found = query_conversations(
-            c, core.globals.session_id(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
+            c, _self_or_none(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
