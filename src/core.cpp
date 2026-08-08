@@ -112,6 +112,10 @@ void Core::register_comp_init(detail::CoreComponent* c) {
     _comp_init.push_back(c);
 }
 
+quic::Loop& Core::loop() {
+    return *_loop;
+}
+
 void Core::set_network(std::shared_ptr<network::Network> network) {
     // Polling signs its retrieve requests with the account key, so attaching a network before the
     // account has an identity would fail inside a background poll rather than here.  Refuse at the

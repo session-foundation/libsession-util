@@ -493,8 +493,23 @@ class Core {
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }
 
+    /// The event loop this account's work runs on.
+    ///
+    /// Everything Core does off the caller's thread — polling, send completion, and therefore every
+    /// callback it fires — happens here.  A layer above Core dispatches its own database work onto
+    /// it with `loop().call(...)` so that all access is serialised onto one thread, rather than
+    /// relying on the database being safe to touch from several.
+    ///
+    /// `call()` runs the job inline when the caller is already on this thread, so a single-threaded
+    /// application pays nothing for the indirection.
+    quic::Loop& loop();
+
     /// The account database, for a layer built on top of Core that keeps its own tables alongside
     /// Core's — the same layer that supplies a schema_extension to create them.
+    ///
+    /// A layer above Core may create and use its own tables here.  It must not write Core's:
+    /// `namespace_sync`, `devices`, `globals` and the rest are Core's to maintain, and nothing
+    /// defends them against a well-meaning update from outside.
     ///
     /// `database().conn()` hands back the connection the calling thread already holds, if any, so a
     /// write made from inside a Core callback joins the transaction Core has open rather than
