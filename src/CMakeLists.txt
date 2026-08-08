@@ -114,6 +114,7 @@ target_link_libraries(crypto
     PRIVATE
     sessiondep::libsodium
     sessiondep::simdutf
+    sessiondep::utf8proc
     mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     libsession::protos

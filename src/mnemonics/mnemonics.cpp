@@ -1,4 +1,5 @@
 #include <oxenc/endian.h>
+#include <utf8proc.h>
 
 #include <cassert>
 #include <cctype>
@@ -69,33 +70,45 @@ namespace {
     // The standard CRC-32 check value; a mistyped table cannot compile.
     static_assert(crc32("123456789") == 0xCBF43926u);
 
-    // Returns the lowercased first `n_codepoints` UTF-8 codepoints of `s`.  ASCII characters are
-    // lowercased; non-ASCII codepoints are copied as-is.
+    // Returns the first `n_codepoints` codepoints of `s`, composed and case folded.
+    //
+    // Composition matters because the word lists are NFC and a decomposed input is a different byte
+    // sequence for the same word: `ö` typed as `o` + U+0308 puts the combining mark outside the
+    // prefix window, so the accent is dropped rather than mismatched.  Mostly that fails to match
+    // anything, but Russian `тайна` decomposed truncates to `таи`, which *is* `таинство` -- the
+    // lookup silently succeeds against the wrong word.
+    //
+    // Case folding is done here rather than with towlower because towlower is locale-dependent:
+    // under LC_CTYPE=C it leaves U+00D6 alone, so case-insensitivity would work or not depending on
+    // the environment the process happens to run in.
+    //
+    // Both the word lists and user input go through this, so downstream comparisons are plain byte
+    // comparisons on canonical data.
     std::string word_prefix(std::string_view s, int n_codepoints) {
-        std::string result;
-        result.reserve(s.size());
-        const char* it = s.data();
-        const char* end = it + s.size();
-        for (int count = 0; it < end && count < n_codepoints; count++) {
-            uint8_t b = static_cast<uint8_t>(*it);
-            int len;
-            if ((b & 0b11100000) == 0b11000000)  // 110xxxxx: 2-byte sequence
-                len = 2;
-            else if ((b & 0b11110000) == 0b11100000)  // 1110xxxx: 3-byte sequence
-                len = 3;
-            else if ((b & 0b11111000) == 0b11110000)  // 11110xxx: 4-byte sequence
-                len = 4;
-            else  // 0xxxxxxx: ASCII, or invalid byte
-                len = 1;
-            if (len == 1) {
-                result.push_back(static_cast<char>(std::tolower(b)));
-                it++;
-            } else {
-                for (int k = 0; k < len && it < end; k++)
-                    result.push_back(*it++);
-            }
+        utf8proc_uint8_t* folded = nullptr;
+        auto len = utf8proc_map(
+                reinterpret_cast<const utf8proc_uint8_t*>(s.data()),
+                static_cast<utf8proc_ssize_t>(s.size()),
+                &folded,
+                static_cast<utf8proc_option_t>(
+                        UTF8PROC_STABLE | UTF8PROC_COMPOSE | UTF8PROC_CASEFOLD));
+        if (len < 0)
+            // Not valid UTF-8, so it cannot be one of the words; the caller reports it as unknown.
+            return {};
+
+        std::unique_ptr<utf8proc_uint8_t, decltype(&std::free)> owned{folded, &std::free};
+        std::string_view canonical{reinterpret_cast<const char*>(folded), static_cast<size_t>(len)};
+
+        // Take n codepoints by skipping continuation bytes: canonical UTF-8 needs no decoding to
+        // find codepoint boundaries.
+        size_t end = 0;
+        for (int count = 0; end < canonical.size() && count < n_codepoints; count++) {
+            end++;
+            while (end < canonical.size() &&
+                   (static_cast<unsigned char>(canonical[end]) & 0xC0) == 0x80)
+                end++;
         }
-        return result;
+        return std::string{canonical.substr(0, end)};
     }
 
     using WordMap = std::unordered_map<std::string, int>;

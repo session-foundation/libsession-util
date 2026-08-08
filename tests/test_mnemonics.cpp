@@ -562,3 +562,101 @@ TEST_CASE("mnemonics: rejects bad phrases", "[mnemonics][checksum]") {
                 session::mnemonics::unknown_word_error);
     }
 }
+
+// ── Input canonicalisation ──────────────────────────────────────────────────────────────────────
+//
+// The word lists are NFC.  A user whose input path produces NFD -- macOS filesystem APIs, several
+// IMEs, some PDF and web copy paths -- types something that renders identically but is a different
+// byte sequence.  For someone restoring an account that is a lockout, so both forms have to reach
+// the same seed.
+//
+// The decomposed spellings below use \u escapes rather than literal combining sequences, so that no
+// editor or tool can quietly normalise them into the composed form and leave these tests comparing
+// a string with itself.  The static_asserts fail the build if that happens regardless.
+namespace {
+// "mögen": ö is U+00F6 composed, o + U+0308 decomposed.
+constexpr std::string_view moegen_nfc = "mögen";
+constexpr std::string_view moegen_nfd = "mo\u0308gen";
+static_assert(moegen_nfc != moegen_nfd, "the decomposed spelling has been normalised away");
+
+// "тайна": й is U+0439 composed, и + U+0306 decomposed.  German's prefix is 4 codepoints and
+// Russian's is 3, so in both cases the combining mark falls outside the prefix window.
+constexpr std::string_view tajna_nfc = "тайна";
+constexpr std::string_view tajna_nfd = "таи\u0306на";
+static_assert(tajna_nfc != tajna_nfd, "the decomposed spelling has been normalised away");
+
+constexpr std::string_view oestlich_lower = "östlich";
+constexpr std::string_view oestlich_upper = "ÖSTLICH";
+static_assert(oestlich_lower != oestlich_upper);
+}  // namespace
+
+TEST_CASE("mnemonics: a phrase decodes the same however it was typed", "[mnemonics][unicode]") {
+    // Crash mögen Muster, repeated -- chosen because it contains a decomposable word.
+    constexpr auto seed = "04040404040404040404040404040404"_hex_b;
+    auto& german = session::mnemonics::get_language("German");
+
+    auto expected = std::vector<std::byte>{seed.begin(), seed.end()};
+    auto decode = [&](std::vector<std::string_view> w) {
+        auto back = session::mnemonics::words_to_bytes(w, german);
+        auto acc = back.access();
+        return std::vector<std::byte>{acc.buf.begin(), acc.buf.end()};
+    };
+
+    auto m = session::mnemonics::bytes_to_words(seed, german);
+    auto opened = m.open();
+    std::vector<std::string_view> composed{opened.begin(), opened.end()};
+    REQUIRE(decode(composed) == expected);
+    REQUIRE(std::ranges::count(composed, moegen_nfc) > 0);
+
+    SECTION("every occurrence decomposed") {
+        auto w = composed;
+        std::ranges::replace(w, moegen_nfc, moegen_nfd);
+        CHECK(decode(w) == expected);
+    }
+
+    SECTION("decomposed in the checksum word too") {
+        auto w = composed;
+        w.back() = w.back() == moegen_nfc ? moegen_nfd : w.back();
+        CHECK(decode(w) == expected);
+    }
+}
+
+TEST_CASE("mnemonics: case folds beyond ASCII", "[mnemonics][unicode]") {
+    // tolower() only folds single bytes, so an all-caps non-ASCII word used to be unrecognisable.
+    // towlower() would fold it, but only under a UTF-8 locale -- LC_ALL=C would silently disable
+    // it.
+    constexpr auto seed = "04040404040404040404040404040404"_hex_b;
+    auto& german = session::mnemonics::get_language("German");
+
+    auto m = session::mnemonics::bytes_to_words(seed, german);
+    auto opened = m.open();
+    std::vector<std::string_view> w{opened.begin(), opened.end()};
+    std::ranges::replace(w, moegen_nfc, std::string_view{"MÖGEN"});
+
+    auto back = session::mnemonics::words_to_bytes(w, german);
+    auto acc = back.access();
+    CHECK(std::ranges::equal(acc.buf, std::span{seed}));
+}
+
+TEST_CASE("mnemonics: decomposed input does not match a different word", "[mnemonics][unicode]") {
+    // The dangerous case: й decomposes to и + U+0306, the mark falls outside Russian's 3-codepoint
+    // window, and "тайна" truncates to "таи" -- which is "таинство".  Without normalisation the
+    // lookup succeeds against the wrong word and silently decodes to a different seed, which is
+    // worse than a rejection: nothing tells the user their phrase was misread.
+    auto& russian = session::mnemonics::get_language("Russian");
+
+    auto decode = [&](std::string_view word) {
+        std::vector<std::string_view> phrase(12, word);
+        auto back = session::mnemonics::words_to_bytes(phrase, russian);
+        auto acc = back.access();
+        return std::vector<std::byte>{acc.buf.begin(), acc.buf.end()};
+    };
+
+    // The word the truncation would collide with really is a different word with a different seed,
+    // so the check below is meaningful rather than vacuous.
+    auto composed = decode(tajna_nfc);
+    CHECK(decode("таинство") != composed);
+
+    // Typed decomposed, it must still be тайна.
+    CHECK(decode(tajna_nfd) == composed);
+}
