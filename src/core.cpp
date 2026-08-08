@@ -36,11 +36,53 @@ using namespace session::sqlite;
 using namespace oxen::log::literals;
 static auto cat = log::Cat("core");
 
-// Returns true if the given namespace requires a signed retrieve request.  A namespace does NOT
-// require auth if and only if it satisfies: ns_val < 0 && (-ns_val) % 20 == 1 (i.e. -1, -21, ...).
-static constexpr bool ns_requires_auth(int16_t ns_val) {
-    return !(ns_val < 0 && (-ns_val) % 20 == 1);
+// Namespace access rules, mirrored from the storage server's oxenss/common/namespace.h.  The names
+// match it deliberately: these decide whether a request we build has to be signed, and getting them
+// out of step with the server is a 401 in production and nothing at all in testing.
+
+// Namespaces anyone may store to, every one divisible by 10.  Namespace 0 is one, which is what
+// makes it possible to be messaged by someone who does not have our keys.
+static constexpr bool is_public_inbox_namespace(int16_t ns) {
+    return ns % 10 == 0;
 }
+
+// Namespaces anyone may retrieve from but only the owner may store to: the negative namespaces of
+// the form -(20n+1), i.e. -1, -21, -41.  Storing implicitly replaces what is there.
+static constexpr bool is_public_outbox_namespace(int16_t ns) {
+    return ns < 0 && -ns % 20 == 1;
+}
+
+// Deprecated legacy closed groups, which allow both unauthenticated store and retrieval.
+static constexpr int16_t LEGACY_CLOSED_NAMESPACE = -10;
+
+static constexpr bool retrieve_requires_auth(int16_t ns) {
+    return !(ns == LEGACY_CLOSED_NAMESPACE || is_public_outbox_namespace(ns));
+}
+
+static constexpr bool store_requires_auth(int16_t ns) {
+    return !is_public_inbox_namespace(ns);
+}
+
+// The examples the storage server's own comments give, so a rule transcribed wrongly cannot build.
+static_assert(
+        is_public_inbox_namespace(0) && is_public_inbox_namespace(10) &&
+        is_public_inbox_namespace(400) && is_public_inbox_namespace(-1230));
+static_assert(
+        !is_public_inbox_namespace(11) && !is_public_inbox_namespace(21) &&
+        !is_public_inbox_namespace(-21));
+static_assert(
+        is_public_outbox_namespace(-1) && is_public_outbox_namespace(-21) &&
+        is_public_outbox_namespace(-981));
+static_assert(
+        !is_public_outbox_namespace(1) && !is_public_outbox_namespace(21) &&
+        !is_public_outbox_namespace(-20));
+
+// The namespaces we actually use, spelled out: a DM is deposited unsigned in a stranger's inbox,
+// while our own device and account-key namespaces are ours alone to write.
+static_assert(!store_requires_auth(0) && retrieve_requires_auth(0));
+static_assert(store_requires_auth(21) && retrieve_requires_auth(21));
+static_assert(store_requires_auth(-21) && !retrieve_requires_auth(-21));
+static_assert(!retrieve_requires_auth(LEGACY_CLOSED_NAMESPACE));
 
 // Builds a request sent to `node` *about* the account identified by `swarm_pubkey`.  Recording the
 // swarm pubkey is what allows a 421 (the node is no longer in that account's swarm) to be recovered
@@ -178,7 +220,7 @@ void Core::_poll() {
         auto seed = globals.account_seed();
         for (size_t i = 0; i < namespaces.size(); ++i) {
             auto ns_val = static_cast<int16_t>(namespaces[i]);
-            if (!ns_requires_auth(ns_val))
+            if (!retrieve_requires_auth(ns_val))
                 continue;
             auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
             auto sig = ed25519::sign(seed.ed25519_secret(), to_span(to_sign));
@@ -588,31 +630,54 @@ void Core::_send_to_swarm(
     if (!net)
         throw std::logic_error{"_send_to_swarm: no send_to_swarm callback and no network object"};
 
-    // Build signed store request.
-    auto ed25519_hex = globals.pubkey_ed25519().hex();
     auto ns_val = static_cast<int16_t>(ns);
     auto now_ms = epoch_ms(clock_now_ms());
 
-    auto to_sign = ns_signature_value("store", ns_val, now_ms);
-    b64 sig;
-    {
-        auto seed = globals.account_seed();
-        auto to_sign_bytes = std::as_bytes(std::span{to_sign});
-        ed25519::sign(sig, seed.ed25519_secret(), to_sign_bytes);
-    }
-
+    // The pubkey in the body and the swarm the request goes to must be the same account: a storage
+    // server answers a store for a pubkey outside its own swarm with a 421, and the retry that
+    // provokes cannot recover, because every node of the swarm we picked says the same thing.
     nlohmann::json params = {
-            {"pubkey", globals.session_id_hex()},
-            {"pubkey_ed25519", ed25519_hex},
+            {"pubkey", oxenc::to_hex(dest_pubkey.begin(), dest_pubkey.end())},
             {"namespace", ns_val},
             {"data", "{:b}"_format(payload)},
             {"timestamp", now_ms},
-            {"sig_timestamp", now_ms},
-            {"signature", "{:b}"_format(sig)},
             {"ttl", ttl.count()},
     };
 
+    // Signed only where the storage server actually requires it.  Signing anyway would not merely
+    // be redundant -- a public inbox store skips signature checking entirely, so the server never
+    // reads it -- it would identify us as the one doing the storing.  For a message deposited in
+    // our own swarm that distinguishes a copy we sent from one we were sent, which is precisely
+    // what a storage server should not be able to tell.
+    //
+    // TODO: this signs with the account key, which is only right when the destination swarm is our
+    // own.  Storing to a group swarm (namespaces 11-14) also requires authentication, but we do not
+    // hold the group's key: a non-admin member signs with the subaccount token the admins issued
+    // them and sends it alongside as `subaccount` + `subaccount_sig`, which the server checks
+    // carries subaccount_access::Write (and, for a public outbox namespace, Delete as well).  Until
+    // that exists, a group store signed here will be rejected with a 401.
+    bool signed_store = store_requires_auth(ns_val);
+    if (signed_store) {
+        auto to_sign = ns_signature_value("store", ns_val, now_ms);
+        b64 sig;
+        {
+            auto seed = globals.account_seed();
+            ed25519::sign(sig, seed.ed25519_secret(), std::as_bytes(std::span{to_sign}));
+        }
+        params["pubkey_ed25519"] = globals.pubkey_ed25519().hex();
+        params["sig_timestamp"] = now_ms;
+        params["signature"] = "{:b}"_format(sig);
+    }
+
     auto body = to_vector<std::byte>(params.dump());
+
+    log::debug(
+            cat,
+            "Storing {}B to namespace {} of {}{}",
+            payload.size(),
+            ns_val,
+            params["pubkey"].get<std::string_view>(),
+            signed_store ? ", signed" : "");
 
     // Resolve the recipient's swarm and send.
     network::x25519_pubkey x25519_pub;
@@ -624,6 +689,7 @@ void Core::_send_to_swarm(
             [net, body = std::move(body), on_complete = std::move(on_complete), x25519_pub](
                     auto, auto swarm) mutable {
                 if (swarm.empty()) {
+                    log::warning(cat, "Cannot store: no swarm nodes available");
                     if (on_complete)
                         on_complete(false);
                     return;
@@ -631,7 +697,17 @@ void Core::_send_to_swarm(
                 net->send_request(
                         swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
                         [on_complete = std::move(on_complete)](
-                                bool success, bool, int16_t, auto, auto) {
+                                bool success,
+                                bool timeout,
+                                int16_t status,
+                                auto,
+                                std::optional<std::string> resp) {
+                            if (!success)
+                                log::warning(
+                                        cat,
+                                        "Store request failed ({}): {}",
+                                        timeout ? "timed out" : "status {}"_format(status),
+                                        resp.value_or("no response body"));
                             if (on_complete)
                                 on_complete(success);
                         });
