@@ -424,10 +424,8 @@ static void parse_envelope_fields(
         // This can be removed after a while once we want to stop supporting old clients.
         const std::string& source = envelope.source();
         if (source.size() != 0 && source.size() != (result.envelope.source.max_size() * 2) /*hex*/)
-            throw std::runtime_error(
-                    fmt::format(
-                            "Parse envelope failed, source had unexpected size ({} bytes)",
-                            source.size()));
+            throw std::runtime_error(fmt::format(
+                    "Parse envelope failed, source had unexpected size ({} bytes)", source.size()));
 
         if (source.size()) {
             oxenc::from_hex(source.begin(), source.end(), result.envelope.source.data());
@@ -657,10 +655,9 @@ DecodedCommunityMessage decode_for_community(
                 // send in the source is a Session public key (see: encode_for_destination)
                 const std::string& source = pb_envelope.source();
                 if (source.size() != envelope.source.max_size())
-                    throw std::runtime_error(
-                            fmt::format(
-                                    "Parse envelope failed, source had unexpected size ({} bytes)",
-                                    source.size()));
+                    throw std::runtime_error(fmt::format(
+                            "Parse envelope failed, source had unexpected size ({} bytes)",
+                            source.size()));
                 std::memcpy(envelope.source.data(), source.data(), source.size());
                 envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
             }

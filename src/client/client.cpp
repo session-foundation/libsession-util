@@ -432,15 +432,13 @@ static std::vector<Conversation> query_conversations(
                  int64_t,
                  std::string,
                  int>(query, bind...))
-        out.push_back(
-                Conversation{
-                        .id = subject_to_id(convo, sid, gid, url, room),
-                        .display_name = name.value_or(""),
-                        .last_message = std::move(preview),
-                        .last_activity = from_epoch_ms(activity),
-                        .unread = unread,
-                        .note_to_self =
-                                sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
+        out.push_back(Conversation{
+                .id = subject_to_id(convo, sid, gid, url, room),
+                .display_name = name.value_or(""),
+                .last_message = std::move(preview),
+                .last_activity = from_epoch_ms(activity),
+                .unread = unread,
+                .note_to_self = sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
     return out;
 }
 
@@ -554,17 +552,16 @@ static std::vector<Message> query_messages(
                  int64_t,
                  std::string,
                  std::optional<int>>(query, bind...))
-        out.push_back(
-                Message{.id = id,
-                        .conversation = convo,
-                        .sender = sender,
-                        .outgoing = outgoing != 0,
-                        .timestamp = from_epoch_ms(ts),
-                        .body = std::move(body),
-                        .send_state = send_state
-                                            ? std::optional{static_cast<SendState>(*send_state)}
-                                            : std::nullopt,
-                        .hash = std::move(swarm_hash)});
+        out.push_back(Message{
+                .id = id,
+                .conversation = convo,
+                .sender = sender,
+                .outgoing = outgoing != 0,
+                .timestamp = from_epoch_ms(ts),
+                .body = std::move(body),
+                .send_state = send_state ? std::optional{static_cast<SendState>(*send_state)}
+                                         : std::nullopt,
+                .hash = std::move(swarm_hash)});
     return out;
 }
 

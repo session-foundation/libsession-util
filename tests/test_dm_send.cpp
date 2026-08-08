@@ -416,8 +416,9 @@ TEST_CASE("send_dm: Content overload rejects a mismatched sigTimestamp", "[core]
 
 // ── Sends queued behind a PFS key fetch ─────────────────────────────────────────────────────────
 
-TEST_CASE("send_dm: a send queued behind a key fetch is released when the fetch settles",
-          "[core][send_dm]") {
+TEST_CASE(
+        "send_dm: a send queued behind a key fetch is released when the fetch settles",
+        "[core][send_dm]") {
     std::vector<MessageSendStatus> statuses;
     std::vector<PfsKeyFetch> fetches;
     std::vector<std::byte> captured;
@@ -459,8 +460,9 @@ TEST_CASE("send_dm: a send queued behind a key fetch is released when the fetch 
     CHECK(statuses.back() == MessageSendStatus::success);
 }
 
-TEST_CASE("send_dm: every send queued for one recipient is released by a single fetch",
-          "[core][send_dm]") {
+TEST_CASE(
+        "send_dm: every send queued for one recipient is released by a single fetch",
+        "[core][send_dm]") {
     std::vector<PfsKeyFetch> fetches;
     int stored = 0;
 
@@ -494,8 +496,9 @@ TEST_CASE("send_dm: every send queued for one recipient is released by a single 
     CHECK(fetches.size() == 1);
 }
 
-TEST_CASE("send_dm: a throwing pfs_keys_fetched callback does not strand queued sends",
-          "[core][send_dm]") {
+TEST_CASE(
+        "send_dm: a throwing pfs_keys_fetched callback does not strand queued sends",
+        "[core][send_dm]") {
     int stored = 0;
 
     callbacks cbs;
