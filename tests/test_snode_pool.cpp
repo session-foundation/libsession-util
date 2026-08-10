@@ -288,8 +288,8 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
     session::network::config::SnodePool pool_config = {
             std::nullopt,
             std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
+            5min,
+            5min,
             false,  // enforce_subnet_diversity
             network::opt::retry_delay{50ms, 200ms},
             opt::netid::Target::testnet,
