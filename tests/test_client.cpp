@@ -111,6 +111,57 @@ void deliver(
     });
 }
 
+/// Records every callback so a test can assert on what a subscriber was told, and in what order.
+struct Recorder {
+    std::vector<std::string> order;
+    std::vector<Conversation> added, updated;
+    std::vector<ConversationId> removed;
+    std::vector<std::vector<Conversation>> replaced;
+    std::vector<std::pair<ConversationId, Message>> msg_added, msg_updated;
+
+    callbacks handlers() {
+        return {
+                .conversation_added =
+                        [this](const Conversation& c) {
+                            order.push_back("added");
+                            added.push_back(c);
+                        },
+                .conversation_updated =
+                        [this](const Conversation& c) {
+                            order.push_back("updated");
+                            updated.push_back(c);
+                        },
+                .conversation_removed =
+                        [this](const ConversationId& id) {
+                            order.push_back("removed");
+                            removed.push_back(id);
+                        },
+                .conversation_list_replaced =
+                        [this](std::vector<Conversation> l) {
+                            order.push_back("replaced");
+                            replaced.push_back(std::move(l));
+                        },
+                .message_added =
+                        [this](const ConversationId& id, const Message& m) {
+                            order.push_back("message");
+                            msg_added.emplace_back(id, m);
+                        },
+                .message_updated =
+                        [this](const ConversationId& id, const Message& m) {
+                            order.push_back("message_updated");
+                            msg_updated.emplace_back(id, m);
+                        },
+        };
+    }
+};
+
+/// Waits for anything Client deferred with call_soon -- the coalesced conversation_updated -- to
+/// have run.  Jobs run in the order they were queued, so a job queued afterwards that we wait on
+/// cannot finish first.
+void sync(Client& c) {
+    c.core.loop().call_get([] { return 0; });
+}
+
 }  // namespace
 
 // ── ConversationId ──────────────────────────────────────────────────────────────────────────────
@@ -741,29 +792,80 @@ TEST_CASE("Client: subscribers are told what changed", "[client][signals]") {
     TempClient c;
     SenderKeys sender;
 
-    std::vector<Change> changes;
-    auto sub = c->subscribe([&](const Change& ch) { changes.push_back(ch); });
+    Recorder r;
+    auto sub = c->subscribe(r.handlers());
 
     deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+    sync(*c);
 
     auto convo = ConversationId::dm(sender.session_id);
-    REQUIRE(changes.size() == 3);
-    CHECK(changes[0].type == ChangeType::conversation_added);
-    CHECK(changes[1].type == ChangeType::new_message);
-    CHECK(changes[2].type == ChangeType::conversation_updated);
-    for (const auto& ch : changes)
-        CHECK(ch.conversation == convo);
+    CHECK(r.order == std::vector<std::string>{"added", "message", "updated"});
 
-    REQUIRE(changes[1].message_id.has_value());
-    CHECK(c->message(*changes[1].message_id)->body == "ping");
-    CHECK_FALSE(changes[0].message_id.has_value());
+    // Every handler is given the state itself, not something to go and look up.
+    REQUIRE(r.added.size() == 1);
+    CHECK(r.added[0].id == convo);
+    REQUIRE(r.msg_added.size() == 1);
+    CHECK(r.msg_added[0].first == convo);
+    CHECK(r.msg_added[0].second.body == "ping");
+    REQUIRE(r.updated.size() == 1);
+    CHECK(r.updated[0].last_message == "ping");
+    CHECK(r.updated[0].unread == 1);
 
     // A second message on an existing conversation does not re-announce the conversation.
-    changes.clear();
+    r.order.clear();
     deliver(*c, sender, "pong", from_epoch_ms(2000), "h2");
-    REQUIRE(changes.size() == 2);
-    CHECK(changes[0].type == ChangeType::new_message);
-    CHECK(changes[1].type == ChangeType::conversation_updated);
+    sync(*c);
+    CHECK(r.order == std::vector<std::string>{"message", "updated"});
+}
+
+TEST_CASE(
+        "Client: a batch reports each message but settles the conversation once",
+        "[client][signals]") {
+    TempClient c;
+    SenderKeys sender;
+
+    Recorder r;
+    auto sub = c->subscribe(r.handlers());
+
+    // One delivery carrying several messages, as a swarm poll produces.
+    std::vector<SessionProtos::Content> contents;
+    std::vector<std::string> encoded;
+    std::vector<core::SwarmMessage> batch;
+    for (int i = 0; i < 5; i++) {
+        SessionProtos::Content content;
+        auto ts = from_epoch_ms(1000 + i);
+        content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(ts)));
+        content.mutable_datamessage()->set_body("m{}"_format(i));
+        encoded.push_back(content.SerializeAsString());
+    }
+    std::vector<std::vector<std::byte>> wire;
+    for (int i = 0; i < 5; i++)
+        wire.push_back(encode_dm_v1(
+                std::as_bytes(std::span{encoded[i]}),
+                sender.ed_sk,
+                from_epoch_ms(1000 + i),
+                own_sid(*c),
+                std::nullopt));
+    for (int i = 0; i < 5; i++)
+        batch.push_back(
+                core::SwarmMessage{
+                        wire[i],
+                        "b{}"_format(i),
+                        from_epoch_ms(1000 + i),
+                        from_epoch_ms(1'000'000'000'000)});
+
+    c->core.loop().call_get([&] {
+        c->core.receive_messages(batch, config::Namespace::Default, true);
+        return 0;
+    });
+    sync(*c);
+
+    // Five messages, but the conversation settles once rather than being rebuilt five times.
+    CHECK(std::ranges::count(r.order, "message") == 5);
+    CHECK(std::ranges::count(r.order, "updated") == 1);
+    REQUIRE(r.updated.size() == 1);
+    CHECK(r.updated[0].unread == 5);
+    CHECK(r.updated[0].last_message == "m4");
 }
 
 TEST_CASE("Client: state is committed before the signal fires", "[client][signals]") {
@@ -771,10 +873,9 @@ TEST_CASE("Client: state is committed before the signal fires", "[client][signal
     SenderKeys sender;
 
     std::optional<std::string> body_seen_from_handler;
-    auto sub = c->subscribe([&](const Change& ch) {
-        if (ch.type == ChangeType::new_message)
-            body_seen_from_handler = c->message(*ch.message_id)->body;
-    });
+    auto sub = c->subscribe({.message_added = [&](const ConversationId&, const Message& m) {
+        body_seen_from_handler = c->message(m.id)->body;
+    }});
 
     deliver(*c, sender, "readable already", from_epoch_ms(1000), "h1");
     CHECK(body_seen_from_handler == "readable already");
@@ -785,22 +886,24 @@ TEST_CASE("Client: multiple independent subscribers each get every change", "[cl
     SenderKeys sender;
 
     int a = 0, b = 0;
-    auto sub_a = c->subscribe([&](const Change&) { a++; });
+    auto sub_a =
+            c->subscribe({.message_added = [&](const ConversationId&, const Message&) { a++; }});
     {
-        auto sub_b = c->subscribe([&](const Change&) { b++; });
+        auto sub_b = c->subscribe(
+                {.message_added = [&](const ConversationId&, const Message&) { b++; }});
         deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
-        CHECK(a == 3);
-        CHECK(b == 3);
+        CHECK(a == 1);
+        CHECK(b == 1);
     }
 
     // sub_b is out of scope: dropping the handle unsubscribes.
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
-    CHECK(a == 5);
-    CHECK(b == 3);
+    CHECK(a == 2);
+    CHECK(b == 1);
 
     sub_a.reset();
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
-    CHECK(a == 5);
+    CHECK(a == 2);
 }
 
 TEST_CASE("Client: a subscription may be moved and outlive its Client", "[client][signals]") {
@@ -812,14 +915,15 @@ TEST_CASE("Client: a subscription may be moved and outlive its Client", "[client
         TempClient c;
         SenderKeys sender;
 
-        auto sub = c->subscribe([&](const Change&) { count++; });
+        auto sub = c->subscribe(
+                {.message_added = [&](const ConversationId&, const Message&) { count++; }});
         CHECK(static_cast<bool>(sub));
 
         moved = std::move(sub);
         CHECK(static_cast<bool>(moved));
 
         deliver(*c, sender, "hi", from_epoch_ms(1000), "h1");
-        CHECK(count == 3);
+        CHECK(count == 1);
     }
 
     // Destroying `moved` after the Client is gone must not touch freed memory.
@@ -832,11 +936,14 @@ TEST_CASE("Client: a throwing handler does not break the others", "[client][sign
     SenderKeys sender;
 
     int after = 0;
-    auto bad = c->subscribe([](const Change&) { throw std::runtime_error{"deliberate"}; });
-    auto good = c->subscribe([&](const Change&) { after++; });
+    auto bad = c->subscribe({.message_added = [](const ConversationId&, const Message&) {
+        throw std::runtime_error{"deliberate"};
+    }});
+    auto good = c->subscribe(
+            {.message_added = [&](const ConversationId&, const Message&) { after++; }});
 
     CHECK_NOTHROW(deliver(*c, sender, "still fine", from_epoch_ms(1000), "h1"));
-    CHECK(after == 3);
+    CHECK(after == 1);
     CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
 }
 
@@ -856,19 +963,107 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
 
-    std::vector<Change> changes;
-    auto sub = c->subscribe([&](const Change& ch) { changes.push_back(ch); });
+    Recorder r;
+    auto sub = c->subscribe(r.handlers());
 
     auto id = c->send_message(ConversationId::dm(peer), "hello");
-    changes.clear();
+    sync(*c);
+    r.order.clear();
+    r.msg_updated.clear();
 
     REQUIRE(finish_store);
     finish_store(true);
 
-    REQUIRE(changes.size() == 1);
-    CHECK(changes[0].type == ChangeType::message_updated);
-    CHECK(changes[0].message_id == id);
-    CHECK(c->message(id)->send_state == SendState::sent);
+    CHECK(r.order == std::vector<std::string>{"message_updated"});
+    REQUIRE(r.msg_updated.size() == 1);
+    CHECK(r.msg_updated[0].second.id == id);
+    CHECK(r.msg_updated[0].second.send_state == SendState::sent);
+}
+
+TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
+    TempClient c;
+    SenderKeys a, b, d;
+
+    // Three conversations, most recent first: d, b, a.
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    deliver(*c, d, "third", from_epoch_ms(3000), "h3");
+    sync(*c);
+
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+    auto idd = ConversationId::dm(d.session_id);
+
+    auto ids = [&] {
+        std::vector<ConversationId> out;
+        for (const auto& convo : c->conversations())
+            out.push_back(convo.id);
+        return out;
+    };
+    CHECK(ids() == std::vector{idd, idb, ida});
+
+    // Higher priority sorts first, regardless of recency.
+    c->set_priority(ida, 1);
+    CHECK(ids() == std::vector{ida, idd, idb});
+    CHECK(c->conversation(ida)->priority == 1);
+
+    // A bigger number outranks a smaller one.
+    c->set_priority(idb, 5);
+    CHECK(ids() == std::vector{idb, ida, idd});
+
+    // Equal priorities form a block that sorts among itself by recency: b is pinned alongside a but
+    // is the more recently active of the two, so it leads.  d stays below both, unpinned.
+    c->set_priority(ida, 5);
+    CHECK(ids() == std::vector{idb, ida, idd});
+
+    // Negative is hidden: gone from the list entirely rather than sorted last.
+    c->set_priority(idb, -1);
+    CHECK(ids() == std::vector{ida, idd});
+
+    // Still reachable by name, though: hidden is a statement about the list, and this is the only
+    // way back to one.
+    REQUIRE(c->conversation(idb).has_value());
+    CHECK(c->conversation(idb)->priority == -1);
+
+    // ...and unhiding brings it back where its priority says.
+    c->set_priority(idb, 0);
+    CHECK(ids() == std::vector{ida, idd, idb});
+}
+
+TEST_CASE("Client: a priority change replaces the whole list", "[client][signals]") {
+    TempClient c;
+    SenderKeys a, b;
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    Recorder r;
+    auto sub = c->subscribe(r.handlers());
+
+    c->set_priority(ConversationId::dm(a.session_id), 3);
+
+    // Reported as a replacement, not as an update to the one conversation whose priority changed:
+    // what moved is the list.
+    CHECK(r.order == std::vector<std::string>{"replaced"});
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.replaced[0].size() == 2);
+    CHECK(r.replaced[0][0].id == ConversationId::dm(a.session_id));
+    CHECK(r.replaced[0][0].priority == 3);
+
+    // Hiding removes it from the replacement list, which is how a subscriber learns it is gone.
+    r.order.clear();
+    r.replaced.clear();
+    c->set_priority(ConversationId::dm(a.session_id), -1);
+    CHECK(r.order == std::vector<std::string>{"replaced"});
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.replaced[0].size() == 1);
+    CHECK(r.replaced[0][0].id == ConversationId::dm(b.session_id));
+
+    // Setting the same value again changes nothing, so it says nothing.
+    r.order.clear();
+    c->set_priority(ConversationId::dm(a.session_id), -1);
+    CHECK(r.order.empty());
 }
 
 // ── Core interoperability ───────────────────────────────────────────────────────────────────────

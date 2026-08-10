@@ -4,6 +4,7 @@
 #include <optional>
 #include <session/client/conversation_id.hpp>
 #include <session/client/signals.hpp>
+#include <session/client/types.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
 #include <session/util.hpp>
@@ -28,7 +29,10 @@
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::sqlite::argon2id_password{"correct horse battery staple"}};
 ///
-///     auto sub = client.subscribe([&](const auto& change) { redraw(change.conversation); });
+///     auto sub = client.subscribe({
+///         .conversation_updated = [&](const auto& convo) { redraw(convo); },
+///         .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
+///     });
 ///
 ///     for (const auto& convo : client.conversations())
 ///         std::cout << convo.name_or_id() << ": " << convo.unread << " unread\n";
@@ -36,98 +40,13 @@
 /// Client shares Core's database — the same file and the same connection pool, not a second
 /// database — so a write from a Client handler joins whatever transaction Core already has open on
 /// that thread.
+namespace oxen::quic {
+class JobQueue;
+}
+
 namespace session::client {
 
 using namespace std::literals;
-
-/// Delivery state of an outgoing message.  Incoming messages have no send state.
-enum class SendState : int {
-    /// Queued locally; Core has not yet been able to dispatch it (typically waiting on a PFS key
-    /// fetch for the recipient).
-    pending = 0,
-
-    /// Handed to the swarm; awaiting confirmation.
-    sending = 1,
-
-    /// Accepted by a swarm node.
-    sent = 2,
-
-    /// Terminal failure: the swarm rejected it, there was no network, or encryption failed.
-    failed = 3,
-
-    /// The application exited while this send was in flight, so its outcome is unknown — it may or
-    /// may not have reached the swarm.  Set at startup for anything left in pending or sending,
-    /// because Core's in-flight send queue does not survive a restart.
-    interrupted = 4,
-};
-
-/// A position in a conversation's message history, used to page backwards.  Ordering is by
-/// timestamp then message id, so this is a stable cursor even when several messages share a
-/// timestamp.
-struct MessageCursor {
-    sys_ms timestamp;
-    int64_t id;
-    std::strong_ordering operator<=>(const MessageCursor&) const = default;
-};
-
-struct Message {
-    /// Client-assigned, database-local message id.  Stable for the life of the message; not the
-    /// swarm hash and not Core's send id.
-    int64_t id;
-
-    ConversationId conversation;
-
-    /// 0x05-prefixed session ID of the sender; our own account ID for outgoing messages.
-    b33 sender;
-
-    bool outgoing;
-
-    /// The message's authenticated timestamp (the Content `sigTimestamp`), which is what history
-    /// is ordered by — not the swarm's upload time.
-    sys_ms timestamp;
-
-    /// The message body.  Empty for a message that carries no text (e.g. attachments only).
-    std::string body;
-
-    /// Set for outgoing messages only.
-    std::optional<SendState> send_state;
-
-    /// Swarm-assigned hash; unset for an outgoing message that has not been stored yet.
-    std::optional<std::string> hash;
-
-    MessageCursor cursor() const { return {timestamp, id}; }
-};
-
-struct Conversation {
-    ConversationId id;
-
-    /// Best known display name, or empty if none is known yet.  For DMs this currently comes from
-    /// the `LokiProfile` attached to received messages; once Core carries the Contacts config it
-    /// will prefer the contact's name.  Empty is normal and expected — the caller decides how to
-    /// render an unnamed conversation.
-    std::string display_name;
-
-    /// Body of the most recent message, for a conversation-list preview.  Empty if the
-    /// conversation has no messages or the latest carries no text.
-    std::string last_message;
-
-    /// Timestamp of the most recent message, or the conversation's creation time if it has none.
-    sys_ms last_activity;
-
-    /// Count of incoming messages newer than the read watermark.
-    int unread = 0;
-
-    /// True for the conversation with our own account — Session's "Note to Self".  It is an
-    /// ordinary DM rather than a kind of its own, so this is the only thing distinguishing it, and
-    /// it is reported here so that displaying it differently does not require the caller to know
-    /// our session ID or to compare it themselves.  What to call it is still the caller's
-    /// decision: `display_name` is whatever our own profile says, not a localised label.
-    bool note_to_self = false;
-
-    /// The display name if known, otherwise the conversation's string id — a reasonable default
-    /// for a caller that has no better fallback of its own.
-    std::string name_or_id() const { return display_name.empty() ? id.to_string() : display_name; }
-};
 
 class Client {
   public:
@@ -151,10 +70,6 @@ class Client {
                  std::forward<Opts>(opts)...} {
         _init();
     }
-
-    /// The account state this Client is built on: keys, device group, configs, polling.  A
-    /// Client-based application uses this for everything below the conversation layer.
-    core::Core core;
 
     // -- Conversations and messages ---------------------------------------------------------------
     //
@@ -211,6 +126,16 @@ class Client {
     void mark_read(const ConversationId& id, std::function<void()> cb);
     void mark_read(const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb);
 
+    /// Sets a conversation's pinning: 0 unpinned, positive pinned with higher values first,
+    /// negative hidden.  The value is the one the Contacts and UserGroups configs carry, so this is
+    /// also where a config update from another device lands once that reconciliation exists.
+    ///
+    /// Reported to subscribers as `conversation_list_replaced`, not as an update to the one
+    /// conversation, because hiding removes a conversation from the list and unhiding returns it —
+    /// so what changed is the list, not a row in it.
+    void set_priority(const ConversationId& id, int priority);
+    void set_priority(const ConversationId& id, int priority, std::function<void()> cb);
+
     /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
     /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
     /// not repeated.
@@ -245,22 +170,27 @@ class Client {
 
     // -- Change notification ------------------------------------------------------------------
 
-    /// Registers a handler to be called whenever stored state changes, and returns an RAII handle
-    /// that keeps the registration alive.  Any number of handlers may be registered
-    /// independently; each gets every change.
+    /// Registers a set of change handlers and returns an RAII handle that keeps the registration
+    /// alive.  Any number of subscribers may be registered independently; each gets every change.
     ///
-    /// Handlers must not throw — an escaping exception is caught and logged, exactly as Core does
-    /// with its own callbacks, because there is nothing useful a data model can do about a broken
-    /// listener.
+    /// Every handler is given the new state outright, so an application maintains its display from
+    /// these alone and never reads anything back to draw a frame.  See `callbacks` for what each
+    /// one reports and for the threading rules.
     ///
-    /// Handlers fire on whichever thread produced the change: the caller's thread for a change it
-    /// made itself (send_message, mark_read), and Core's polling thread for received messages.  An
-    /// application with its own event loop should marshal onto it rather than touching UI state
-    /// directly.
+    /// **Subscribe before taking the initial list, not after.**  The correct startup is:
     ///
-    /// The change is always emitted *after* the state is committed, so a handler that reads back
+    ///     auto sub = client.subscribe(std::move(cbs));   // 1. queue what arrives
+    ///     auto convos = client.conversations();          // 2. install as the starting point
+    ///                                                    // 3. apply the queued changes in order
+    ///
+    /// Anything arriving between 1 and 2 is then applied on top of the snapshot and lands on the
+    /// right answer, because each handler carries the whole of the new state rather than a delta,
+    /// so applying one twice changes nothing.  Taking the list first and subscribing afterwards
+    /// loses whatever happened in between, silently and permanently.
+    ///
+    /// Changes are emitted *after* the state is committed, so a handler that does read back
     /// through the Client sees the new state.
-    [[nodiscard]] Subscription subscribe(std::function<void(const Change&)> handler);
+    [[nodiscard]] Subscription subscribe(callbacks cbs);
 
   private:
     // Declared before `core` so that they are constructed before it and destroyed after it: Core's
@@ -283,6 +213,7 @@ class Client {
     std::optional<Conversation> _conversation(const ConversationId& id);
     Conversation _create_conversation(const ConversationId& id);
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
+    void _set_priority(const ConversationId& id, int priority);
     std::vector<Message> _messages(
             const ConversationId& id, int limit, std::optional<MessageCursor> before);
     std::optional<Message> _message(int64_t id);
@@ -300,7 +231,49 @@ class Client {
     void _on_send_status(int64_t core_id, core::MessageSendStatus status);
     void _apply_send_status(int64_t client_id, core::MessageSendStatus status);
 
-    void _emit(const Change& change);
+    // Invokes `pick(handlers)` on each subscriber, calling the result if it is set.  Snapshotting
+    // the subscriber list first, because a handler may subscribe or unsubscribe from inside itself.
+    void _emit(const std::function<void(const callbacks&)>& invoke);
+
+    void _emit_conversation_added(const ConversationId& id);
+    void _emit_list_replaced();
+    void _emit_message(bool added, const ConversationId& id, int64_t message_id);
+
+    // Conversations whose settled state still has to be reported.  A conversation is marked here
+    // rather than reported immediately so that a poll delivering fifty messages to one conversation
+    // reports it once; `_flush_pending` is scheduled on the loop and runs when the work that
+    // dirtied them is finished.
+    std::vector<ConversationId> _dirty;
+    bool _flush_scheduled = false;
+    void _touch(const ConversationId& id);
+    void _flush_pending();
+
+  public:
+    /// The account state this Client is built on: keys, device group, configs, polling.  A
+    /// Client-based application uses this for everything below the conversation layer.
+    ///
+    /// Declared last, which is load-bearing rather than stylistic: members are destroyed in reverse
+    /// declaration order, so this is destroyed *first*.  Core's callbacks and loop jobs capture
+    /// `this` and reach the members above -- the signal registry, the send-id map, the pending
+    /// flush -- and Core's polling thread can be part-way through delivering one when a Client is
+    /// destroyed.  `quic::Loop::~Loop()` joins that thread, so once this member is gone no callback
+    /// can fire, and everything destroyed after it is unreachable by definition.
+    ///
+    /// Put anything a Core callback touches *above* this, never below.
+    core::Core core;
+
+  private:
+    // Client's own queue on Core's loop, rather than the loop's shared one, so that work deferred
+    // here is *cancelled* if the Client is destroyed with it still outstanding.  Running it instead
+    // would mean reporting a change to the subscribers of a Client that is going away, against a
+    // Core whose database is already being torn down.
+    //
+    // Declared after `core` -- the one thing that belongs below it -- because a JobQueue needs its
+    // loop alive in order to stop, so it has to be destroyed while Core still exists.
+    struct JobsDeleter {
+        void operator()(oxen::quic::JobQueue*) const;
+    };
+    std::unique_ptr<oxen::quic::JobQueue, JobsDeleter> _jobs;
 };
 
 }  // namespace session::client

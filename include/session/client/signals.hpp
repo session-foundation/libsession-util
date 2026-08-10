@@ -7,33 +7,51 @@
 #include <mutex>
 #include <optional>
 #include <session/client/conversation_id.hpp>
+#include <session/client/types.hpp>
+#include <vector>
 
 namespace session::client {
 
-/// What changed.  Every Change names the conversation it happened in, so a listener that only cares
-/// about one conversation can filter on that field alone without consulting the database.
-enum class ChangeType {
-    /// A message was added to the conversation.  `message_id` is set.  Fires for both received and
-    /// locally-sent messages.
-    new_message,
+/// Notifications of everything the conversation layer changes, so that an application never has to
+/// ask.  A caller sets the handlers it cares about and leaves the rest empty; an unset handler is
+/// simply not called.
+///
+/// Every handler is given the new state outright rather than an identifier to go and fetch, which
+/// is what makes a display bindable without reading anything back.  It also makes applying one
+/// twice harmless, which in turn makes startup race-free — see subscribe().
+///
+/// **Handlers run on Core's event loop**, not the caller's thread.  A handler must not block and
+/// must not throw (an escaping exception is caught and logged, and the change is not redelivered).
+/// A UI will typically copy the argument into its own queue and wake its render thread.
+///
+/// The conversation list an application maintains from these is expected to be *complete*: ordering
+/// is a comparison against every other conversation, so a partial list cannot be sorted.  Showing
+/// only part of it is fine, holding only part of it is not.
+struct callbacks {
+    /// A conversation now exists that did not before.
+    std::function<void(const Conversation&)> conversation_added;
 
-    /// An existing message changed — currently only its send state.  `message_id` is set.
-    message_updated,
+    /// A conversation's contents changed: a new or edited message, a name, an unread count, its
+    /// last activity.  Fired once with the conversation's settled state rather than once per
+    /// underlying change, so a poll that delivers fifty messages to one conversation fires this
+    /// once.
+    std::function<void(const Conversation&)> conversation_updated;
 
-    /// Conversation metadata changed: display name, unread count, last activity, draft.  Fires
-    /// alongside (after) new_message, since a new message also moves the conversation.
-    conversation_updated,
+    /// A conversation is gone and should be dropped from the list.
+    std::function<void(const ConversationId&)> conversation_removed;
 
-    /// The conversation was created.  Always followed by whatever change created it.
-    conversation_added,
-};
+    /// Priorities changed — a pin, unpin, hide or unhide — carrying the whole list in its new
+    /// order.  A replacement rather than a description of what moved, because one config update
+    /// from another device can repin, reveal and hide arbitrarily many conversations at once, and
+    /// because a replacement cannot leave the application subtly out of step the way a missed
+    /// delta would.
+    std::function<void(std::vector<Conversation>)> conversation_list_replaced;
 
-struct Change {
-    ChangeType type;
-    ConversationId conversation;
+    /// A message was added, whether received or sent from here.
+    std::function<void(const ConversationId&, const Message&)> message_added;
 
-    /// Set for new_message and message_updated; nullopt otherwise.
-    std::optional<int64_t> message_id;
+    /// An existing message changed — currently only its send state.
+    std::function<void(const ConversationId&, const Message&)> message_updated;
 };
 
 namespace detail {
@@ -47,7 +65,7 @@ namespace detail {
     struct SignalRegistry {
         std::mutex mutex;
         uint64_t next_id = 1;
-        std::map<uint64_t, std::function<void(const Change&)>> handlers;
+        std::map<uint64_t, callbacks> handlers;
     };
 }  // namespace detail
 

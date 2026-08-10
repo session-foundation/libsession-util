@@ -53,10 +53,15 @@ CREATE TABLE conversations (
     -- by the application, for the reason given there.
     count INTEGER NOT NULL DEFAULT 0,
     unread_count INTEGER NOT NULL DEFAULT 0,
+    -- Pinning, mirroring the value the Contacts and UserGroups configs sync: 0 is unpinned, a
+    -- positive value is pinned with higher values sorting first, and a negative value is hidden.
+    -- Kept numerically identical to the config so that reconciling one into the other is a copy
+    -- rather than a translation.
+    priority INTEGER NOT NULL DEFAULT 0,
     CHECK ((dm IS NOT NULL) + (closed_group IS NOT NULL) + (community IS NOT NULL) = 1)
 ) STRICT;
 
-CREATE INDEX conversations_activity ON conversations(last_activity DESC);
+CREATE INDEX conversations_order ON conversations(priority DESC, last_activity DESC);
 
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY,

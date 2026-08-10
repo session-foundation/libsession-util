@@ -231,6 +231,8 @@ core::callbacks Client::_intercept_callbacks(core::callbacks app) {
 }
 
 void Client::_init() {
+    _jobs.reset(new oxen::quic::JobQueue{core.loop()});
+
     // Core's send queue is in-memory, so anything still mid-flight when the last run ended is not
     // resumed and its outcome is unknowable.  Say so rather than guessing either way.
     auto c = core.database().conn();
@@ -245,17 +247,17 @@ void Client::_init() {
 
 // -- Change notification ----------------------------------------------------------------------
 
-Subscription Client::subscribe(std::function<void(const Change&)> handler) {
+Subscription Client::subscribe(callbacks cbs) {
     std::lock_guard lock{_signals->mutex};
     auto id = _signals->next_id++;
-    _signals->handlers.emplace(id, std::move(handler));
+    _signals->handlers.emplace(id, std::move(cbs));
     return Subscription{_signals, id};
 }
 
-void Client::_emit(const Change& change) {
+void Client::_emit(const std::function<void(const callbacks&)>& invoke) {
     // Iterate over a copy of the handler list: a handler is allowed to subscribe or unsubscribe
     // (including its own subscription) from inside the callback.
-    std::vector<std::function<void(const Change&)>> handlers;
+    std::vector<callbacks> handlers;
     {
         std::lock_guard lock{_signals->mutex};
         handlers.reserve(_signals->handlers.size());
@@ -265,10 +267,64 @@ void Client::_emit(const Change& change) {
 
     for (const auto& h : handlers) {
         try {
-            h(change);
+            invoke(h);
         } catch (const std::exception& e) {
             log::error(cat, "client change handler threw: {}", e.what());
         }
+    }
+}
+
+void Client::_emit_conversation_added(const ConversationId& id) {
+    auto convo = _conversation(id);
+    if (!convo)
+        return;
+    _emit([&](const callbacks& cbs) {
+        if (cbs.conversation_added)
+            cbs.conversation_added(*convo);
+    });
+}
+
+void Client::_emit_message(bool added, const ConversationId& id, int64_t message_id) {
+    auto msg = _message(message_id);
+    if (!msg)
+        return;
+    _emit([&](const callbacks& cbs) {
+        const auto& h = added ? cbs.message_added : cbs.message_updated;
+        if (h)
+            h(id, *msg);
+    });
+}
+
+void Client::JobsDeleter::operator()(oxen::quic::JobQueue* p) const {
+    delete p;
+}
+
+void Client::_touch(const ConversationId& id) {
+    if (std::ranges::find(_dirty, id) == _dirty.end())
+        _dirty.push_back(id);
+
+    // Deferred to the end of the loop's current turn rather than reported here: everything that
+    // dirties a conversation runs on the loop, so by the time this fires a whole received batch has
+    // been stored and the conversation has one settled state to report instead of fifty.
+    if (!_flush_scheduled) {
+        _flush_scheduled = true;
+        _jobs->call_soon([this] { _flush_pending(); });
+    }
+}
+
+void Client::_flush_pending() {
+    _flush_scheduled = false;
+    auto dirty = std::move(_dirty);
+    _dirty.clear();
+
+    for (const auto& id : dirty) {
+        auto convo = _conversation(id);
+        if (!convo)
+            continue;
+        _emit([&](const callbacks& cbs) {
+            if (cbs.conversation_updated)
+                cbs.conversation_updated(*convo);
+        });
     }
 }
 
@@ -325,6 +381,13 @@ void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
     });
 }
 
+void Client::set_priority(const ConversationId& id, int priority) {
+    core.loop().call_get([this, &id, priority] {
+        _set_priority(id, priority);
+        return 0;
+    });
+}
+
 std::vector<Message> Client::messages(
         const ConversationId& id, int limit, std::optional<MessageCursor> before) {
     return core.loop().call_get(
@@ -363,6 +426,14 @@ void Client::mark_read(
         const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb) {
     _dispatch([this, id, up_to, cb = std::move(cb)] {
         _mark_read(id, up_to);
+        if (cb)
+            cb();
+    });
+}
+
+void Client::set_priority(const ConversationId& id, int priority, std::function<void()> cb) {
+    _dispatch([this, id, priority, cb = std::move(cb)] {
+        _set_priority(id, priority);
         if (cb)
             cb();
     });
@@ -407,7 +478,7 @@ static const auto CONVO_COLUMNS = R"(
            a.display_name, c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
-           c.unread_count
+           c.unread_count, c.priority
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -421,7 +492,7 @@ static std::vector<Conversation> query_conversations(
         const std::string& query,
         const Bind&... bind) {
     std::vector<Conversation> out;
-    for (auto [convo, sid, gid, url, room, name, activity, preview, unread] :
+    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -431,14 +502,18 @@ static std::vector<Conversation> query_conversations(
                  std::optional<std::string>,
                  int64_t,
                  std::string,
+                 int,
                  int>(query, bind...))
-        out.push_back(Conversation{
-                .id = subject_to_id(convo, sid, gid, url, room),
-                .display_name = name.value_or(""),
-                .last_message = std::move(preview),
-                .last_activity = from_epoch_ms(activity),
-                .unread = unread,
-                .note_to_self = sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
+        out.push_back(
+                Conversation{
+                        .id = subject_to_id(convo, sid, gid, url, room),
+                        .display_name = name.value_or(""),
+                        .last_message = std::move(preview),
+                        .last_activity = from_epoch_ms(activity),
+                        .unread = unread,
+                        .priority = priority,
+                        .note_to_self =
+                                sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
     return out;
 }
 
@@ -454,7 +529,12 @@ std::span<const std::byte> Client::_self_or_none() {
 std::vector<Conversation> Client::_conversations() {
     auto c = core.database().conn();
     return query_conversations(
-            c, _self_or_none(), "{} ORDER BY c.last_activity DESC, c.id"_format(CONVO_COLUMNS));
+            c,
+            _self_or_none(),
+            // Hidden (negative priority) conversations are not part of the list at all; pinned ones
+            // lead it, and equal priorities form a block that sorts among itself by recency.
+            "{} WHERE c.priority >= 0 ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
+                    CONVO_COLUMNS));
 }
 
 std::optional<Conversation> Client::_conversation(const ConversationId& id) {
@@ -478,7 +558,7 @@ Conversation Client::_create_conversation(const ConversationId& id) {
         tx.commit();
     }
     if (created)
-        _emit({ChangeType::conversation_added, id, std::nullopt});
+        _emit_conversation_added(id);
     return *_conversation(id);
 }
 
@@ -523,7 +603,37 @@ void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
         tx.commit();
     }
     if (changed > 0)
-        _emit({ChangeType::conversation_updated, id, std::nullopt});
+        _touch(id);
+}
+
+void Client::_set_priority(const ConversationId& id, int priority) {
+    int changed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        // Not ensure_conversation() for one that already exists: that moves last_activity forward,
+        // and pinning is not activity -- it would reorder the very list it is being used to order.
+        auto existing = find_conversation(c, id);
+        auto convo = existing ? *existing : ensure_conversation(c, id, clock_now_ms()).id;
+
+        changed = c.prepared_exec(
+                "UPDATE conversations SET priority = ?1 WHERE id = ?2 AND priority IS NOT ?1",
+                priority,
+                convo);
+        tx.commit();
+    }
+
+    if (changed > 0)
+        _emit_list_replaced();
+}
+
+void Client::_emit_list_replaced() {
+    auto convos = _conversations();
+    _emit([&](const callbacks& cbs) {
+        if (cbs.conversation_list_replaced)
+            cbs.conversation_list_replaced(convos);
+    });
 }
 
 // -- Messages ---------------------------------------------------------------------------------
@@ -552,16 +662,17 @@ static std::vector<Message> query_messages(
                  int64_t,
                  std::string,
                  std::optional<int>>(query, bind...))
-        out.push_back(Message{
-                .id = id,
-                .conversation = convo,
-                .sender = sender,
-                .outgoing = outgoing != 0,
-                .timestamp = from_epoch_ms(ts),
-                .body = std::move(body),
-                .send_state = send_state ? std::optional{static_cast<SendState>(*send_state)}
-                                         : std::nullopt,
-                .hash = std::move(swarm_hash)});
+        out.push_back(
+                Message{.id = id,
+                        .conversation = convo,
+                        .sender = sender,
+                        .outgoing = outgoing != 0,
+                        .timestamp = from_epoch_ms(ts),
+                        .body = std::move(body),
+                        .send_state = send_state
+                                            ? std::optional{static_cast<SendState>(*send_state)}
+                                            : std::nullopt,
+                        .hash = std::move(swarm_hash)});
     return out;
 }
 
@@ -660,9 +771,9 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     }
 
     if (created)
-        _emit({ChangeType::conversation_added, id, std::nullopt});
-    _emit({ChangeType::new_message, id, client_id});
-    _emit({ChangeType::conversation_updated, id, std::nullopt});
+        _emit_conversation_added(id);
+    _emit_message(true, id, client_id);
+    _touch(id);
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
 
@@ -812,11 +923,11 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     }
 
     if (created)
-        _emit({ChangeType::conversation_added, convo_id, std::nullopt});
+        _emit_conversation_added(convo_id);
     if (inserted)
-        _emit({ChangeType::new_message, convo_id, client_id});
+        _emit_message(true, convo_id, client_id);
     if (inserted || renamed)
-        _emit({ChangeType::conversation_updated, convo_id, std::nullopt});
+        _touch(convo_id);
 }
 
 void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
@@ -856,7 +967,7 @@ void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus statu
     }
 
     if (convo)
-        _emit({ChangeType::message_updated, *convo, client_id});
+        _emit_message(false, *convo, client_id);
 }
 
 }  // namespace session::client
