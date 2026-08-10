@@ -148,7 +148,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
                     {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
                     {"sig", oxenc::to_hex(master_privkey.data)},
-                    {"account_expiry_ts", unix_ts + 90 * 24 * 3600}};
+                    {"account_expiry_ts", unix_ts + 90 * 24 * 3600},
+                    {"account_grace_period_duration", 14 * 24 * 3600},
+                    {"account_auto_renewing", true}};
             std::string json = j.dump();
 
             // Valid JSON
@@ -211,6 +213,39 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 j_no_ae["result"].erase("account_expiry_ts");
                 REQUIRE_THROWS_AS(parse_pro_proof(j_no_ae.dump()), parse_error);
 
+                // The two fields that QUALIFY account_expiry_ts: both surface through the C and
+                // C++ parses, and `E - G` recovers the paid-through instant.
+                REQUIRE(result_cpp.account_grace_period.count() == 14 * 24 * 3600);
+                REQUIRE(result_cpp.account_auto_renewing);
+                REQUIRE((*result_cpp.account_expiry - result_cpp.account_grace_period)
+                                .time_since_epoch()
+                                .count() == unix_ts + 90 * 24 * 3600 - 14 * 24 * 3600);
+                REQUIRE(result.account_grace_period_duration == 14 * 24 * 3600);
+                REQUIRE(result.account_auto_renewing);
+
+                // Required on success, exactly like account_expiry_ts: a proof that cannot be
+                // paired with the values qualifying its expiry is malformed, rather than handing
+                // the client a fresh expiry beside a defaulted grace/flag it would then persist.
+                for (const auto* key : {"account_grace_period_duration", "account_auto_renewing"}) {
+                    nlohmann::json j_missing = j;
+                    j_missing["result"].erase(key);
+                    REQUIRE_THROWS_AS(parse_pro_proof(j_missing.dump()), parse_error);
+                }
+
+                // A wrong type is malformed for the same reason: a silently defaulted flag would be
+                // written to config as an explicit false, and there a false ERASES the key.
+                nlohmann::json j_bad = j;
+                j_bad["result"]["account_auto_renewing"] = 1;  // int, not bool
+                REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), parse_error);
+
+                // The non-auto-renewing account: a genuine zero grace, and `E - 0 == E`.
+                nlohmann::json j_false = j;
+                j_false["result"]["account_grace_period_duration"] = 0;
+                j_false["result"]["account_auto_renewing"] = false;
+                auto f_cpp = parse_pro_proof(j_false.dump());
+                REQUIRE_FALSE(f_cpp.account_auto_renewing);
+                REQUIRE(f_cpp.account_grace_period.count() == 0);
+
                 // It also rides a subscription_expired failure (top-level, now-past value) so the
                 // client can refresh its cached horizon without a separate status call.
                 nlohmann::json j_exp;
@@ -222,6 +257,24 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(exp.error_code == "subscription_expired");
                 REQUIRE(exp.account_expiry.has_value());
                 REQUIRE(exp.account_expiry->time_since_epoch().count() == unix_ts - 24 * 3600);
+
+                // 🔴 The failure path leaves BOTH qualifying fields at their struct defaults, and
+                // nothing in the type says so. `not_subscribed` here, but the same holds for a
+                // protocol error or a `stale_request` -- outcomes that say nothing about the
+                // account. A caller that reads them outside the success branch gets a plain
+                // 0/false, and writing that false to the presence-only config key ERASES a flag
+                // learned from get_pro_status. Pinned so the hazard is executable, not just
+                // documented: the protection here is SCOPE, not the type.
+                {
+                    nlohmann::json j_fail;
+                    j_fail["status"] = "fail";
+                    j_fail["error_code"] = "not_subscribed";
+                    j_fail["error"] = "no";
+                    auto fail = parse_pro_proof(j_fail.dump());
+                    REQUIRE_FALSE(static_cast<bool>(fail));
+                    REQUIRE(fail.account_grace_period.count() == 0);  // default, NOT "no grace"
+                    REQUIRE_FALSE(fail.account_auto_renewing);        // default, NOT "not renewing"
+                }
 
                 // Other failures (e.g. not_subscribed) carry no horizon.
                 nlohmann::json j_ns;

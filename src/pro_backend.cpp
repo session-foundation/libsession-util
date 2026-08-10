@@ -311,6 +311,14 @@ namespace {
         // expiry, which breaks renewal, so treat a missing value as a malformed response.
         auto account_expiry_ts = json_require<int64_t>(result_obj, "account_expiry_ts");
         result.account_expiry = std::chrono::sys_seconds(std::chrono::seconds(account_expiry_ts));
+
+        // The two values that qualify `account_expiry_ts`, required for the same reason it is: a
+        // client persists all three into config together, and a fresh expiry beside a stale grace
+        // or a stale renewing flag is worse than no refresh at all -- it computes a wrong
+        // paid-through instant, and reads a renewing subscription as terminal.
+        result.account_grace_period = std::chrono::seconds(
+                json_require<int64_t>(result_obj, "account_grace_period_duration"));
+        result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");
     }
 }  // namespace
 
@@ -860,6 +868,8 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
         std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
         result.account_expiry_ts =
                 owned->account_expiry ? session::epoch_seconds(*owned->account_expiry) : 0;
+        result.account_grace_period_duration = owned->account_grace_period.count();
+        result.account_auto_renewing = owned->account_auto_renewing;
         // All C fields aliased into *owned; hand ownership to the response (freed by *_free).
         result.header.internal_ = owned.release();
     } catch (const std::exception& e) {

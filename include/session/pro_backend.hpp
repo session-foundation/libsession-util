@@ -198,6 +198,38 @@ struct GenerateProProofResponse : ResponseBase {
     /// value carried top-level on the envelope); nullopt on other outcomes (`not_subscribed`,
     /// `revoked`, protocol errors).
     std::optional<std::chrono::sys_seconds> account_expiry;
+
+    /// The grace period folded into `account_expiry` above, so a client can recover the
+    /// paid-through instant as `account_expiry - account_grace_period`. Zero whenever the
+    /// subscription is not auto-renewing, mirroring `get_pro_status`, because the backend only
+    /// folds grace in for auto-renewing payments.
+    ///
+    /// Required on a successful proof, like `account_expiry`: a response missing it can't be paired
+    /// with the expiry it qualifies, and a client that persisted the two out of step would compute
+    /// the wrong paid-through instant.
+    ///
+    /// ⚠️ **Meaningful ONLY when the response succeeded.** This is default-initialised and is filled
+    /// only on the success path, so on *every* non-OK outcome -- including a protocol error, a
+    /// `stale_request`, or a transport failure, where the account is untouched -- it reads as a
+    /// plain `0`, indistinguishable from a backend that really said "no grace". Nothing in the type
+    /// signals which you have. Read it inside the success branch or not at all; a caller that
+    /// persists this after a failed request erases a grace it had learned from `get_pro_status`.
+    std::chrono::seconds account_grace_period{0};
+
+    /// Whether the subscription behind `account_expiry` renews itself -- the same value
+    /// `get_pro_status` reports as `auto_renewing`. Advisory and UNSIGNED, like the two above.
+    ///
+    /// Required on a successful proof for the same reason as the grace period: clients persist it
+    /// into config beside the expiry, and a stale flag next to a fresh expiry reads as a terminal
+    /// subscription that is in fact renewing.
+    ///
+    /// ⚠️ **Meaningful ONLY when the response succeeded**, and this one is the more dangerous of the
+    /// two. Default-initialised and filled only on the success path, so every non-OK outcome yields
+    /// a plain `false` -- and the config key it feeds is presence-only, where writing `false`
+    /// **erases**. A caller that reads it after a protocol error or a `stale_request` therefore
+    /// destroys a renewing flag learned from `get_pro_status`, on a request that told it nothing
+    /// about the account at all. Read it inside the success branch or not at all.
+    bool account_auto_renewing{false};
 };
 
 /// Parse the reply to a generate-proof request. On success `proof` holds the issued proof; a

@@ -140,6 +140,22 @@ typedef struct session_pro_backend_pro_proof_response {
     /// proof-validity window). Populated on a successful proof and on a `subscription_expired`
     /// failure (a now-past value); 0 on `not_subscribed` / `revoked` / protocol errors.
     int64_t account_expiry_ts;
+    /// The grace period (seconds) folded into `account_expiry_ts`, so the paid-through instant is
+    /// `account_expiry_ts - account_grace_period_duration`. 0 when the subscription is not
+    /// auto-renewing.
+    ///
+    /// ⚠️ MEANINGFUL ONLY WHEN `header.status` IS OK. Filled only on the success path, so every
+    /// non-OK outcome -- protocol error, `stale_request`, transport failure, where the account is
+    /// untouched -- yields a plain 0 that is indistinguishable from "no grace". Nothing in the
+    /// struct signals which you have. Read it inside the success branch or not at all.
+    int64_t account_grace_period_duration;
+    /// Whether the subscription behind `account_expiry_ts` renews itself.
+    ///
+    /// ⚠️ MEANINGFUL ONLY WHEN `header.status` IS OK, and this one is the more dangerous of the two:
+    /// every non-OK outcome yields a plain false, and the config key it feeds is presence-only,
+    /// where writing false ERASES. Reading it after a failed request destroys a renewing flag
+    /// learned from `get_pro_status`, on a response that said nothing about the account.
+    bool account_auto_renewing;
 } session_pro_backend_pro_proof_response;
 
 /// API: session_pro_backend/pro_proof_response_free
