@@ -714,14 +714,20 @@ void SnodePool::_on_refresh_complete(
                  use_direct_fetcher,
                  total_requests] {
         // Throw away everything we received and start the requests again after a backoff
-        auto discard_and_retry = [this,
+        auto discard_and_retry = [weak_self = weak_from_this(),
                                   refresh_id,
                                   refreshing_from_seed_nodes,
                                   use_direct_fetcher,
                                   total_requests](std::string_view reason) {
-            _snode_refresh_results.clear();
-            _snode_cache_refresh_failure_count++;
-            auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
+            auto self = weak_self.lock();
+
+            if (!self)
+                return;
+
+            self->_snode_refresh_results.clear();
+            self->_snode_cache_refresh_failure_count++;
+            auto delay =
+                    self->_config.retry_delay.exponential(self->_snode_cache_refresh_failure_count);
 
             log::error(
                     cat,
@@ -729,9 +735,9 @@ void SnodePool::_on_refresh_complete(
                     refresh_id,
                     delay.count(),
                     reason);
-            _loop->call_later(
+            self->_loop->call_later(
                     delay,
-                    [weak_self = weak_from_this(),
+                    [weak_self,
                      refresh_id,
                      refreshing_from_seed_nodes,
                      use_direct_fetcher,
