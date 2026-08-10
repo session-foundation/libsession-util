@@ -702,6 +702,18 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
           std::chrono::sys_seconds{5000s});
 
+    // Clearing `E` clears the renewing flag with it, for the same reason it clears `G`: `A`
+    // describes the subscription `E` denotes, and a renewing flag with no expiry beside it
+    // describes a subscription that is not there. Pinned because the alternative -- every consumer
+    // testing `E` before reading `A` -- is a convention nothing enforces.
+    profile.set_pro_auto_renewing(true);
+    profile.set_pro_access_expiry(std::chrono::sys_seconds{9000s});
+    CHECK(profile.get_pro_auto_renewing());
+    profile.set_pro_access_expiry(std::nullopt);
+    CHECK_FALSE(profile.get_pro_auto_renewing());
+    CHECK(profile.get_pro_grace_period() == 0s);
+    CHECK_FALSE(profile.get_pro_access_expiry().has_value());
+
     // Clearing `E` also clears `G`: the pair is only meaningful as `E - G`, so a `G` that outlived
     // its `E` would silently pair with the NEXT `E` write -- and that write is typically a proof
     // outcome, which carries no grace to correct it with. Enforced in the setter, not at call

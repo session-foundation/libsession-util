@@ -236,6 +236,17 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         // case (the proof-outcome clears), and a rule spread across every call site is one a new
         // call site inherits wrongly.
         data["G"].erase();
+        // `A` describes the subscription `E` denotes, so the same argument applies: a renewing flag
+        // with no expiry beside it describes a subscription that is not there.  Every caller that
+        // clears `E` is handling an account with no entitlement -- a proof cleared, a proof
+        // revoked, or a non-positive `expiry_ts` -- and none of those is auto-renewing, so there is
+        // no state in which the flag should survive its expiry.
+        //
+        // Without this the three keys are only coherent because every *consumer* happens to test
+        // `E` before reading `A`.  That is true today on all three clients and it is not a property
+        // anything enforces; making the write side maintain the invariant is what stops the next
+        // consumer inheriting the obligation without knowing it has one.
+        data["A"].erase();
     }
 
     // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
