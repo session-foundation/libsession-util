@@ -68,7 +68,41 @@ class TestSnodePool : public SnodePool {
     // Called from the test thread, so this also covers `_update_cache` being entered from off the
     // loop thread
     void update_cache(std::vector<service_node> nodes) { _update_cache("test", std::move(nodes)); }
+
+    void debug_on_refresh_complete(std::vector<std::vector<std::byte>> raw_results) {
+        auto total_requests = static_cast<uint8_t>(raw_results.size());
+        _loop->call_get([&] {
+            _on_refresh_complete("test", std::move(raw_results), false, true, total_requests);
+        });
+    }
 };
+
+// Encodes nodes the way the storage server returns them, so they can be fed to
+// `_on_refresh_complete`: 51 bytes per node, all multi-byte fields big-endian
+std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes) {
+    std::vector<std::byte> result;
+    result.reserve(nodes.size() * 51);
+
+    auto append = [&result](uint64_t value, size_t bytes) {
+        for (size_t i = bytes; i-- > 0;)
+            result.push_back(static_cast<std::byte>((value >> (i * 8)) & 0xff));
+    };
+
+    for (const auto& node : nodes) {
+        for (auto byte : node.view_remote_key())
+            result.push_back(static_cast<std::byte>(byte));
+
+        append(node.swarm_id, 8);
+        append(node.ip.addr, 4);
+        append(node.https_port, 2);
+        append(node.omq_port, 2);
+
+        for (auto part : node.storage_server_version)
+            append(part, 1);
+    }
+
+    return result;
+}
 }  // namespace session::network
 
 TEST_CASE("Network", "[network][get_unused_nodes]") {
@@ -248,4 +282,57 @@ TEST_CASE("Network", "[network][update_cache]") {
     // Should have stored the nodes by the time it returns
     snode_pool->update_cache(snode_cache);
     CHECK(snode_pool->size() == snode_cache.size());
+}
+
+TEST_CASE("Network", "[network][refresh_min_cache_size]") {
+    session::network::config::SnodePool pool_config = {
+            std::nullopt,
+            std::nullopt,
+            std::chrono::minutes{5},
+            std::chrono::minutes{5},
+            false,  // enforce_subnet_diversity
+            network::opt::retry_delay{50ms, 200ms},
+            opt::netid::Target::testnet,
+            {},
+            12,  // cache_min_size
+            0,
+            0,
+            3,  // cache_node_strike_threshold
+            false};
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    std::vector<service_node> snode_cache;
+
+    for (uint16_t i = 0; i < 20; ++i)
+        snode_cache.emplace_back(service_node{
+                ed25519_pubkey::from_bytes(ed_pk),
+                oxen::quic::ipv4{"192.168.0.{}"_format(i)},
+                static_cast<uint16_t>(20000 + i),
+                static_cast<uint16_t>(30000 + i),
+                {2, 11, 0},
+                0});
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    snode_pool->reset_state_with_cache(snode_cache);
+    REQUIRE(snode_pool->size() == 20);
+
+    // The encoding needs to round-trip or the rest of this test proves nothing
+    REQUIRE(service_node::process_snode_cache_bin(to_snode_cache_bin(snode_cache)).first ==
+            snode_cache);
+
+    // A refresh returning fewer than `cache_min_size` nodes should be discarded rather than
+    // replacing the perfectly good cache we already have
+    std::vector<service_node> too_few(snode_cache.begin(), snode_cache.begin() + 11);
+    snode_pool->debug_on_refresh_complete({to_snode_cache_bin(too_few)});
+    CHECK(snode_pool->size() == 20);
+
+    // ... and an empty refresh likewise
+    snode_pool->debug_on_refresh_complete({{}});
+    CHECK(snode_pool->size() == 20);
+
+    // A refresh with enough nodes should still replace it
+    std::vector<service_node> enough(snode_cache.begin(), snode_cache.begin() + 12);
+    snode_pool->debug_on_refresh_complete({to_snode_cache_bin(enough)});
+    CHECK(snode_pool->size() == 12);
 }
