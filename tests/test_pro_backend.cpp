@@ -211,7 +211,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Required on success: a proof response missing it is treated as malformed.
                 nlohmann::json j_no_ae = j;
                 j_no_ae["result"].erase("account_expiry_ts");
-                REQUIRE_THROWS_AS(parse_pro_proof(j_no_ae.dump()), parse_error);
+                REQUIRE_THROWS_AS(parse_pro_proof(j_no_ae.dump()), session::parse_error_missing);
 
                 // The two fields that QUALIFY account_expiry_ts: both surface through the C and
                 // C++ parses, and `E + G` is the instant coverage ends.
@@ -229,14 +229,15 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 for (const auto* key : {"account_grace_period_duration", "account_auto_renewing"}) {
                     nlohmann::json j_missing = j;
                     j_missing["result"].erase(key);
-                    REQUIRE_THROWS_AS(parse_pro_proof(j_missing.dump()), parse_error);
+                    REQUIRE_THROWS_AS(
+                            parse_pro_proof(j_missing.dump()), session::parse_error_missing);
                 }
 
                 // A wrong type is malformed for the same reason: a silently defaulted flag would be
                 // written to config as an explicit false, and there a false ERASES the key.
                 nlohmann::json j_bad = j;
                 j_bad["result"]["account_auto_renewing"] = 1;  // int, not bool
-                REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), parse_error);
+                REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), session::parse_error_type);
 
                 // The non-auto-renewing account: a genuine zero grace, and `E - 0 == E`.
                 nlohmann::json j_false = j;

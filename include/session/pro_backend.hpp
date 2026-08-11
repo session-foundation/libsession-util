@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <optional>
+#include <session/parse_error.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
@@ -61,14 +62,6 @@
 namespace session::pro_backend {
 
 using namespace oxenc::literals;
-
-/// Thrown by the parse_* functions when the backend's reply cannot be understood: malformed JSON, a
-/// missing or wrong-typed field, an unrecognized envelope status, or bad hex. This is distinct from
-/// a well-formed backend *failure* (envelope status "fail"/"error" carrying an error_code), which
-/// is not an error to the parser -- it is returned normally with `status`/`error_code` populated.
-struct parse_error : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
 
 /// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
 /// checking its signature against this key (see ProProof::verify_signature). This is the current
