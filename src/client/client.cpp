@@ -247,30 +247,11 @@ void Client::_init() {
 
 // -- Change notification ----------------------------------------------------------------------
 
-Subscription Client::subscribe(callbacks cbs) {
-    std::lock_guard lock{_signals->mutex};
-    auto id = _signals->next_id++;
-    _signals->handlers.emplace(id, std::move(cbs));
-    return Subscription{_signals, id};
-}
-
 void Client::_emit(const std::function<void(const callbacks&)>& invoke) {
-    // Iterate over a copy of the handler list: a handler is allowed to subscribe or unsubscribe
-    // (including its own subscription) from inside the callback.
-    std::vector<callbacks> handlers;
-    {
-        std::lock_guard lock{_signals->mutex};
-        handlers.reserve(_signals->handlers.size());
-        for (const auto& [id, h] : _signals->handlers)
-            handlers.push_back(h);
-    }
-
-    for (const auto& h : handlers) {
-        try {
-            invoke(h);
-        } catch (const std::exception& e) {
-            log::error(cat, "client change handler threw: {}", e.what());
-        }
+    try {
+        invoke(_cbs);
+    } catch (const std::exception& e) {
+        log::error(cat, "client change handler threw: {}", e.what());
     }
 }
 

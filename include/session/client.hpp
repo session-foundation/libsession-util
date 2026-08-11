@@ -29,10 +29,12 @@
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::sqlite::argon2id_password{"correct horse battery staple"}};
 ///
-///     auto sub = client.subscribe({
-///         .conversation_updated = [&](const auto& convo) { redraw(convo); },
-///         .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
-///     });
+///     session::client::Client client{
+///         std::filesystem::path{"/path/to/session.db"},
+///         session::client::callbacks{
+///             .conversation_updated = [&](const auto& convo) { redraw(convo); },
+///             .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
+///         }};
 ///
 ///     for (const auto& convo : client.conversations())
 ///         std::cout << convo.name_or_id() << ": " << convo.unread << " unread\n";
@@ -57,9 +59,17 @@ class Client {
     /// Client handles those to maintain its own tables and then invokes the application's handler
     /// for the same event, if one was supplied, so passing `core::callbacks` here still works as
     /// it does for a bare Core.  Applications building on Client should not need either of them —
-    /// subscribe() reports what changed in terms of conversations instead.
+    /// `client::callbacks` reports what changed in terms of conversations instead.
     template <core::CoreOption... Opts>
     explicit Client(std::filesystem::path db_path, Opts&&... opts) :
+            Client{std::move(db_path), callbacks{}, std::forward<Opts>(opts)...} {}
+
+    /// As above, additionally taking the change notifications to deliver.  They are fixed for the
+    /// life of the Client, exactly as core::callbacks are, and are the only way an application is
+    /// told anything -- see `callbacks`, and read the startup ordering note there before using it.
+    template <core::CoreOption... Opts>
+    explicit Client(std::filesystem::path db_path, callbacks cbs, Opts&&... opts) :
+            _cbs{std::move(cbs)},
             core{std::move(db_path),
                  // Must precede any caller-supplied callbacks: Core takes the first instance in
                  // the pack, so ours (which chains to theirs) has to be found first.
@@ -169,33 +179,21 @@ class Client {
             const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb);
 
     // -- Change notification ------------------------------------------------------------------
-
-    /// Registers a set of change handlers and returns an RAII handle that keeps the registration
-    /// alive.  Any number of subscribers may be registered independently; each gets every change.
-    ///
-    /// Every handler is given the new state outright, so an application maintains its display from
-    /// these alone and never reads anything back to draw a frame.  See `callbacks` for what each
-    /// one reports and for the threading rules.
-    ///
-    /// **Subscribe before taking the initial list, not after.**  The correct startup is:
-    ///
-    ///     auto sub = client.subscribe(std::move(cbs));   // 1. queue what arrives
-    ///     auto convos = client.conversations();          // 2. install as the starting point
-    ///                                                    // 3. apply the queued changes in order
-    ///
-    /// Anything arriving between 1 and 2 is then applied on top of the snapshot and lands on the
-    /// right answer, because each handler carries the whole of the new state rather than a delta,
-    /// so applying one twice changes nothing.  Taking the list first and subscribing afterwards
-    /// loses whatever happened in between, silently and permanently.
-    ///
-    /// Changes are emitted *after* the state is committed, so a handler that does read back
-    /// through the Client sees the new state.
-    [[nodiscard]] Subscription subscribe(callbacks cbs);
+    //
+    // Handlers are given at construction; there is no way to add or remove one afterwards.  See
+    // `callbacks` for what each reports, and note in particular that the initial conversation list
+    // must be taken *after* construction, never gathered before it:
+    //
+    //     Client client{path, std::move(cbs)};    // 1. notifications start here
+    //     auto convos = client.conversations();   // 2. install as the starting point
+    //
+    // Anything arriving between 1 and 2 is applied on top of the snapshot and lands on the right
+    // answer, because each handler carries the whole of the new state rather than a delta, so
+    // applying one twice changes nothing.
 
   private:
-    // Declared before `core` so that they are constructed before it and destroyed after it: Core's
-    // callbacks capture `this` and may fire for as long as Core is alive.
-    std::shared_ptr<detail::SignalRegistry> _signals = std::make_shared<detail::SignalRegistry>();
+    // Declared above `core`, which is declared last: see the note there.
+    callbacks _cbs;
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.
@@ -231,8 +229,8 @@ class Client {
     void _on_send_status(int64_t core_id, core::MessageSendStatus status);
     void _apply_send_status(int64_t client_id, core::MessageSendStatus status);
 
-    // Invokes `pick(handlers)` on each subscriber, calling the result if it is set.  Snapshotting
-    // the subscriber list first, because a handler may subscribe or unsubscribe from inside itself.
+    // Runs `invoke` against the application's handlers, swallowing and logging anything it throws:
+    // a broken listener is not something a data model can do anything about.
     void _emit(const std::function<void(const callbacks&)>& invoke);
 
     void _emit_conversation_added(const ConversationId& id);

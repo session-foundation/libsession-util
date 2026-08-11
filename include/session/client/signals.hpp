@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cstdint>
 #include <functional>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <session/client/conversation_id.hpp>
 #include <session/client/types.hpp>
@@ -18,7 +14,12 @@ namespace session::client {
 ///
 /// Every handler is given the new state outright rather than an identifier to go and fetch, which
 /// is what makes a display bindable without reading anything back.  It also makes applying one
-/// twice harmless, which in turn makes startup race-free — see subscribe().
+/// twice harmless, which in turn makes startup race-free — see the Client constructor.
+///
+/// Handed to Client at construction and fixed thereafter, exactly as core::callbacks is.  There is
+/// deliberately no way to register a second set: a process that wants to fan these out to somewhere
+/// else — a notification daemon, a log — does that fanning out itself, which it has to anyway once
+/// the other end is a separate process.
 ///
 /// **Handlers run on Core's event loop**, not the caller's thread.  A handler must not block and
 /// must not throw (an escaping exception is caught and logged, and the change is not redelivered).
@@ -52,49 +53,6 @@ struct callbacks {
 
     /// An existing message changed — currently only its send state.
     std::function<void(const ConversationId&, const Message&)> message_updated;
-};
-
-namespace detail {
-    /// Shared registry of change listeners.  Held by shared_ptr so that a Subscription outliving
-    /// its Client unsubscribes harmlessly instead of writing through a dangling pointer.
-    ///
-    /// Guarded by a mutex because these are the one part of Client not confined to the event loop:
-    /// changes are emitted from the loop thread, while subscribing and unsubscribing happen
-    /// wherever the application does them -- including a Subscription destructor running on a UI
-    /// thread.
-    struct SignalRegistry {
-        std::mutex mutex;
-        uint64_t next_id = 1;
-        std::map<uint64_t, callbacks> handlers;
-    };
-}  // namespace detail
-
-/// RAII handle for a change subscription: the handler stays registered for as long as this object
-/// is alive.  Discarding it immediately unsubscribes, hence the [[nodiscard]] on subscribe().
-///
-/// Movable, not copyable.  Destroying it after the Client is destroyed is safe.
-class Subscription {
-  public:
-    Subscription() = default;
-    Subscription(Subscription&& other) noexcept { *this = std::move(other); }
-    Subscription& operator=(Subscription&& other) noexcept;
-    Subscription(const Subscription&) = delete;
-    Subscription& operator=(const Subscription&) = delete;
-    ~Subscription() { reset(); }
-
-    /// Unsubscribes now rather than at destruction.  Idempotent.
-    void reset();
-
-    /// True if this handle currently refers to a live subscription.
-    explicit operator bool() const { return _id != 0 && !_registry.expired(); }
-
-  private:
-    friend class Client;
-    Subscription(std::weak_ptr<detail::SignalRegistry> reg, uint64_t id) :
-            _registry{std::move(reg)}, _id{id} {}
-
-    std::weak_ptr<detail::SignalRegistry> _registry;
-    uint64_t _id = 0;
 };
 
 }  // namespace session::client

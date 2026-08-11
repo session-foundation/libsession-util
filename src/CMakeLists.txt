@@ -137,7 +137,6 @@ add_subdirectory(mnemonics)
 add_libsession_util_library(client
     client/client.cpp
     client/conversation_id.cpp
-    client/signals.cpp
 )
 add_subdirectory(client/schema)
 

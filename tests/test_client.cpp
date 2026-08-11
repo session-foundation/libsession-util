@@ -47,6 +47,12 @@ struct TempClient {
             client{std::make_unique<Client>(path, std::forward<Opts>(opts)...)} {}
 
     template <core::CoreOption... Opts>
+    explicit TempClient(callbacks cbs, Opts&&... opts) :
+            path{std::filesystem::temp_directory_path() /
+                 fmt::format("{}.db", random::unique_id("test_client", 7))},
+            client{std::make_unique<Client>(path, std::move(cbs), std::forward<Opts>(opts)...)} {}
+
+    template <core::CoreOption... Opts>
     void reopen(Opts&&... opts) {
         client.reset();
         client = std::make_unique<Client>(path, std::forward<Opts>(opts)...);
@@ -788,12 +794,10 @@ TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[cli
 
 // ── Signals ─────────────────────────────────────────────────────────────────────────────────────
 
-TEST_CASE("Client: subscribers are told what changed", "[client][signals]") {
-    TempClient c;
+TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     SenderKeys sender;
-
     Recorder r;
-    auto sub = c->subscribe(r.handlers());
+    TempClient c{r.handlers()};
 
     deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
     sync(*c);
@@ -821,16 +825,12 @@ TEST_CASE("Client: subscribers are told what changed", "[client][signals]") {
 TEST_CASE(
         "Client: a batch reports each message but settles the conversation once",
         "[client][signals]") {
-    TempClient c;
     SenderKeys sender;
-
     Recorder r;
-    auto sub = c->subscribe(r.handlers());
+    TempClient c{r.handlers()};
 
     // One delivery carrying several messages, as a swarm poll produces.
-    std::vector<SessionProtos::Content> contents;
     std::vector<std::string> encoded;
-    std::vector<core::SwarmMessage> batch;
     for (int i = 0; i < 5; i++) {
         SessionProtos::Content content;
         auto ts = from_epoch_ms(1000 + i);
@@ -846,6 +846,7 @@ TEST_CASE(
                 from_epoch_ms(1000 + i),
                 own_sid(*c),
                 std::nullopt));
+    std::vector<core::SwarmMessage> batch;
     for (int i = 0; i < 5; i++)
         batch.push_back(
                 core::SwarmMessage{
@@ -868,82 +869,29 @@ TEST_CASE(
     CHECK(r.updated[0].last_message == "m4");
 }
 
-TEST_CASE("Client: state is committed before the signal fires", "[client][signals]") {
-    TempClient c;
+TEST_CASE("Client: state is committed before the handler fires", "[client][signals]") {
     SenderKeys sender;
-
     std::optional<std::string> body_seen_from_handler;
-    auto sub = c->subscribe({.message_added = [&](const ConversationId&, const Message& m) {
-        body_seen_from_handler = c->message(m.id)->body;
-    }});
+    Client* self = nullptr;
+
+    TempClient c{callbacks{.message_added = [&](const ConversationId&, const Message& m) {
+        body_seen_from_handler = self->message(m.id)->body;
+    }}};
+    self = &*c;
 
     deliver(*c, sender, "readable already", from_epoch_ms(1000), "h1");
     CHECK(body_seen_from_handler == "readable already");
 }
 
-TEST_CASE("Client: multiple independent subscribers each get every change", "[client][signals]") {
-    TempClient c;
+TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
     SenderKeys sender;
-
-    int a = 0, b = 0;
-    auto sub_a =
-            c->subscribe({.message_added = [&](const ConversationId&, const Message&) { a++; }});
-    {
-        auto sub_b = c->subscribe(
-                {.message_added = [&](const ConversationId&, const Message&) { b++; }});
-        deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
-        CHECK(a == 1);
-        CHECK(b == 1);
-    }
-
-    // sub_b is out of scope: dropping the handle unsubscribes.
-    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
-    CHECK(a == 2);
-    CHECK(b == 1);
-
-    sub_a.reset();
-    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
-    CHECK(a == 2);
-}
-
-TEST_CASE("Client: a subscription may be moved and outlive its Client", "[client][signals]") {
-    int count = 0;
-    Subscription moved;
-    CHECK_FALSE(static_cast<bool>(moved));
-
-    {
-        TempClient c;
-        SenderKeys sender;
-
-        auto sub = c->subscribe(
-                {.message_added = [&](const ConversationId&, const Message&) { count++; }});
-        CHECK(static_cast<bool>(sub));
-
-        moved = std::move(sub);
-        CHECK(static_cast<bool>(moved));
-
-        deliver(*c, sender, "hi", from_epoch_ms(1000), "h1");
-        CHECK(count == 1);
-    }
-
-    // Destroying `moved` after the Client is gone must not touch freed memory.
-    CHECK_FALSE(static_cast<bool>(moved));
-    moved.reset();
-}
-
-TEST_CASE("Client: a throwing handler does not break the others", "[client][signals]") {
-    TempClient c;
-    SenderKeys sender;
-
-    int after = 0;
-    auto bad = c->subscribe({.message_added = [](const ConversationId&, const Message&) {
+    TempClient c{callbacks{.message_added = [](const ConversationId&, const Message&) {
         throw std::runtime_error{"deliberate"};
-    }});
-    auto good = c->subscribe(
-            {.message_added = [&](const ConversationId&, const Message&) { after++; }});
+    }}};
 
+    // The exception is caught and logged rather than escaping into Core's event loop, and the
+    // message is stored regardless: a broken listener must not cost us data.
     CHECK_NOTHROW(deliver(*c, sender, "still fine", from_epoch_ms(1000), "h1"));
-    CHECK(after == 1);
     CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
 }
 
@@ -958,13 +906,11 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
         finish_store = std::move(on_stored);
     };
 
-    TempClient c{cbs};
+    Recorder r;
+    TempClient c{r.handlers(), cbs};
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
-
-    Recorder r;
-    auto sub = c->subscribe(r.handlers());
 
     auto id = c->send_message(ConversationId::dm(peer), "hello");
     sync(*c);
@@ -1031,15 +977,14 @@ TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
 }
 
 TEST_CASE("Client: a priority change replaces the whole list", "[client][signals]") {
-    TempClient c;
     SenderKeys a, b;
+    Recorder r;
+    TempClient c{r.handlers()};
 
     deliver(*c, a, "first", from_epoch_ms(1000), "h1");
     deliver(*c, b, "second", from_epoch_ms(2000), "h2");
     sync(*c);
-
-    Recorder r;
-    auto sub = c->subscribe(r.handlers());
+    r.order.clear();
 
     c->set_priority(ConversationId::dm(a.session_id), 3);
 
