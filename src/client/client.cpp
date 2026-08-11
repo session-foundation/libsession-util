@@ -238,7 +238,14 @@ void Client::_init() {
     auto c = core.database().conn();
     c.prepared_exec(
             R"(
-        UPDATE messages SET send_state = ? WHERE send_state IN (?, ?)
+        UPDATE messages SET send_state = ?1 WHERE send_state IN (?2, ?3)
+    )",
+            static_cast<int>(SendState::interrupted),
+            static_cast<int>(SendState::pending),
+            static_cast<int>(SendState::sending));
+    c.prepared_exec(
+            R"(
+        UPDATE messages SET sync_send_state = ?1 WHERE sync_send_state IN (?2, ?3)
     )",
             static_cast<int>(SendState::interrupted),
             static_cast<int>(SendState::pending),
@@ -622,7 +629,8 @@ void Client::_emit_list_replaced() {
 // No join back to conversations: every row of a given query belongs to one conversation, so its
 // ConversationId is resolved once by the caller rather than rebuilt per row.
 static constexpr auto MESSAGE_COLUMNS = R"(
-    SELECT m.id, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body, m.send_state
+    SELECT m.id, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body, m.send_state,
+           m.sync_send_state
     FROM messages m
     JOIN accounts a ON a.id = m.sender
 )"sv;
@@ -634,7 +642,7 @@ static std::vector<Message> query_messages(
         const std::string& query,
         const Bind&... bind) {
     std::vector<Message> out;
-    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state] :
+    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state] :
          c.prepared_results<
                  int64_t,
                  std::optional<std::string>,
@@ -642,6 +650,7 @@ static std::vector<Message> query_messages(
                  int,
                  int64_t,
                  std::string,
+                 std::optional<int>,
                  std::optional<int>>(query, bind...))
         out.push_back(
                 Message{.id = id,
@@ -653,6 +662,9 @@ static std::vector<Message> query_messages(
                         .send_state = send_state
                                             ? std::optional{static_cast<SendState>(*send_state)}
                                             : std::nullopt,
+                        .sync_send_state = sync_send_state ? std::optional{static_cast<SendState>(
+                                                                     *sync_send_state)}
+                                                           : std::nullopt,
                         .hash = std::move(swarm_hash)});
     return out;
 }
@@ -719,9 +731,23 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     data->set_body(std::string{body});
     data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
 
-    auto serialised = content.SerializeAsString();
+    // Two artifacts: the copy the recipient gets, and the copy we deposit in our own swarm so that
+    // our other devices see it.  They differ only in syncTarget, which is what tells those devices
+    // which conversation an outgoing message belongs to -- the sender being us either way.
+    //
+    // What we store locally is the *sync* copy, so that our row is identical whether we sent the
+    // message or a linked device did.  Anything re-sent out of the database therefore has to clear
+    // syncTarget again before it goes to a recipient.
+    SessionProtos::Content synced = content;
+    synced.mutable_datamessage()->set_synctarget(oxenc::to_hex(id.session_id()));
+
+    auto serialised = synced.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
     auto cid = content_hash(self, raw);
+
+    // Note to self is one swarm, not two: sending both copies there would deposit the same message
+    // twice, and both would come back.  So there is no separate sync send to have a state for.
+    bool to_self = std::ranges::equal(id.session_id(), self);
 
     bool created;
     int64_t client_id;
@@ -735,15 +761,18 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
         c.prepared_exec(
                 R"(
             INSERT INTO messages
-                (conversation, content_hash, sender, outgoing, timestamp, body, send_state)
-            VALUES (?, ?, ?, 1, ?, ?, ?)
+                (conversation, content_hash, sender, outgoing, timestamp, body, send_state,
+                 sync_send_state)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
         )",
                 convo.id,
                 cid,
                 account_id(c, self),
                 to_ms(now),
                 body,
-                static_cast<int>(SendState::pending));
+                static_cast<int>(SendState::pending),
+                to_self ? std::optional<int>{}
+                        : std::optional{static_cast<int>(SendState::pending)});
         client_id = c.sql.getLastInsertRowid();
 
         c.prepared_exec(
@@ -758,12 +787,20 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
 
-    auto core_id = core.send_dm(id.session_id(), content, now);
+    auto core_id =
+            to_self ? core.send_dm(self, synced, now) : core.send_dm(id.session_id(), content, now);
     _send_ids[core_id] = client_id;
 
     // send_dm() reports its first status synchronously, i.e. before we knew the id to map it to.
     if (auto stashed = _early_status.extract(core_id))
-        _apply_send_status(client_id, stashed.mapped());
+        _apply_send_status(client_id, stashed.mapped(), false);
+
+    if (!to_self) {
+        auto sync_id = core.send_dm(self, synced, now);
+        _sync_sends[sync_id] = client_id;
+        if (auto stashed = _early_status.extract(sync_id))
+            _apply_send_status(client_id, stashed.mapped(), true);
+    }
 
     return client_id;
 }
@@ -912,6 +949,16 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
 }
 
 void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
+    if (auto sync = _sync_sends.find(core_id); sync != _sync_sends.end()) {
+        log::debug(
+                cat, "sync copy of send {} reached status {}", core_id, static_cast<int>(status));
+        auto client_id = sync->second;
+        if (is_terminal(status))
+            _sync_sends.erase(sync);
+        _apply_send_status(client_id, status, true);
+        return;
+    }
+
     auto it = _send_ids.find(core_id);
     if (it == _send_ids.end()) {
         // Fired from inside send_dm(), before it returned us the id to map.  send_message() drains
@@ -923,22 +970,21 @@ void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
     auto client_id = it->second;
     if (is_terminal(status))
         _send_ids.erase(it);
-    _apply_send_status(client_id, status);
+    _apply_send_status(client_id, status, false);
 }
 
-void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus status) {
+void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus status, bool sync) {
     auto state = state_for(status);
     std::optional<ConversationId> convo;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
+        // The two sends own one column each, so a status for one never disturbs the other.
+        auto column = sync ? "sync_send_state"sv : "send_state"sv;
         if (c.prepared_exec(
-                    R"(
-            UPDATE messages SET send_state = ? WHERE id = ? AND send_state IS NOT ?
-        )",
+                    "UPDATE messages SET {0} = ?1 WHERE id = ?2 AND {0} IS NOT ?1"_format(column),
                     static_cast<int>(state),
-                    client_id,
-                    static_cast<int>(state)) > 0) {
+                    client_id) > 0) {
             auto convo_row = c.prepared_maybe_get<int64_t>(
                     "SELECT conversation FROM messages WHERE id = ?", client_id);
             if (convo_row)

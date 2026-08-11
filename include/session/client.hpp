@@ -25,6 +25,15 @@
 /// that wants conversations constructs a Client and reaches through `client.core` for the account
 /// state.
 ///
+/// Client is where interpretation lives.  Core hands up an authenticated sender and a span of
+/// decrypted bytes; everything after that is here — parsing the payload, deciding which
+/// conversation it belongs to, whether it is one of ours, what it does to unread state and to the
+/// order of the list.  Composing outbound messages is the same job in reverse, which is why setting
+/// and clearing protocol fields such as `syncTarget` happens at this layer and not below it.
+///
+/// The rule, in one line: if a question can be answered without reading what a message *says*, it
+/// belongs in Core; if answering it means interpreting the payload, it belongs here.
+///
 ///     session::client::Client client{
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::sqlite::argon2id_password{"correct horse battery staple"}};
@@ -203,6 +212,13 @@ class Client {
     // send id to map.  Drained by send_message() once the mapping is registered.
     std::unordered_map<int64_t, core::MessageSendStatus> _early_status;
 
+    // Core send ids belonging to the copy of an outgoing message deposited in our own swarm.  Their
+    // delivery status is deliberately not reported: what the application waits on is the copy going
+    // to the recipient, and a sync copy that fails costs an entry on our other devices rather than
+    // the message itself.  Tracked rather than merely unregistered so that a late status does not
+    // accumulate in _early_status forever.
+    std::unordered_map<int64_t, int64_t> _sync_sends;  // core send id -> client message id
+
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
@@ -227,7 +243,7 @@ class Client {
 
     void _on_message_received(core::ReceivedMessage&& msg);
     void _on_send_status(int64_t core_id, core::MessageSendStatus status);
-    void _apply_send_status(int64_t client_id, core::MessageSendStatus status);
+    void _apply_send_status(int64_t client_id, core::MessageSendStatus status, bool sync);
 
     // Runs `invoke` against the application's handlers, swallowing and logging anything it throws:
     // a broken listener is not something a data model can do anything about.

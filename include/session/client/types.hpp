@@ -61,8 +61,18 @@ struct Message {
     /// The message body.  Empty for a message that carries no text (e.g. attachments only).
     std::string body;
 
-    /// Set for outgoing messages only.
+    /// Delivery of the copy sent to the recipient — what "did it arrive" ordinarily means, and
+    /// what a message list normally shows.  Unset on an incoming message.
     std::optional<SendState> send_state;
+
+    /// Delivery of the copy deposited in our own swarm, which is how our other devices come to see
+    /// a message we sent.  A separate send, retried separately, so it can still be pending when the
+    /// recipient already has the message — worth surfacing somewhere detailed rather than in the
+    /// message list, since it says nothing about whether the message arrived.
+    ///
+    /// Unset on an incoming message, and on a note to self, where the recipient's swarm is our own
+    /// and `send_state` already describes the only send there was.
+    std::optional<SendState> sync_send_state;
 
     /// Swarm-assigned hash; unset for an outgoing message that has not been stored yet.
     std::optional<std::string> hash;

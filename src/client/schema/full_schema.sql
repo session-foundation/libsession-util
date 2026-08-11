@@ -79,13 +79,22 @@ CREATE TABLE messages (
     outgoing INTEGER NOT NULL,
     timestamp INTEGER NOT NULL,         -- ms since epoch; the Content sigTimestamp
     body TEXT NOT NULL,
-    -- Delivery state, for outgoing messages only; NULL for incoming.
+    -- Delivery state of the copy sent to the recipient's swarm, for outgoing messages only:
     --   0 = queued locally, not yet dispatched
     --   1 = handed to the swarm, awaiting confirmation
     --   2 = accepted by a swarm node
     --   3 = terminal failure
     --   4 = in flight when the process exited, so the outcome is unknown
-    send_state INTEGER
+    --
+    -- ...and the same for the copy deposited in our own swarm, which is how our other devices see
+    -- an outgoing message.  The two are independent sends, retried separately, so a message can
+    -- have reached its recipient while still owing our other devices a copy.
+    --
+    -- NULL in either means there is no such send: both are NULL on an incoming message, and
+    -- sync_send_state is NULL for a note to self, where the recipient's swarm is our own and a
+    -- second store would be the same store twice.
+    send_state INTEGER,
+    sync_send_state INTEGER
 ) STRICT;
 
 -- Delivery is at-least-once, so a redelivered message must not duplicate.  Deduping on the content

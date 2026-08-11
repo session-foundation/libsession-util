@@ -1011,6 +1011,88 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     CHECK(r.order.empty());
 }
 
+TEST_CASE("Client: the two copies of a send report separately", "[client][send]") {
+    // Capture each store so the recipient's copy and the sync copy can be completed independently,
+    // in either order.
+    std::vector<std::pair<b33, std::function<void(bool)>>> stores;
+    core::callbacks cbs;
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33> dest,
+                            config::Namespace,
+                            std::vector<std::byte>,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        b33 to;
+        std::ranges::copy(dest, to.begin());
+        stores.emplace_back(to, std::move(on_stored));
+    };
+
+    TempClient c{cbs};
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    TestHelper::seed_pfs_nak(c->core, peer);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
+
+    auto id = c->send_message(ConversationId::dm(peer), "two ways");
+    REQUIRE(stores.size() == 2);
+
+    auto me = own_sid(*c);
+    auto to_peer = std::ranges::find_if(stores, [&](const auto& s) { return s.first != me; });
+    auto to_self = std::ranges::find_if(stores, [&](const auto& s) { return s.first == me; });
+    REQUIRE(to_peer != stores.end());
+    REQUIRE(to_self != stores.end());
+
+    // The recipient's copy lands; our own swarm has not answered yet.
+    to_peer->second(true);
+    CHECK(c->message(id)->send_state == SendState::sent);
+    CHECK(c->message(id)->sync_send_state == SendState::sending);
+
+    // The sync copy fails, which says nothing about whether the message arrived.
+    to_self->second(false);
+    CHECK(c->message(id)->send_state == SendState::sent);
+    CHECK(c->message(id)->sync_send_state == SendState::failed);
+}
+
+TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
+    core::callbacks cbs;
+    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
+                           config::Namespace,
+                           std::vector<std::byte>,
+                           std::chrono::milliseconds,
+                           std::function<void(bool)> on_stored) { on_stored(true); };
+
+    TempClient c{cbs};
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto id = c->send_message(ConversationId::dm(me), "note to self");
+    CHECK(c->message(id)->body == "note to self");
+
+    // One swarm, so one send: there is no separate sync copy to have a state for.
+    CHECK(c->message(id)->send_state.has_value());
+    CHECK_FALSE(c->message(id)->sync_send_state.has_value());
+    CHECK(c->messages(ConversationId::dm(me)).size() == 1);
+
+    // ...and when our own swarm hands it straight back on the next poll, which is what note to self
+    // does, it must recognise its own message rather than storing a second copy.
+    // Rebuild exactly what _send_message serialised, so the content hash matches.
+    auto ts = c->message(id)->timestamp;
+    SessionProtos::Content sent;
+    sent.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(ts)));
+    sent.mutable_datamessage()->set_body("note to self");
+    sent.mutable_datamessage()->set_timestamp(static_cast<uint64_t>(epoch_ms(ts)));
+    sent.mutable_datamessage()->set_synctarget(oxenc::to_hex(me));
+    auto plaintext = sent.SerializeAsString();
+    auto encoded = encode_dm_v1(
+            std::as_bytes(std::span{plaintext}), self_keys(*c).ed_sk, ts, me, std::nullopt);
+    core::SwarmMessage sm{encoded, "swarmhash", ts, from_epoch_ms(1'000'000'000'000)};
+    c->core.loop().call_get([&] {
+        c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+        return 0;
+    });
+
+    CHECK(c->messages(ConversationId::dm(me)).size() == 1);
+}
+
 // ── Core interoperability ───────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Client: the application's own Core callbacks still fire", "[client][callbacks]") {
@@ -1042,10 +1124,13 @@ TEST_CASE("Client: the application's own Core callbacks still fire", "[client][c
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
     c->send_message(ConversationId::dm(peer), "outbound");
 
-    REQUIRE(app_statuses.size() >= 1);
-    CHECK(app_statuses.back() == core::MessageSendStatus::success);
+    // Two Core sends, not one: the recipient's copy and the copy deposited in our own swarm for our
+    // other devices.  Both are visible here because these are Core's own callbacks, which report
+    // what Core was asked to do rather than what the conversation layer did.
+    CHECK(std::ranges::count(app_statuses, core::MessageSendStatus::success) == 2);
 }
 
 TEST_CASE("Client: Core is usable directly through the Client", "[client][callbacks]") {

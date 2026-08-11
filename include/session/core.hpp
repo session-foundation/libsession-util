@@ -20,14 +20,23 @@
 /// manages an encrypted sqlite database for storing account keys, messages, and other account
 /// state.
 ///
-/// This class is currently in an early state with only partial database, but this class is intended
-/// to eventually grow to the point where it contains the entire data model of a Session account
-/// (i.e.  conversations, contacts, messages, etc.) and manages that data (e.g. by fetching data
-/// from swarms).
+/// Core is the primitive layer, and deliberately stops short of interpretation.  It holds the
+/// account's keys, talks to swarms, signs and authenticates requests, encrypts and decrypts, and
+/// stores what it must to do those things.  What it does *not* do is decide what any of it means: a
+/// message that arrives is handed up as an authenticated sender plus a span of decrypted bytes, and
+/// nothing in Core parses those bytes, knows what a conversation is, or can tell an outgoing
+/// message from an incoming one.
 ///
-/// Currently Core does not yet have its own network stack and so the integrating application must
-/// update the Core instance when it receives the appropriate data (such as pro revocations) from
-/// the network.
+/// That is `session::client::Client`'s work.  The dividing line is worth stating because it is easy
+/// to erode one convenience at a time: if a question can be answered without knowing what a message
+/// *says*, it belongs here; the moment answering it requires reading the payload, it belongs above.
+///
+/// The apparent exception proves it — Core does parse its own namespaces, the device group and the
+/// account keys, because that state *is* Core's rather than a conversation's.
+///
+/// Core can drive its own network once one is attached with set_network(), after which it polls the
+/// account's swarms on a timer; without one, the integrating application is responsible for feeding
+/// it (receive_messages(), and callbacks::send_to_swarm for outbound).
 ///
 /// The typical intended flow for using the Core is to construct it early in the application and
 /// store it for the application duration:
