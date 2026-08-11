@@ -16,9 +16,13 @@
 #include "core/schema/schema_registry.hpp"
 #include "session/network/key_types.hpp"
 
-/// The "Core" class is intended to be used by a Session account instance to hold account state.  It
-/// manages an encrypted sqlite database for storing account keys, messages, and other account
-/// state.
+/// The "Core" class holds a Session account's own state, in an encrypted sqlite database: its keys,
+/// its device group, its configs, and the bookkeeping needed to talk to the network on its behalf.
+///
+/// Core was once meant to be the whole data model -- conversations, contacts and messages included
+/// -- and the split into Core and `session::client::Client` divided that job rather than shrinking
+/// it.  The two together are what Core alone was originally envisioned to be, so a reader looking
+/// for conversations or message history should look up, not deeper.
 ///
 /// Core is the primitive layer, and deliberately stops short of interpretation.  It holds the
 /// account's keys, talks to swarms, signs and authenticates requests, encrypts and decrypts, and
