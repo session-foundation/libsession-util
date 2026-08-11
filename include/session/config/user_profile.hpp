@@ -382,7 +382,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Note this deliberately returns a plain duration rather than an optional: the backend sends
     /// zero when the subscription is not auto-renewing, so "no grace stored" and "a grace of zero"
-    /// describe the same account and both give `E - 0 == E`.  There is no state a caller could act
+    /// describe the same account and both give `E + 0 == E`.  There is no state a caller could act
     /// on differently, so there is nothing for a presence check to disambiguate.
     ///
     /// Inputs: None
