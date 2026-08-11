@@ -217,7 +217,13 @@ typedef struct session_pro_backend_pro_payment_item {
     /// Provider purchase time, fractional UNIX seconds. Millisecond-precise: the value passes
     /// through a millisecond-resolution representation, so sub-millisecond digits are not retained.
     double purchased_ts;
+    /// When THIS payment's term was paid through.
     int64_t expiry_ts;
+    /// The dunning window this one payment's provider declared -- raw store data. NOT the same
+    /// quantity as the account-level `grace_period_duration` on the status response, which adds the
+    /// backend's renewal-latency allowance and is gated on the account renewing. This one is not
+    /// gated, so a cancelled subscription can still carry a stale non-zero value. For "when does
+    /// entitlement end", use the account-level field.
     int64_t grace_period_duration;
     int64_t platform_refund_expiry_ts;
     /// Provider revocation instant, fractional UNIX seconds (millisecond-precise; 0 if not revoked)
@@ -234,7 +240,17 @@ typedef struct session_pro_backend_get_pro_status_response {
     /// NUL-terminated; points into the response's `internal_`.
     const char* status;
     bool auto_renewing;
+    /// The account's PAYMENT-DUE date: when the current term was paid through. Does NOT include the
+    /// grace period -- entitlement runs to `expiry_ts + grace_period_duration`, and `status` is
+    /// judged against that sum. Do not subtract the grace from this.
     int64_t expiry_ts;
+    /// How much longer (seconds) entitlement continues PAST `expiry_ts`: the provider's dunning
+    /// window plus the backend's renewal-latency allowance. Add it to `expiry_ts` to get the
+    /// instant entitlement ends; `[expiry_ts, expiry_ts + this)` is overdue-but-still-served. 0
+    /// when `auto_renewing` is false, so the sum stays correct there without a special case.
+    ///
+    /// ACCOUNT-level. `latest_payment.grace_period_duration` shares the name and is a different
+    /// quantity -- see there.
     int64_t grace_period_duration;
     /// True if the account has at least one payment, in which case `latest_payment` is populated
     /// with the most recent one; false means the account has no payments and `latest_payment` is
