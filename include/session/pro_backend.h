@@ -133,16 +133,16 @@ typedef struct session_pro_backend_response_header {
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if
-    /// this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
-    /// display / refreshing the cached access expiry only -- NOT an entitlement authority and NOT
-    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
+    /// The end of the paid term (unix seconds) -- coverage runs to this plus the grace below -- or
+    /// 0 if this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2):
+    /// use for display / refreshing the cached access expiry only -- NOT an entitlement authority
+    /// and NOT part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
     /// proof-validity window). Populated on a successful proof and on a `subscription_expired`
     /// failure (a now-past value); 0 on `not_subscribed` / `revoked` / protocol errors.
     int64_t account_expiry_ts;
-    /// The grace period (seconds) folded into `account_expiry_ts`, so the paid-through instant is
-    /// `account_expiry_ts - account_grace_period_duration`. 0 when the subscription is not
-    /// auto-renewing.
+    /// How much longer (seconds) the account keeps being served past `account_expiry_ts`, so
+    /// coverage ends at `account_expiry_ts + account_grace_period_duration`. 0 when the
+    /// subscription is not auto-renewing.
     ///
     /// ⚠️ MEANINGFUL ONLY WHEN `header.status` IS OK. Filled only on the success path, so every
     /// non-OK outcome -- protocol error, `stale_request`, transport failure, where the account is

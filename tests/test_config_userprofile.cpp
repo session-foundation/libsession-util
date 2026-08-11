@@ -682,21 +682,21 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.set_pro_auto_renewing(false);
     CHECK_FALSE(profile.get_pro_auto_renewing());
 
-    // Grace period: synced so any device can derive the paid-through instant as `E - G`. The
-    // backend folds grace INTO the stored expiry for auto-renewing subscriptions, so `E` is the end
-    // of coverage rather than the renewal-due date -- deriving that is the whole reason this key
-    // exists.
+    // Grace period: synced so any device can compute when coverage actually ends, at `E + G`. `E`
+    // is the payment-due date -- the instant the term was paid through -- and `G` is how much
+    // longer the backend keeps serving past it (the store's dunning window plus its renewal-latency
+    // allowance). Carrying `G` is the whole reason this key exists: `E` alone cannot answer it.
     CHECK(profile.get_pro_grace_period() == 0s);
     UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
     profile.set_pro_grace_period(1h);
     CHECK(profile.get_pro_grace_period() == 1h);
     // Backend-derived, like E/I/R/A: no profile-updated bump.
     CHECK(profile.get_profile_updated().time_since_epoch().count() == 456);
-    // The property the key exists for: coverage end minus grace is the paid-through instant.
+    // The property the key exists for: expiry plus grace is the instant coverage ends.
     profile.set_pro_access_expiry(std::chrono::sys_seconds{5000s});
-    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
-          std::chrono::sys_seconds{5000s} - 1h);
-    // Zero clears; unset and zero are indistinguishable *and* equivalent (`E - 0 == E`).
+    CHECK(*profile.get_pro_access_expiry() + profile.get_pro_grace_period() ==
+          std::chrono::sys_seconds{5000s} + 1h);
+    // Zero clears; unset and zero are indistinguishable *and* equivalent (coverage ends at `E`).
     profile.set_pro_grace_period(0s);
     CHECK(profile.get_pro_grace_period() == 0s);
     CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
@@ -714,7 +714,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(profile.get_pro_grace_period() == 0s);
     CHECK_FALSE(profile.get_pro_access_expiry().has_value());
 
-    // Clearing `E` also clears `G`: the pair is only meaningful as `E - G`, so a `G` that outlived
+    // Clearing `E` also clears `G`: the pair is only meaningful as `E + G`, so a `G` that outlived
     // its `E` would silently pair with the NEXT `E` write -- and that write is typically a proof
     // outcome, which carries no grace to correct it with. Enforced in the setter, not at call
     // sites.

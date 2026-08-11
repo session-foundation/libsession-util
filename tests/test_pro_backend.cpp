@@ -214,12 +214,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE_THROWS_AS(parse_pro_proof(j_no_ae.dump()), parse_error);
 
                 // The two fields that QUALIFY account_expiry_ts: both surface through the C and
-                // C++ parses, and `E - G` recovers the paid-through instant.
+                // C++ parses, and `E + G` is the instant coverage ends.
                 REQUIRE(result_cpp.account_grace_period.count() == 14 * 24 * 3600);
                 REQUIRE(result_cpp.account_auto_renewing);
-                REQUIRE((*result_cpp.account_expiry - result_cpp.account_grace_period)
+                REQUIRE((*result_cpp.account_expiry + result_cpp.account_grace_period)
                                 .time_since_epoch()
-                                .count() == unix_ts + 90 * 24 * 3600 - 14 * 24 * 3600);
+                                .count() == unix_ts + 90 * 24 * 3600 + 14 * 24 * 3600);
                 REQUIRE(result.account_grace_period_duration == 14 * 24 * 3600);
                 REQUIRE(result.account_auto_renewing);
 

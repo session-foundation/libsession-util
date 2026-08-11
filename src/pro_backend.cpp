@@ -315,7 +315,7 @@ namespace {
         // The two values that qualify `account_expiry_ts`, required for the same reason it is: a
         // client persists all three into config together, and a fresh expiry beside a stale grace
         // or a stale renewing flag is worse than no refresh at all -- it computes a wrong
-        // paid-through instant, and reads a renewing subscription as terminal.
+        // coverage end, and reads a renewing subscription as terminal.
         result.account_grace_period = std::chrono::seconds(
                 json_require<int64_t>(result_obj, "account_grace_period_duration"));
         result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");

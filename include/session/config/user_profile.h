@@ -429,9 +429,9 @@ LIBSESSION_EXPORT void user_profile_set_pro_auto_renewing(config_object* conf, i
 ///
 /// Returns the account's grace period in seconds (`get_pro_status.grace_period_duration`), or 0 if
 /// none is stored. Backend-derived and synced alongside the access expiry, so any linked device can
-/// derive the paid-through instant as `access_expiry - grace_period`: the backend folds the grace
-/// period into the stored expiry for auto-renewing subscriptions, so the access expiry is the end
-/// of coverage rather than the date the renewal is due.
+/// compute when coverage actually ends: `access_expiry + grace_period`. The access expiry is the
+/// payment-due date -- the instant the term was paid through -- and `[E, E + G)` is the window
+/// where the payment is overdue but service continues.
 ///
 /// There is deliberately no companion presence check: the backend sends 0 whenever the
 /// subscription is not auto-renewing, so "unset" and "zero" describe the same account and both give

@@ -229,7 +229,7 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         data["E"] = epoch_seconds(*access_expiry_ts);
     else {
         data["E"].erase();
-        // `G` is only meaningful as `E - G`, so it must never outlive the `E` it was paired with:
+        // `G` is only meaningful as `E + G`, so it must never outlive the `E` it was paired with:
         // a stranded `G` would silently pair with whatever the *next* `E` write happens to be, and
         // that next write is usually a proof outcome, which carries no grace of its own to correct
         // it with.  Enforced here rather than left to callers because clearing `E` is the common

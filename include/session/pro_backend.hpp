@@ -189,24 +189,26 @@ struct ProRequest {
 struct GenerateProProofResponse : ResponseBase {
     ProProof proof;
 
-    /// The account's true, grace-inclusive subscription entitlement end -- the same value
-    /// `get_pro_status` reports as its `expiry_ts` (pro-wire-protocol.md §2.2). Advisory and
-    /// UNSIGNED: not part of the proof's signed message and never fed into signature verification;
-    /// it rides on the response so a proof fetch also refreshes the client's cached access expiry.
-    /// Distinct from `proof.expiry_at` (the clamped, rolling <=30d proof-validity window). Present
-    /// (and required) on a successful proof, and on a `subscription_expired` failure (a now-past
-    /// value carried top-level on the envelope); nullopt on other outcomes (`not_subscribed`,
-    /// `revoked`, protocol errors).
+    /// The end of the paid term -- the same value `get_pro_status` reports as its `expiry_ts`
+    /// (pro-wire-protocol.md §2.2), carrying neither the store's grace nor the backend's
+    /// renewal-latency allowance; coverage runs to `account_expiry + account_grace_period`.
+    /// Advisory and UNSIGNED: not part of the proof's signed message and never fed into signature
+    /// verification; it rides on the response so a proof fetch also refreshes the client's cached
+    /// access expiry. Distinct from `proof.expiry_at` (the clamped, rolling <=30d proof-validity
+    /// window). Present (and required) on a successful proof, and on a `subscription_expired`
+    /// failure (a now-past value carried top-level on the envelope); nullopt on other outcomes
+    /// (`not_subscribed`, `revoked`, protocol errors).
     std::optional<std::chrono::sys_seconds> account_expiry;
 
-    /// The grace period folded into `account_expiry` above, so a client can recover the
-    /// paid-through instant as `account_expiry - account_grace_period`. Zero whenever the
-    /// subscription is not auto-renewing, mirroring `get_pro_status`, because the backend only
-    /// folds grace in for auto-renewing payments.
+    /// How much longer the account keeps being served past `account_expiry` above -- the store's
+    /// dunning window plus the backend's renewal-latency allowance -- so coverage ends at
+    /// `account_expiry + account_grace_period`. Zero whenever the subscription is not
+    /// auto-renewing, mirroring `get_pro_status`, because neither span applies to a term that is
+    /// simply ending.
     ///
     /// Required on a successful proof, like `account_expiry`: a response missing it can't be paired
     /// with the expiry it qualifies, and a client that persisted the two out of step would compute
-    /// the wrong paid-through instant.
+    /// the wrong coverage end.
     ///
     /// ⚠️ **Meaningful ONLY when the response succeeded.** This is default-initialised and is filled
     /// only on the success path, so on *every* non-OK outcome -- including a protocol error, a
