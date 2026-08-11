@@ -713,6 +713,46 @@ void SnodePool::_on_refresh_complete(
                  refreshing_from_seed_nodes,
                  use_direct_fetcher,
                  total_requests] {
+        // Throw away everything we received and start the requests again after a backoff
+        auto discard_and_retry = [weak_self = weak_from_this(),
+                                  refresh_id,
+                                  refreshing_from_seed_nodes,
+                                  use_direct_fetcher,
+                                  total_requests](std::string_view reason) {
+            auto self = weak_self.lock();
+
+            if (!self)
+                return;
+
+            self->_snode_refresh_results.clear();
+            self->_snode_cache_refresh_failure_count++;
+            auto delay =
+                    self->_config.retry_delay.exponential(self->_snode_cache_refresh_failure_count);
+
+            log::error(
+                    cat,
+                    "[Request {}] Discarding responses and retrying after {}ms due to {}.",
+                    refresh_id,
+                    delay.count(),
+                    reason);
+            self->_loop->call_later(
+                    delay,
+                    [weak_self,
+                     refresh_id,
+                     refreshing_from_seed_nodes,
+                     use_direct_fetcher,
+                     total_requests] {
+                        if (auto self = weak_self.lock())
+                            for (uint8_t i = 0; i < total_requests; ++i)
+                                self->_launch_next_refresh_request(
+                                        refresh_id,
+                                        i,
+                                        refreshing_from_seed_nodes,
+                                        use_direct_fetcher,
+                                        total_requests);
+                    });
+        };
+
         // Sort the vectors (so make it easier to find the intersection)
         std::vector<std::vector<service_node>> processed_nodes;
         processed_nodes.reserve(raw_results.size());
@@ -744,34 +784,7 @@ void SnodePool::_on_refresh_complete(
                 std::ranges::stable_sort(nodes);
                 processed_nodes.emplace_back(std::move(nodes));
             } catch (const std::exception& e) {
-                _snode_refresh_results.clear();
-                _snode_cache_refresh_failure_count++;
-                auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
-
-                log::error(
-                        cat,
-                        "[Request {}] Discarding responses and retrying after {}ms due to invalid "
-                        "response #{}: {}.",
-                        refresh_id,
-                        delay.count(),
-                        (i + 1),
-                        e.what());
-                _loop->call_later(
-                        delay,
-                        [weak_self = weak_from_this(),
-                         refresh_id,
-                         refreshing_from_seed_nodes,
-                         use_direct_fetcher,
-                         total_requests] {
-                            if (auto self = weak_self.lock())
-                                for (uint8_t i = 0; i < total_requests; ++i)
-                                    self->_launch_next_refresh_request(
-                                            refresh_id,
-                                            i,
-                                            refreshing_from_seed_nodes,
-                                            use_direct_fetcher,
-                                            total_requests);
-                        });
+                discard_and_retry("invalid response #{}: {}"_format((i + 1), e.what()));
                 return;
             }
         }
@@ -829,6 +842,17 @@ void SnodePool::_on_refresh_complete(
                         heap.push(Cursor{cur.vec, next_index});
                 }
             }
+        }
+
+        // Only replace the cache if the refresh actually came back with a usable pool.  A refresh
+        // can legitimately succeed and still produce too few nodes (most easily when the multi-
+        // request intersection finds little in common), and overwriting a good cache with that
+        // leaves us with nothing to route through until the next refresh completes.  Treat it as a
+        // failed refresh and retry instead, keeping whatever cache we already have.
+        if (nodes.empty() || nodes.size() < _config.cache_min_size) {
+            discard_and_retry("a refreshed cache of only {} nodes (need {})"_format(
+                    nodes.size(), _config.cache_min_size));
+            return;
         }
 
         // Update the cache with the combined nodes
