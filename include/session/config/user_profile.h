@@ -435,7 +435,7 @@ LIBSESSION_EXPORT void user_profile_set_pro_auto_renewing(config_object* conf, i
 ///
 /// There is deliberately no companion presence check: the backend sends 0 whenever the
 /// subscription is not auto-renewing, so "unset" and "zero" describe the same account and both give
-/// `expiry - 0 == expiry`.
+/// `expiry + 0 == expiry`.
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object

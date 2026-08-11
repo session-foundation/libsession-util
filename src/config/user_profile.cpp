@@ -277,7 +277,7 @@ std::chrono::seconds UserProfile::get_pro_grace_period() const {
 
 void UserProfile::set_pro_grace_period(std::chrono::seconds grace) {
     // Omitted when zero: the backend sends 0 whenever the subscription isn't auto-renewing, and
-    // `E - 0 == E`, so an absent key and a stored zero describe the same account.  Set alongside
+    // `E + 0 == E`, so an absent key and a stored zero describe the same account.  Set alongside
     // `E`; no t/T bump -- backend-derived pro state, like E/I/R/A.
     set_nonzero_int(data["G"], grace.count() > 0 ? grace.count() : 0);
 }

@@ -699,7 +699,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // Zero clears; unset and zero are indistinguishable *and* equivalent (coverage ends at `E`).
     profile.set_pro_grace_period(0s);
     CHECK(profile.get_pro_grace_period() == 0s);
-    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
+    CHECK(*profile.get_pro_access_expiry() + profile.get_pro_grace_period() ==
           std::chrono::sys_seconds{5000s});
 
     // Clearing `E` clears the renewing flag with it, for the same reason it clears `G`: `A`
@@ -725,7 +725,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(profile.get_pro_grace_period() == 0s);
     // ...and a later `E` write therefore cannot inherit the stale grace.
     profile.set_pro_access_expiry(std::chrono::sys_seconds{9000s});
-    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
+    CHECK(*profile.get_pro_access_expiry() + profile.get_pro_grace_period() ==
           std::chrono::sys_seconds{9000s});
 
     // Refund-requested flag (synced via config, not the Pro backend)

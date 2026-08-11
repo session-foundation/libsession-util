@@ -223,23 +223,35 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.account_grace_period_duration == 14 * 24 * 3600);
                 REQUIRE(result.account_auto_renewing);
 
-                // Required on success, exactly like account_expiry_ts: a proof that cannot be
-                // paired with the values qualifying its expiry is malformed, rather than handing
-                // the client a fresh expiry beside a defaulted grace/flag it would then persist.
-                for (const auto* key : {"account_grace_period_duration", "account_auto_renewing"}) {
-                    nlohmann::json j_missing = j;
-                    j_missing["result"].erase(key);
-                    REQUIRE_THROWS_AS(
-                            parse_pro_proof(j_missing.dump()), session::parse_error_missing);
+                // Absent -> not applicable, defaulting to 0/false: never a throw, and never
+                // preserving a stale value. The backend omits these when grace/renewal don't apply,
+                // and a client refreshes all three together, so absence clears the cached
+                // grace/flag rather than keeping it. A present value is parsed; the other,
+                // still-present one is untouched.
+                {
+                    nlohmann::json j_no_grace = j;
+                    j_no_grace["result"].erase("account_grace_period_duration");
+                    auto m = parse_pro_proof(j_no_grace.dump());
+                    REQUIRE(static_cast<bool>(m));
+                    REQUIRE(m.account_grace_period.count() == 0);
+                    REQUIRE(m.account_auto_renewing);
+
+                    nlohmann::json j_no_renew = j;
+                    j_no_renew["result"].erase("account_auto_renewing");
+                    m = parse_pro_proof(j_no_renew.dump());
+                    REQUIRE(static_cast<bool>(m));
+                    REQUIRE_FALSE(m.account_auto_renewing);
+                    REQUIRE(m.account_grace_period.count() == 14 * 24 * 3600);
                 }
 
-                // A wrong type is malformed for the same reason: a silently defaulted flag would be
-                // written to config as an explicit false, and there a false ERASES the key.
+                // A *present* value must still be well-formed: a wrong-typed field is a backend
+                // bug, not "not applicable", so it is a hard parse error rather than a silent
+                // default.
                 nlohmann::json j_bad = j;
                 j_bad["result"]["account_auto_renewing"] = 1;  // int, not bool
                 REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), session::parse_error_type);
 
-                // The non-auto-renewing account: a genuine zero grace, and `E - 0 == E`.
+                // The non-auto-renewing account: a genuine zero grace, and `E + 0 == E`.
                 nlohmann::json j_false = j;
                 j_false["result"]["account_grace_period_duration"] = 0;
                 j_false["result"]["account_auto_renewing"] = false;
@@ -247,25 +259,30 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE_FALSE(f_cpp.account_auto_renewing);
                 REQUIRE(f_cpp.account_grace_period.count() == 0);
 
-                // It also rides a subscription_expired failure (top-level, now-past value) so the
-                // client can refresh its cached horizon without a separate status call.
+                // It also rides a subscription_expired failure, carrying the same three account
+                // fields so the client refreshes all of them without a separate status call. A
+                // lapse can still be auto-renewing: the store keeps retrying the renewal past the
+                // grace window, so subscription_expired does NOT imply grace 0 / not-renewing --
+                // the parser must surface whatever the backend sent, never assume defaults.
                 nlohmann::json j_exp;
                 j_exp["status"] = "fail";
                 j_exp["error_code"] = "subscription_expired";
                 j_exp["error"] = "expired";
                 j_exp["account_expiry_ts"] = unix_ts - 24 * 3600;
+                j_exp["account_grace_period_duration"] = 14 * 24 * 3600;
+                j_exp["account_auto_renewing"] = true;
                 auto exp = parse_pro_proof(j_exp.dump());
                 REQUIRE(exp.error_code == "subscription_expired");
                 REQUIRE(exp.account_expiry.has_value());
                 REQUIRE(exp.account_expiry->time_since_epoch().count() == unix_ts - 24 * 3600);
+                REQUIRE(exp.account_grace_period.count() == 14 * 24 * 3600);
+                REQUIRE(exp.account_auto_renewing);
 
-                // 🔴 The failure path leaves BOTH qualifying fields at their struct defaults, and
-                // nothing in the type says so. `not_subscribed` here, but the same holds for a
-                // protocol error or a `stale_request` -- outcomes that say nothing about the
-                // account. A caller that reads them outside the success branch gets a plain
-                // 0/false, and writing that false to the presence-only config key ERASES a flag
-                // learned from get_pro_status. Pinned so the hazard is executable, not just
-                // documented: the protection here is SCOPE, not the type.
+                // An account-less failure (not_subscribed here; likewise revoked,
+                // protocol/transport errors) carries none of the three, so grace/renewal read as
+                // their truthful "not applicable" defaults of 0 / false -- always definite and safe
+                // to read, so a client refreshing config from them clears a stale grace/flag rather
+                // than being told to preserve one.
                 {
                     nlohmann::json j_fail;
                     j_fail["status"] = "fail";
@@ -273,8 +290,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     j_fail["error"] = "no";
                     auto fail = parse_pro_proof(j_fail.dump());
                     REQUIRE_FALSE(static_cast<bool>(fail));
-                    REQUIRE(fail.account_grace_period.count() == 0);  // default, NOT "no grace"
-                    REQUIRE_FALSE(fail.account_auto_renewing);        // default, NOT "not renewing"
+                    REQUIRE(fail.account_grace_period.count() == 0);
+                    REQUIRE_FALSE(fail.account_auto_renewing);
                 }
 
                 // Other failures (e.g. not_subscribed) carry no horizon.

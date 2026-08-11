@@ -267,13 +267,15 @@ namespace {
         result.account_expiry =
                 json_require<std::chrono::sys_seconds>(result_obj, "account_expiry_ts");
 
-        // The two values that qualify `account_expiry_ts`, required for the same reason it is: a
-        // client persists all three into config together, and a fresh expiry beside a stale grace
-        // or a stale renewing flag is worse than no refresh at all -- it computes a wrong
-        // coverage end, and reads a renewing subscription as terminal.
-        result.account_grace_period =
-                json_require<std::chrono::seconds>(result_obj, "account_grace_period_duration");
-        result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");
+        // The two values that qualify `account_expiry_ts`. Absent -> keep the {0}/{false} default:
+        // the backend sends `0`/`false` whenever grace/renewal don't apply and omits them on a
+        // backend that predates them, so a missing field means "not applicable", never "keep the
+        // stale value". A present value must still be well-formed (a wrong type throws).
+        if (result_obj.contains("account_grace_period_duration"))
+            result.account_grace_period =
+                    json_require<std::chrono::seconds>(result_obj, "account_grace_period_duration");
+        if (result_obj.contains("account_auto_renewing"))
+            result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");
     }
 }  // namespace
 
@@ -282,13 +284,23 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
     auto result_obj = read_envelope(json, result);
     if (!result) {
         // On a subscription_expired failure the account's (now-past) true expiry rides top-level on
-        // the envelope (pro-wire-protocol.md §2.2 / §5.1) so the client can refresh its cached
-        // horizon / access expiry without a separate get_pro_status. Advisory -- read leniently
-        // (the envelope already parsed, so this re-parse can't throw).
+        // the envelope, alongside the same grace/renewal qualifiers as the success path
+        // (pro-wire-protocol.md §2.2 / §5.1), so the client can refresh all three without a
+        // separate get_pro_status. They must travel together: coverage ends at `account_expiry +
+        // grace`, and an expiry has typically NOT changed on this failure (it is a
+        // lapse/cancellation) while the grace and flag have -- refreshing only the expiry would
+        // leave a stale grace claiming coverage the backend has stopped honouring. Read leniently,
+        // absent -> {0}/{false} as on the success path (the envelope already parsed, so json_parse
+        // here can't throw).
         if (result.error_code == "subscription_expired") {
             auto j = json_parse(json);
             if (auto expiry = json_maybe<std::chrono::sys_seconds>(j, "account_expiry_ts"))
                 result.account_expiry = *expiry;
+            if (j.contains("account_grace_period_duration"))
+                result.account_grace_period =
+                        json_require<std::chrono::seconds>(j, "account_grace_period_duration");
+            if (j.contains("account_auto_renewing"))
+                result.account_auto_renewing = json_require<bool>(j, "account_auto_renewing");
         }
         return result;
     }
