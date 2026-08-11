@@ -1064,8 +1064,13 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
 
+    // Mirrors opening the conversation first, as a UI does, before sending into it.
+    auto convo = c->create_conversation(ConversationId::dm(me));
+    CHECK(convo.id == ConversationId::dm(me));
+
     auto id = c->send_message(ConversationId::dm(me), "note to self");
     CHECK(c->message(id)->body == "note to self");
+    CHECK(c->conversation(ConversationId::dm(me))->last_message == "note to self");
 
     // One swarm, so one send: there is no separate sync copy to have a state for.
     CHECK(c->message(id)->send_state.has_value());
