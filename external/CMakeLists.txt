@@ -37,7 +37,7 @@ if(ENABLE_NETWORKING_SROUTER)
     set(SROUTER_JEMALLOC OFF CACHE BOOL "")
 
     add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
-    libsession_static_bundle(session-router::libsessionrouter)
+    libsession_static_bundle(session-router::core)
 endif()
 
 # The network library always needs oxen::quic.  When session-router is built (SROUTER, above) it

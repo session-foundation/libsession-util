@@ -22,6 +22,16 @@ using namespace oxen::log::literals;
 
 namespace session::network {
 
+// Holding the claim is what keeps the tunnel mapped; dropping it releases our hold, and Session
+// Router tears the mapping down once nobody else is holding it either.
+struct ActiveTunnel {
+    session::router::udp_tunnel tunnel;
+
+    // Set once the session behind the mapping is up.  Until then requests wait in
+    // `_pending_requests` rather than being written into a mapping with nothing to carry them.
+    bool established = false;
+};
+
 static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address);
 
 namespace {
@@ -79,33 +89,6 @@ namespace {
     }
 
 }  // namespace
-
-TunnelLease::TunnelLease(
-        std::shared_ptr<session::router::SessionRouter> srouter,
-        const session::router::tunnel_info& info) :
-        _srouter{std::move(srouter)},
-        _remote{info.remote},
-        _remote_port{info.remote_port},
-        _local_port{info.local_port} {}
-
-TunnelLease& TunnelLease::operator=(TunnelLease&& other) noexcept {
-    _srouter = std::exchange(other._srouter, {});
-    _remote = std::exchange(other._remote, {});
-    _remote_port = std::exchange(other._remote_port, 0);
-    _local_port = std::exchange(other._local_port, 0);
-    established = std::exchange(other.established, false);
-    return *this;
-}
-
-TunnelLease::~TunnelLease() {
-    if (_remote.empty())
-        return;
-
-    if (auto srouter = _srouter.lock()) {
-        log::debug(cat, "Closing tunnel to {}.", _remote);
-        srouter->close_udp(_remote, _remote_port);
-    }
-}
 
 std::shared_ptr<SessionRouter> SessionRouter::make(
         config::SessionRouter config,
@@ -321,19 +304,26 @@ void SessionRouter::_start_file_upload(
                     if (!self)
                         return nullptr;
 
-                    // Establish tunnel synchronously (we're on the loop thread here)
-                    auto info = srouter->establish_udp(target.address, target.port);
-                    if (!info) {
+                    // Establish tunnel synchronously (we're on the loop thread here).  The claim
+                    // is kept alongside the other tunnels rather than in a local: the file client
+                    // goes on using this port long after this function has returned.
+                    auto& held = _tunnel(target.address);
+                    if (!held.tunnel)
+                        held.tunnel = srouter->establish_udp(target.address, target.port);
+                    if (!held.tunnel) {
                         log::error(cat, "File server {} is unreachable.", target.address);
                         return nullptr;
                     }
 
-                    auto pubkey = pubkey_from_srouter_address(info->remote);
+                    auto pubkey = pubkey_from_srouter_address(held.tunnel->remote);
                     if (!pubkey)
                         return nullptr;
 
                     return &_get_file_client(
-                            *pubkey, "::1", info->local_port, info->suggested_mtu);
+                            *pubkey,
+                            "::1",
+                            held.tunnel->local_port,
+                            held.tunnel->suggested_mtu);
                 });
 
         _loop->call([weak_self = weak_from_this(), this, upload_id] {
@@ -413,7 +403,7 @@ void SessionRouter::_close_connections() {
                     "Network is suspended.");
 
     // Clear all storage of requests, paths and connections so that we are in a fresh state on
-    // relaunch; dropping the leases closes the tunnels behind them.
+    // relaunch; dropping our claims releases the tunnels behind them.
     _active_tunnels.clear();
     _pending_requests.clear();
     _update_status(ConnectionStatus::disconnected);
@@ -516,11 +506,11 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
         if (auto it = _active_tunnels.find(remote_pubkey_hex);
-            it != _active_tunnels.end() && it->second.established) {
+            it != _active_tunnels.end() && it->second->established) {
             log::trace(cat, "[Request {}] Found active tunnel.", request.request_id);
             _send_via_tunnel(
-                    it->second.remote(),
-                    it->second.local_port(),
+                    it->second->tunnel->remote,
+                    it->second->tunnel->local_port,
                     std::move(request),
                     std::move(callback));
             return;
@@ -880,7 +870,8 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                     return;
                 }
 
-                if (!srouter->establish_udp(
+                auto& held = _tunnel(target.address);
+                held.tunnel = srouter->establish_udp(
                             target.address,
                             target.port,
                             [weak_self, this, upload_request, upload_id, data = std::move(data)](
@@ -892,16 +883,24 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                                             std::move(data),
                                             std::move(info));
                             },
-                            [weak_self, this, upload_request, upload_id]() {
+                            [weak_self, this, upload_request, upload_id](
+                                    router::tunnel_failure failure) {
                                 if (auto self = weak_self.lock()) {
+                                    bool timeout =
+                                            failure == router::tunnel_failure::timeout;
                                     log::error(
                                             cat,
-                                            "[Upload {}]: Tunnel establishment timed out.",
-                                            upload_id);
-                                    upload_request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                                            "[Upload {}]: Tunnel establishment failed: {}.",
+                                            upload_id,
+                                            timeout ? "timed out" : "remote is unreachable");
+                                    upload_request.on_complete(
+                                            timeout ? ERROR_BUILD_TIMEOUT
+                                                    : ERROR_INVALID_DESTINATION,
+                                            timeout);
                                     _cleanup_upload(upload_id);
                                 }
-                            })) {
+                            });
+                if (!held.tunnel) {
                     // Neither callback fires when the remote is unreachable, so this is the only
                     // chance to report it.
                     log::error(cat, "[Upload {}]: {} is unreachable.", upload_id, target.address);
@@ -1073,7 +1072,8 @@ void SessionRouter::_download_internal(DownloadRequest request) {
     _active_downloads[download_id] = request;
     auto file_id = download_info->file_id;
 
-    if (!srouter->establish_udp(
+    auto& held = _tunnel(quic_target->address);
+    held.tunnel = srouter->establish_udp(
                 quic_target->address,
                 quic_target->port,
                 [weak_self = weak_from_this(), this, request, download_id, file_id](
@@ -1082,14 +1082,21 @@ void SessionRouter::_download_internal(DownloadRequest request) {
                         _quic_download_via_tunnel(
                                 request, download_id, std::move(file_id), std::move(info));
                 },
-                [weak_self = weak_from_this(), this, request, download_id]() {
+                [weak_self = weak_from_this(), this, request, download_id](
+                        router::tunnel_failure failure) {
                     if (auto self = weak_self.lock()) {
+                        bool timeout = failure == router::tunnel_failure::timeout;
                         log::error(
-                                cat, "[Download {}]: Tunnel establishment timed out.", download_id);
+                                cat,
+                                "[Download {}]: Tunnel establishment failed: {}.",
+                                download_id,
+                                timeout ? "timed out" : "remote is unreachable");
                         _active_downloads.erase(download_id);
-                        request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                        request.on_complete(
+                                timeout ? ERROR_BUILD_TIMEOUT : ERROR_INVALID_DESTINATION, timeout);
                     }
-                })) {
+                });
+    if (!held.tunnel) {
         // Neither callback fires when the remote is unreachable, so this is the only chance to
         // report it.
         log::error(cat, "[Download {}]: {} is unreachable.", download_id, quic_target->address);
@@ -1221,7 +1228,7 @@ void SessionRouter::_establish_tunnel(
             "[Request {}] Establishing new tunnel to {}.",
             initiating_req_id,
             address_pubkey_hex);
-    auto info = srouter->establish_udp(
+    auto tunnel = srouter->establish_udp(
             srouter_address,
             test_port,
             [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
@@ -1238,12 +1245,7 @@ void SessionRouter::_establish_tunnel(
 
                 // This can fire before `establish_udp` returns, when a session to the remote is
                 // already up, so the lease may not have been recorded yet.
-                auto tunnel = _active_tunnels.find(address_pubkey_hex);
-                if (tunnel == _active_tunnels.end())
-                    tunnel = _active_tunnels.try_emplace(
-                                                address_pubkey_hex, TunnelLease{srouter, info})
-                                     .first;
-                tunnel->second.established = true;
+                _tunnel(address_pubkey_hex).established = true;
 
                 auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
                 _pending_requests.erase(address_pubkey_hex);
@@ -1266,24 +1268,30 @@ void SessionRouter::_establish_tunnel(
                                 std::move(cb));
                 }
             },
-            [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id]() mutable {
+            [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
+                    router::tunnel_failure failure) mutable {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
+                // A relay contact we didn't have when the tunnel was requested, and which the
+                // lookup then found doesn't exist, arrives here rather than as a nullopt return.
+                bool unreachable = failure == router::tunnel_failure::unreachable;
+
                 log::info(
                         cat,
-                        "[Request {}] Unable to establish session router UDP connection to {}.",
+                        "[Request {}] Session router connection to {} failed: {}.",
                         initiating_req_id,
-                        address_pubkey_hex);
+                        address_pubkey_hex,
+                        unreachable ? "node is not reachable" : "timed out");
 
-                _fail_tunnel(address_pubkey_hex, false);
+                _fail_tunnel(address_pubkey_hex, unreachable);
             });
 
     // No tunnel at all means Session Router holds no relay contact for this node, i.e. it isn't
     // participating in the network rather than merely being slow to answer.  Neither callback
     // fires in that case, so the failure is ours to report.
-    if (!info) {
+    if (!tunnel) {
         log::info(
                 cat,
                 "[Request {}] {} is not reachable via session router.",
@@ -1294,15 +1302,21 @@ void SessionRouter::_establish_tunnel(
         return;
     }
 
-    // Only record the lease if the established callback hasn't already done so: constructing a
-    // second one for the same mapping would close it again when the temporary died.
-    if (!_active_tunnels.contains(address_pubkey_hex))
-        _active_tunnels.emplace(address_pubkey_hex, TunnelLease{srouter, *info});
+    // The established callback may already have run, so keep whatever it recorded and only fill
+    // in the claim.
+    _tunnel(address_pubkey_hex).tunnel = std::move(tunnel);
+}
+
+ActiveTunnel& SessionRouter::_tunnel(const std::string& pubkey_hex) {
+    auto& entry = _active_tunnels[pubkey_hex];
+    if (!entry)
+        entry = std::make_unique<ActiveTunnel>();
+    return *entry;
 }
 
 void SessionRouter::_fail_tunnel(const std::string& pubkey_hex, bool unreachable) {
-    // Dropping the lease closes the mapping; a later attempt builds a fresh one, which is also what
-    // gives Session Router the chance to notice that an unreachable node has come back.
+    // Dropping our claim releases the mapping; a later attempt builds a fresh one, which is also
+    // what gives Session Router the chance to notice that an unreachable node has come back.
     _active_tunnels.erase(pubkey_hex);
 
     if (auto snode_pool = _snode_pool.lock())

@@ -212,7 +212,7 @@ if(ENABLE_NETWORKING_SROUTER)
     target_sources(network
         PRIVATE
         network/routing/session_router_router.cpp)
-    target_link_libraries(network PUBLIC session-router::libsessionrouter)
+    target_link_libraries(network PUBLIC session-router::core)
     target_compile_definitions(network PUBLIC ENABLE_NETWORKING_SROUTER)
 endif()
 
