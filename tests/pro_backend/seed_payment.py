@@ -84,6 +84,20 @@ def _obfuscated_id(provider, vk):
     return b""
 
 
+def _round_up_to_utc_midnight(value):
+    """Ceil to the next UTC midnight; a value already exactly at midnight stays put.
+
+    Deliberately inlined rather than called from the backend. This was `base.round_datetime_to_next_day`
+    until the backend moved it into its own test scaffolding, on the grounds that day-rounding is not
+    something the backend does -- proof expiry lands on a per-account grid and every other instant is
+    stored as it happened. So there is no stable backend function to call here, and substituting
+    another internal would only queue up the next AttributeError.
+    """
+    value = value.astimezone(datetime.timezone.utc)
+    midnight = value.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight if midnight == value else midnight + datetime.timedelta(days=1)
+
+
 def cmd_payment(args):
     engine, conn, err = _open()
     try:
@@ -99,7 +113,7 @@ def cmd_payment(args):
             payment_tx=_payment_tx(args.provider, args.payment_id),
             plan=plan,
             purchased_at=now,
-            expiry_at=base.round_datetime_to_next_day(now)
+            expiry_at=_round_up_to_utc_midnight(now)
             + datetime.timedelta(days=args.expiry_days),
             platform_refund_expiry_at=base.EPOCH,
             platform_obfuscated_account_id=_obfuscated_id(args.provider, vk),
