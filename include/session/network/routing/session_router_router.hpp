@@ -32,6 +32,35 @@ namespace config {
     };
 }  // namespace config
 
+// A session-router UDP tunnel mapping, released when this object is destroyed.  Session Router
+// creates the mapping up front and leaves its lifetime entirely to us: a session that never
+// establishes does not cancel it, so without an explicit close the mapping, and the session behind
+// it, outlive every use we had for them.
+class TunnelLease {
+    std::weak_ptr<session::router::SessionRouter> _srouter;
+    std::string _remote;
+    uint16_t _remote_port = 0;
+    uint16_t _local_port = 0;
+
+  public:
+    TunnelLease() = default;
+    TunnelLease(
+            std::shared_ptr<session::router::SessionRouter> srouter,
+            const session::router::tunnel_info& info);
+    TunnelLease(TunnelLease&& other) noexcept { *this = std::move(other); }
+    TunnelLease& operator=(TunnelLease&& other) noexcept;
+    TunnelLease(const TunnelLease&) = delete;
+    TunnelLease& operator=(const TunnelLease&) = delete;
+    ~TunnelLease();
+
+    // Set once the session behind the mapping is up.  Until then requests wait in
+    // `_pending_requests` rather than being written into a mapping with nothing to carry them.
+    bool established = false;
+
+    const std::string& remote() const { return _remote; }
+    uint16_t local_port() const { return _local_port; }
+};
+
 class SessionRouter : public IRouter, public std::enable_shared_from_this<SessionRouter> {
   private:
     bool _ready = false;
@@ -45,7 +74,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     // Pool of QUIC file server clients, keyed by Ed25519 pubkey.  Multiple requests to the
     // same server share one client (and thus one connection with idle timeout).
     std::unordered_map<ed25519_pubkey, std::unique_ptr<QuicFileClient>> _file_clients;
-    std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
+    std::unordered_map<std::string, TunnelLease> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
     std::vector<std::function<void()>> _pending_operations;
@@ -118,10 +147,19 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
             std::span<const std::byte, 32> remote_pubkey,
             const uint16_t remote_port,
             const std::string& initiating_req_id);
+    // Takes the tunnel's endpoint by value rather than a reference into `_active_tunnels`: a
+    // response callback that runs inline can fail the tunnel out from under us.
     void _send_via_tunnel(
-            session::router::tunnel_info tunnel,
+            std::string tunnel_remote,
+            uint16_t tunnel_local_port,
             Request request,
             network_response_callback_t callback);
+
+    // Fails every request waiting on a tunnel to `pubkey_hex`, and tells the SnodePool so that the
+    // node stops being selected.  `unreachable` distinguishes a node Session Router has no relay
+    // contact for -- which will stay unreachable until it rejoins the network -- from one that
+    // merely failed to establish this time.
+    void _fail_tunnel(const std::string& pubkey_hex, bool unreachable);
 };
 
 }  // namespace session::network
