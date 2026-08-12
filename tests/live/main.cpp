@@ -5,9 +5,8 @@
 #include "../log_setup.hpp"
 
 // Router selection: consumed by make_testnet_core() in live_utils.hpp.
-// TODO FIXME: remove the `0 &&` once --srouter is working to restore session_router() as default.
 session::network::opt::router live_router_mode =
-#if 0 && defined(ENABLE_NETWORKING_SROUTER)
+#ifdef ENABLE_NETWORKING_SROUTER
         session::network::opt::router::session_router();
 #else
         session::network::opt::router::onion_requests();
