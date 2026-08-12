@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <oxenc/base64.h>
 #include <oxenc/hex.h>
 
 #include <chrono>
@@ -9,6 +10,7 @@
 #include <optional>
 #include <session/parse_error.hpp>
 #include <session/types.hpp>
+#include <span>
 #include <string_view>
 
 namespace session::json {
@@ -88,26 +90,62 @@ std::optional<T> maybe(const nlohmann::json& j, std::string_view key) {
     return extract<T>(*it);
 }
 
-inline void require_hex(const nlohmann::json& j, std::string_view key, std::span<std::byte> dest) {
-    auto hex = require<std::string_view>(j, key);
-    if (hex.starts_with("0X") || hex.starts_with("0x"))
-        hex = hex.substr(2);
+// Reads a fixed-length binary value (a pubkey, a signature, a tag) that the wire carries either
+// hex- or base64-encoded, filling `dest` exactly.  `dest.size()` is the expected byte length, and
+// the encoding is identified from the encoded length alone -- no sniffing of the alphabet, which
+// cannot distinguish the two in general (any hex string is also valid base64).
+//
+// The destination must be a fixed-size byte buffer (a std::array, a C array, or an already
+// fixed-extent span) of at least 5 bytes: below that the encodings collide in length and cannot be
+// told apart, so the requirement is enforced at compile time.  For 1 byte hex and unpadded base64
+// are both 2 chars, for 2 bytes hex and padded base64 are both 4, and for 4 bytes both are 8.  From
+// 5 bytes up hex (2N) is strictly longer than padded base64 (4*ceil(N/3) <= (4N+8)/3) and than
+// unpadded (ceil(4N/3) <= (4N+2)/3), so the three lengths are always distinct.
+template <typename Dest>
+    requires requires(Dest& d) { std::span{d}; }
+inline void require_binary(const nlohmann::json& j, std::string_view key, Dest& dest_) {
+    std::span dest{dest_};
+    using D = decltype(dest);
+    static_assert(
+            std::same_as<typename D::element_type, std::byte>,
+            "require_binary writes into a std::byte buffer");
+    static_assert(
+            D::extent != std::dynamic_extent,
+            "require_binary needs a fixed-size destination: the byte length is what selects the "
+            "encoding");
+    static_assert(
+            D::extent >= 5,
+            "require_binary cannot disambiguate hex from base64 below 5 bytes (at 1, 2 and 4 bytes "
+            "the encoded lengths coincide)");
 
-    size_t hex_avail = dest.size() * 2;
-    if (hex.size() != hex_avail)
+    auto enc = require<std::string_view>(j, key);
+
+    const auto hex_size = oxenc::to_hex_size(dest.size());
+    const auto b64_padded = oxenc::to_base64_size(dest.size(), true);
+    const auto b64_unpadded = oxenc::to_base64_size(dest.size(), false);
+
+    if (enc.size() == hex_size) {
+        if (!oxenc::is_hex(enc))
+            throw session::parse_error_key{
+                    key, fmt::format("Key value ({}) was not valid hex: '{}'", key, enc)};
+        oxenc::from_hex(enc.begin(), enc.end(), dest.begin());
+    } else if (enc.size() == b64_padded || enc.size() == b64_unpadded) {
+        if (!oxenc::is_base64(enc))
+            throw session::parse_error_key{
+                    key, fmt::format("Key value ({}) was not valid base64: '{}'", key, enc)};
+        oxenc::from_base64(enc.begin(), enc.end(), dest.begin());
+    } else
         throw session::parse_error_key{
                 key,
                 fmt::format(
-                        "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
+                        "Key value ({}) was not a {}-byte value: expected {} hex chars or {}/{} "
+                        "base64 chars, got {}",
                         key,
-                        hex,
-                        hex_avail,
-                        hex.size())};
-
-    if (!oxenc::is_hex(hex))
-        throw session::parse_error_key{
-                key, fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
-    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
+                        dest.size(),
+                        hex_size,
+                        b64_unpadded,
+                        b64_padded,
+                        enc.size())};
 }
 
 }  // namespace session::json

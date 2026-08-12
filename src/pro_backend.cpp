@@ -184,9 +184,9 @@ namespace {
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
         result.proof.version = json::require<uint8_t>(result_obj, "version");
         result.proof.expiry_at = json::require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
-        json::require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
-        json::require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
-        json::require_hex(result_obj, "sig", result.proof.sig);
+        json::require_binary(result_obj, "revocation_tag", result.proof.revocation_tag);
+        json::require_binary(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
+        json::require_binary(result_obj, "sig", result.proof.sig);
 
         // Advisory and unsigned (pro-wire-protocol.md §2.2) -- never fed into signature
         // verification -- but required: a proof response without it can't refresh the cached access
@@ -316,7 +316,7 @@ GetProRevocationsResponse parse_revocations(std::string_view json_in) {
         auto obj = it.get<nlohmann::json::object_t>();
         ProRevocationItem item = {};
         item.effective_at = json::require<std::chrono::sys_seconds>(obj, "effective_ts");
-        json::require_hex(obj, "revocation_tag", item.revocation_tag);
+        json::require_binary(obj, "revocation_tag", item.revocation_tag);
         result.items.emplace_back(std::move(item));
     }
 

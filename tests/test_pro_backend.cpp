@@ -1,3 +1,4 @@
+#include <oxenc/base64.h>
 #include <oxenc/hex.h>
 #include <session/pro_backend.h>
 #include <sodium.h>
@@ -250,6 +251,40 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 nlohmann::json j_bad = j;
                 j_bad["result"]["account_auto_renewing"] = 1;  // int, not bool
                 REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), session::parse_error_type);
+
+                // Binary fields are accepted hex- or base64-encoded, padded or not, decoding to
+                // the same bytes. 32 bytes is 64 hex chars, 44 padded base64 or 43 unpadded, so
+                // the three are distinguishable by length alone.
+                nlohmann::json j_b64 = j;
+                j_b64["result"]["revocation_tag"] = oxenc::to_base64(fake_revocation_tag);
+                auto b64_padded = oxenc::to_base64(rotating_pubkey.data);
+                REQUIRE(b64_padded.size() == 44);
+                j_b64["result"]["rotating_pkey"] = b64_padded;
+                auto b64_unpadded = b64_padded.substr(0, 43);
+                REQUIRE(b64_unpadded.back() != '=');
+                j_b64["result"]["sig"] = oxenc::to_base64(master_privkey.data);
+                auto enc_cpp = parse_pro_proof(j_b64.dump());
+                REQUIRE(enc_cpp);
+                CHECK(enc_cpp.proof.revocation_tag == fake_revocation_tag);
+                CHECK(std::memcmp(
+                              enc_cpp.proof.rotating_pubkey.data(),
+                              rotating_pubkey.data,
+                              sizeof(rotating_pubkey.data)) == 0);
+
+                // An unpadded value of the same field decodes identically.
+                nlohmann::json j_b64u = j_b64;
+                j_b64u["result"]["rotating_pkey"] = b64_unpadded;
+                auto unpadded_cpp = parse_pro_proof(j_b64u.dump());
+                REQUIRE(unpadded_cpp);
+                CHECK(std::memcmp(
+                              unpadded_cpp.proof.rotating_pubkey.data(),
+                              rotating_pubkey.data,
+                              sizeof(rotating_pubkey.data)) == 0);
+
+                // A length matching neither encoding is rejected, naming the field.
+                nlohmann::json j_short = j;
+                j_short["result"]["revocation_tag"] = oxenc::to_hex(fake_revocation_tag).substr(2);
+                REQUIRE_THROWS_AS(parse_pro_proof(j_short.dump()), session::parse_error_key);
 
                 // The non-auto-renewing account: a genuine zero grace, and `E + 0 == E`.
                 nlohmann::json j_false = j;
