@@ -35,27 +35,6 @@ double epoch_seconds_double(session::sys_ms t) {
     return std::chrono::duration<double>(t.time_since_epoch()).count();
 }
 
-void json_require_hex(const nlohmann::json& j, std::string_view key, std::span<uint8_t> dest) {
-    auto hex = json_require<std::string_view>(j, key);
-    if (hex.starts_with("0X") || hex.starts_with("0x"))
-        hex = hex.substr(2);
-
-    size_t hex_avail = dest.size() * 2;
-    if (hex.size() != hex_avail)
-        throw session::parse_error_key{
-                key,
-                fmt::format(
-                        "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
-                        key,
-                        hex,
-                        hex_avail,
-                        hex.size())};
-
-    if (!oxenc::is_hex(hex))
-        throw session::parse_error_key{
-                key, fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
-    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
-}
 };  // namespace
 
 namespace session::pro_backend {

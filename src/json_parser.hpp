@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <oxenc/hex.h>
 
 #include <chrono>
 #include <concepts>
@@ -85,6 +86,29 @@ std::optional<T> json_maybe(const nlohmann::json& j, std::string_view key) {
     if (it == j.end() || !json_is<T>(*it).first)
         return std::nullopt;
     return json_extract<T>(*it);
+}
+
+inline void json_require_hex(
+        const nlohmann::json& j, std::string_view key, std::span<uint8_t> dest) {
+    auto hex = json_require<std::string_view>(j, key);
+    if (hex.starts_with("0X") || hex.starts_with("0x"))
+        hex = hex.substr(2);
+
+    size_t hex_avail = dest.size() * 2;
+    if (hex.size() != hex_avail)
+        throw session::parse_error_key{
+                key,
+                fmt::format(
+                        "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
+                        key,
+                        hex,
+                        hex_avail,
+                        hex.size())};
+
+    if (!oxenc::is_hex(hex))
+        throw session::parse_error_key{
+                key, fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
+    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
 }
 
 }  // namespace session::detail
