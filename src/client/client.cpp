@@ -774,6 +774,8 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
                 to_self ? std::optional<int>{}
                         : std::optional{static_cast<int>(SendState::pending)});
         client_id = c.sql.getLastInsertRowid();
+        log::debug(
+                cat, "send_message: stored message {} ({}B content)", client_id, serialised.size());
 
         c.prepared_exec(
                 "INSERT INTO message_raw_content (message, content) VALUES (?, ?)", client_id, raw);
