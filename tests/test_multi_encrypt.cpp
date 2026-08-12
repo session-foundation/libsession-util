@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <oxenc/bt_serialize.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/crypto/ed25519.hpp>
@@ -240,6 +241,52 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
                   x_keys[0].first,
                   x_keys[0].second,
                   "test suite"));
+
+    auto padded = encrypt_for_multiple_simple(
+            msgs[0],
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            x_keys[0].first,
+            x_keys[0].second,
+            "test suite",
+            nonce,
+            4);
+
+    oxenc::bt_dict_consumer padded_dict{padded};
+    auto padded_list = padded_dict.require<oxenc::bt_list_consumer>("e");
+    std::vector<size_t> padded_sizes;
+    while (!padded_list.is_finished())
+        padded_sizes.push_back(padded_list.consume<std::span<const std::byte>>().size());
+
+    CHECK(padded_sizes ==
+          std::vector<size_t>(4, msgs[0].size() + encryption::XCHACHA20_ABYTES));
+
+    auto padded_message = decrypt_for_multiple_simple(
+            padded, x_keys[3].first, x_keys[3].second, x_keys[0].second, "test suite");
+    REQUIRE(padded_message);
+    CHECK(session::to_string(*padded_message) == msgs[0]);
+
+    auto empty_padded = encrypt_for_multiple_simple(
+            std::string_view{},
+            to_view_vector(std::next(recipients.begin()), std::next(recipients.begin(), 2)),
+            x_keys[0].first,
+            x_keys[0].second,
+            "test suite",
+            nonce,
+            4);
+
+    oxenc::bt_dict_consumer empty_padded_dict{empty_padded};
+    auto empty_padded_list = empty_padded_dict.require<oxenc::bt_list_consumer>("e");
+    std::vector<size_t> empty_padded_sizes;
+    while (!empty_padded_list.is_finished())
+        empty_padded_sizes.push_back(
+                empty_padded_list.consume<std::span<const std::byte>>().size());
+
+    CHECK(empty_padded_sizes == std::vector<size_t>(4, encryption::XCHACHA20_ABYTES));
+
+    auto empty_message = decrypt_for_multiple_simple(
+            empty_padded, x_keys[1].first, x_keys[1].second, x_keys[0].second, "test suite");
+    REQUIRE(empty_message);
+    CHECK(empty_message->empty());
 
     auto m1 = decrypt_for_multiple_simple(
             encrypted, x_keys[1].first, x_keys[1].second, x_keys[0].second, "test suite");

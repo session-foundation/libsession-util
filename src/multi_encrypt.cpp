@@ -120,9 +120,9 @@ std::vector<std::byte> encrypt_for_multiple_simple(
                     msg_count++;
                 });
 
-        if (int pad_size = pad > 1 && !messages.empty() ? messages.front().size() : 0) {
-            std::vector<std::byte> junk;
-            junk.resize(pad_size);
+        if (pad > 1 && !messages.empty()) {
+            const auto pad_size = messages.front().size() + encrypt_multiple_message_overhead;
+            std::vector<std::byte> junk(pad_size);
             for (; msg_count % pad != 0; msg_count++) {
                 random::fill(junk);
                 enc_list.append(to_string(junk));
