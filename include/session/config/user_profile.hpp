@@ -45,6 +45,12 @@ using namespace std::literals;
 ///     terminal (will not renew), unknown, or the account isn't Pro. Backend-derived
 ///     (get_pro_status.auto_renewing) and synced across devices; the client sets it alongside `E`
 ///     and clears it (sets false) when the subscription lapses.
+/// G - how much longer the account keeps being served past `E`, in seconds
+///     (get_pro_status.grace_period_duration): the store's dunning window plus the backend's own
+///     renewal-latency allowance. Coverage ends at `E + G`; `[E, E + G)` is the window where the
+///     payment is overdue but service continues. Backend-derived and set alongside `E`. Omitted
+///     when zero, which is also what the backend sends when the subscription is not auto-renewing
+///     -- so an absent `G` and a zero `G` mean the same thing and coverage ends at `E`.
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -365,6 +371,35 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `auto_renewing` -- true if the subscription auto-renews; false to clear the flag.
     void set_pro_auto_renewing(bool auto_renewing);
+
+    /// API: user_profile/UserProfile::get_pro_grace_period
+    ///
+    /// Returns how much longer the account keeps being served past `E`
+    /// (`get_pro_status.grace_period_duration`), or zero if none is stored.  Backend-derived and
+    /// synced alongside `E`, so any linked device can compute when coverage actually ends:
+    /// `get_pro_access_expiry() + get_pro_grace_period()`.  `E` itself is the payment-due date --
+    /// the instant the term was paid through -- and `[E, E + G)` is the window where the payment is
+    /// overdue but service continues.
+    ///
+    /// Note this deliberately returns a plain duration rather than an optional: the backend sends
+    /// zero when the subscription is not auto-renewing, so "no grace stored" and "a grace of zero"
+    /// describe the same account and both give `E + 0 == E`.  There is no state a caller could act
+    /// on differently, so there is nothing for a presence check to disambiguate.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::seconds` -- the grace period, or `0s` if unset.
+    std::chrono::seconds get_pro_grace_period() const;
+
+    /// API: user_profile/UserProfile::set_pro_grace_period
+    ///
+    /// Records the account's grace period, in seconds.  Set alongside `set_pro_access_expiry` from
+    /// each `get_pro_status` response; a zero (or negative) value erases the key.
+    ///
+    /// Inputs:
+    /// - `grace` -- the grace period; zero or negative clears it.
+    void set_pro_grace_period(std::chrono::seconds grace);
 
     /// API: user_profile/UserProfile::get_refund_requested
     ///

@@ -18,59 +18,12 @@
 #include <session/util.hpp>
 
 #include "internal-util.hpp"
+#include "json_parser.hpp"
 #include "pro_message.hpp"
 
 namespace {
 
-using session::pro_backend::parse_error;
-
-nlohmann::json json_parse(std::string_view json) {
-    try {
-        return nlohmann::json::parse(json);
-    } catch (const std::exception& e) {
-        throw parse_error{fmt::format("Invalid JSON received, parse failed: {}", e.what())};
-    }
-}
-
-template <typename T>
-T json_require(const nlohmann::json& j, std::string_view key) {
-    auto it = j.find(key);
-    if (it == j.end())
-        throw parse_error{fmt::format("Key '{}' is missing", key)};
-
-    bool success = false;
-    std::string_view type;
-    if constexpr (std::floating_point<T>) {
-        // An integer is a valid float value, so accept any JSON number: is_number_float() alone
-        // would wrongly reject an integer-valued number.
-        type = "a number";
-        success = it->is_number();
-    } else if constexpr (std::same_as<T, bool>) {
-        type = "a boolean";
-        success = it->is_boolean();
-    } else if constexpr (std::integral<T>) {
-        // is_number_integer() (not is_number()) so a fractional wire value is rejected rather than
-        // silently truncated by get_to. True for both signed and unsigned integer storage.
-        type = "an integer";
-        success = it->is_number_integer();
-    } else if constexpr (session::is_one_of<T, std::string, std::string_view>) {
-        type = "a string";
-        success = it->is_string();
-    } else if constexpr (std::same_as<T, nlohmann::json::array_t>) {
-        type = "an array";
-        success = it->is_array();
-    } else {
-        static_assert(std::same_as<T, nlohmann::json::object_t>);
-        type = "an object";
-        success = it->is_object();
-    }
-    if (!success)
-        throw parse_error{fmt::format("Key value ({}, {}) was not {}", key, it->dump(1), type)};
-
-    T result = {};
-    it->get_to<T>(result);
-    return result;
-}
+using namespace session::detail;
 
 // Fractional UNIX seconds (double) -> millisecond-precision system time, preserving the provider's
 // sub-second precision (rounded to the nearest millisecond).
@@ -85,24 +38,6 @@ double epoch_seconds_double(session::sys_ms t) {
     return std::chrono::duration<double>(t.time_since_epoch()).count();
 }
 
-void json_require_hex(const nlohmann::json& j, std::string_view key, std::span<std::byte> dest) {
-    auto hex = json_require<std::string_view>(j, key);
-    if (hex.starts_with("0X") || hex.starts_with("0x"))
-        hex = hex.substr(2);
-
-    size_t hex_avail = dest.size() * 2;
-    if (hex.size() != hex_avail)
-        throw parse_error{fmt::format(
-                "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
-                key,
-                hex,
-                hex_avail,
-                hex.size())};
-
-    if (!oxenc::is_hex(hex))
-        throw parse_error{fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
-    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
-}
 };  // namespace
 
 namespace session::pro_backend {
@@ -250,8 +185,7 @@ namespace {
     // proof) from the already-extracted `result` object.
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
         result.proof.version = json_require<uint8_t>(result_obj, "version");
-        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts");
-        result.proof.expiry_at = as_sys_seconds(expiry_ts);
+        result.proof.expiry_at = json_require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
         json_require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
         json_require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
         json_require_hex(result_obj, "sig", result.proof.sig);
@@ -259,8 +193,18 @@ namespace {
         // Advisory and unsigned (pro-wire-protocol.md §2.2) -- never fed into signature
         // verification -- but required: a proof response without it can't refresh the cached access
         // expiry, which breaks renewal, so treat a missing value as a malformed response.
-        auto account_expiry_ts = json_require<int64_t>(result_obj, "account_expiry_ts");
-        result.account_expiry = as_sys_seconds(account_expiry_ts);
+        result.account_expiry =
+                json_require<std::chrono::sys_seconds>(result_obj, "account_expiry_ts");
+
+        // The two values that qualify `account_expiry_ts`. Absent -> keep the {0}/{false} default:
+        // the backend sends `0`/`false` whenever grace/renewal don't apply and omits them on a
+        // backend that predates them, so a missing field means "not applicable", never "keep the
+        // stale value". A present value must still be well-formed (a wrong type throws).
+        if (result_obj.contains("account_grace_period_duration"))
+            result.account_grace_period =
+                    json_require<std::chrono::seconds>(result_obj, "account_grace_period_duration");
+        if (result_obj.contains("account_auto_renewing"))
+            result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");
     }
 }  // namespace
 
@@ -269,13 +213,23 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
     auto result_obj = read_envelope(json, result);
     if (!result) {
         // On a subscription_expired failure the account's (now-past) true expiry rides top-level on
-        // the envelope (pro-wire-protocol.md §2.2 / §5.1) so the client can refresh its cached
-        // horizon / access expiry without a separate get_pro_status. Advisory -- read leniently
-        // (the envelope already parsed, so this re-parse can't throw).
+        // the envelope, alongside the same grace/renewal qualifiers as the success path
+        // (pro-wire-protocol.md §2.2 / §5.1), so the client can refresh all three without a
+        // separate get_pro_status. They must travel together: coverage ends at `account_expiry +
+        // grace`, and an expiry has typically NOT changed on this failure (it is a
+        // lapse/cancellation) while the grace and flag have -- refreshing only the expiry would
+        // leave a stale grace claiming coverage the backend has stopped honouring. Read leniently,
+        // absent -> {0}/{false} as on the success path (the envelope already parsed, so json_parse
+        // here can't throw).
         if (result.error_code == "subscription_expired") {
             auto j = json_parse(json);
-            if (auto it = j.find("account_expiry_ts"); it != j.end() && it->is_number_integer())
-                result.account_expiry = as_sys_seconds(it->get<int64_t>());
+            if (auto expiry = json_maybe<std::chrono::sys_seconds>(j, "account_expiry_ts"))
+                result.account_expiry = *expiry;
+            if (j.contains("account_grace_period_duration"))
+                result.account_grace_period =
+                        json_require<std::chrono::seconds>(j, "account_grace_period_duration");
+            if (j.contains("account_auto_renewing"))
+                result.account_auto_renewing = json_require<bool>(j, "account_auto_renewing");
         }
         return result;
     }
@@ -343,8 +297,8 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
 
     // Parse payload
     result.ticket = json_require<int64_t>(result_obj, "ticket");
-    result.retry_in = std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in"));
-    result.retain_for = std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for"));
+    result.retry_in = json_require<std::chrono::seconds>(result_obj, "retry_in");
+    result.retain_for = json_require<std::chrono::seconds>(result_obj, "retain_for");
 
     // Clamp values against non-sensical/catastrophic values: retry_in of very small would result in
     // excess retries, and an overly long retry (e.g. 10 years) would make the client not properly
@@ -363,7 +317,7 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
 
         auto obj = it.get<nlohmann::json::object_t>();
         ProRevocationItem item = {};
-        item.effective_at = as_sys_seconds(json_require<int64_t>(obj, "effective_ts"));
+        item.effective_at = json_require<std::chrono::sys_seconds>(obj, "effective_ts");
         json_require_hex(obj, "revocation_tag", item.revocation_tag);
         result.items.emplace_back(std::move(item));
     }
@@ -438,9 +392,11 @@ namespace {
         // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
         // timestamps are whole-second integers.
         auto purchased_ts = json_require<double>(obj, "purchased_ts");
-        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts");
-        auto grace_period_duration = json_require<int64_t>(obj, "grace_period_duration");
-        auto platform_refund_expiry_ts = json_require<int64_t>(obj, "platform_refund_expiry_ts");
+        auto expiry_at = json_require<std::chrono::sys_seconds>(obj, "expiry_ts");
+        auto grace_period_duration =
+                json_require<std::chrono::seconds>(obj, "grace_period_duration");
+        auto platform_refund_expiry_at =
+                json_require<std::chrono::sys_seconds>(obj, "platform_refund_expiry_ts");
         auto revoked_ts = json_require<double>(obj, "revoked_ts");
 
         ProPaymentItem item = {};
@@ -451,9 +407,9 @@ namespace {
         item.payment_id = std::move(payment_id);
         item.auto_renewing = auto_renewing;
         item.purchased_at = sys_ms_from_seconds(purchased_ts);
-        item.expiry_at = as_sys_seconds(expiry_ts);
-        item.grace_period_duration = std::chrono::seconds(grace_period_duration);
-        item.platform_refund_expiry_at = as_sys_seconds(platform_refund_expiry_ts);
+        item.expiry_at = expiry_at;
+        item.grace_period_duration = grace_period_duration;
+        item.platform_refund_expiry_at = platform_refund_expiry_at;
         item.revoked_at = sys_ms_from_seconds(revoked_ts);
         return item;
     }
@@ -495,20 +451,19 @@ ProStatusResponse parse_pro_status(std::string_view json) {
     // parse.
     result.user_status = json_require<std::string>(result_obj, "user_status");
     result.auto_renewing = json_require<bool>(result_obj, "auto_renewing");
-    result.expiry_at = as_sys_seconds(json_require<int64_t>(result_obj, "expiry_ts"));
+    result.expiry_at = json_require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
     result.grace_period_duration =
-            std::chrono::seconds(json_require<int64_t>(result_obj, "grace_period_duration"));
+            json_require<std::chrono::seconds>(result_obj, "grace_period_duration");
 
     // `latest_payment` is a single payment item, or null when the account has no payments.
     if (auto it = result_obj.find("latest_payment"); it == result_obj.end())
-        throw parse_error{"Key 'latest_payment' is missing"};
+        throw parse_error_missing{"latest_payment"};
     else if (it->second.is_null()) {
         // No payments: latest_payment stays std::nullopt.
     } else if (it->second.is_object())
         result.latest_payment = parse_payment_item(it->second.get<nlohmann::json::object_t>());
     else
-        throw parse_error{fmt::format(
-                "Key value (latest_payment, {}) was not an object or null", it->second.dump(1))};
+        throw parse_error_type{"latest_payment", "an object or null", it->second.dump(1)};
 
     return result;
 }
@@ -533,14 +488,13 @@ PaymentDetailsResponse parse_payment_details(std::string_view json) {
 
     // `next_cursor` is the opaque keyset cursor (§5.3), or null at end-of-data.
     if (auto it = result_obj.find("next_cursor"); it == result_obj.end())
-        throw parse_error{"Key 'next_cursor' is missing"};
+        throw parse_error_missing{"next_cursor"};
     else if (it->second.is_null()) {
         // End of data: next_cursor stays std::nullopt.
     } else if (it->second.is_string())
         result.next_cursor = it->second.get<std::string>();
     else
-        throw parse_error{fmt::format(
-                "Key value (next_cursor, {}) was not a string or null", it->second.dump(1))};
+        throw parse_error_type{"next_cursor", "a string or null", it->second.dump(1)};
 
     return result;
 }
@@ -798,6 +752,8 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
         std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
         result.account_expiry_ts =
                 owned->account_expiry ? session::epoch_seconds(*owned->account_expiry) : 0;
+        result.account_grace_period_duration = owned->account_grace_period.count();
+        result.account_auto_renewing = owned->account_auto_renewing;
         // All C fields aliased into *owned; hand ownership to the response (freed by *_free).
         result.header.internal_ = owned.release();
     } catch (const std::exception& e) {

@@ -7,6 +7,7 @@
 #include <optional>
 #include <session/clock.hpp>
 #include <session/crypto/ed25519.hpp>
+#include <session/parse_error.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
@@ -61,14 +62,6 @@
 /// See the unit tests for examples of using the APIs mentioned.
 
 namespace session::pro_backend {
-
-/// Thrown by the parse_* functions when the backend's reply cannot be understood: malformed JSON, a
-/// missing or wrong-typed field, an unrecognized envelope status, or bad hex. This is distinct from
-/// a well-formed backend *failure* (envelope status "fail"/"error" carrying an error_code), which
-/// is not an error to the parser -- it is returned normally with `status`/`error_code` populated.
-struct parse_error : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
 
 /// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
 /// checking its signature against this key (see ProProof::verify_signature). This is the current
@@ -188,15 +181,39 @@ struct ProRequest {
 struct GenerateProProofResponse : ResponseBase {
     ProProof proof;
 
-    /// The account's true, grace-inclusive subscription entitlement end -- the same value
-    /// `get_pro_status` reports as its `expiry_ts` (pro-wire-protocol.md §2.2). Advisory and
-    /// UNSIGNED: not part of the proof's signed message and never fed into signature verification;
-    /// it rides on the response so a proof fetch also refreshes the client's cached access expiry.
-    /// Distinct from `proof.expiry_at` (the clamped, rolling <=30d proof-validity window). Present
-    /// (and required) on a successful proof, and on a `subscription_expired` failure (a now-past
-    /// value carried top-level on the envelope); nullopt on other outcomes (`not_subscribed`,
-    /// `revoked`, protocol errors).
+    /// The end of the paid term -- the same value `get_pro_status` reports as its `expiry_ts`
+    /// (pro-wire-protocol.md §2.2), carrying neither the store's grace nor the backend's
+    /// renewal-latency allowance; coverage runs to `account_expiry + account_grace_period`.
+    /// Advisory and UNSIGNED: not part of the proof's signed message and never fed into signature
+    /// verification; it rides on the response so a proof fetch also refreshes the client's cached
+    /// access expiry. Distinct from `proof.expiry_at` (the clamped, rolling <=30d proof-validity
+    /// window). Present (and required) on a successful proof, and on a `subscription_expired`
+    /// failure (a now-past value carried top-level on the envelope); nullopt on other outcomes
+    /// (`not_subscribed`, `revoked`, protocol errors).
     std::optional<std::chrono::sys_seconds> account_expiry;
+
+    /// How much longer the account keeps being served past `account_expiry` above -- the store's
+    /// dunning window plus the backend's renewal-latency allowance -- so coverage ends at
+    /// `account_expiry + account_grace_period`. Zero whenever the subscription is not
+    /// auto-renewing, mirroring `get_pro_status`, because neither span applies to a term that is
+    /// simply ending.
+    ///
+    /// Carried, alongside `account_auto_renewing`, on both a successful proof and a
+    /// `subscription_expired` failure -- refresh all three of these together (see `account_expiry`)
+    /// and never the expiry alone. `0` when the backend omits it, which it does whenever grace does
+    /// not apply: a missing value means "not applicable" and should overwrite (clear) any stale
+    /// cached grace, never be taken as "leave the old value". Consequently it is a truthful `0` on
+    /// the account-less outcomes too (`not_subscribed`, `revoked`, protocol/transport errors).
+    std::chrono::seconds account_grace_period{0};
+
+    /// Whether the subscription behind `account_expiry` renews itself -- the same value
+    /// `get_pro_status` reports as `auto_renewing`. Advisory and UNSIGNED, like the two above.
+    ///
+    /// Travels with `account_grace_period` (see there): carried on a successful proof and on a
+    /// `subscription_expired` failure, `false` whenever the backend omits it. Refresh it together
+    /// with the expiry and grace; a missing value means "not renewing" and should clear the
+    /// presence-only config flag, not preserve a stale one.
+    bool account_auto_renewing{false};
 };
 
 /// Parse the reply to a generate-proof request. On success `proof` holds the issued proof; a
@@ -337,10 +354,13 @@ struct ProPaymentItem {
     /// Unix timestamp of when the payment was expiry. 0 if not activated
     std::chrono::sys_seconds expiry_at;
 
-    /// Duration of the grace period, e.g. when the payment provider will start to attempt to renew
-    /// the Session Pro subscription. During the period between
-    /// [expiry_at, expiry_at + grace_period_duration] the user continues to have
-    /// entitlement to Session Pro. This value is only applicable if `auto_renewing` is `true`.
+    /// The dunning window this ONE payment's provider declared -- raw store data, and NOT the same
+    /// quantity as `ProStatusResponse::grace_period_duration`, which is account-level and adds the
+    /// backend's renewal-latency allowance. This one is also not gated on `auto_renewing`, so a
+    /// cancelled subscription can still carry a stale non-zero value here.
+    ///
+    /// Use the account-level field for "when does entitlement end"; this is for showing what a
+    /// given payment was granted. Only meaningful when this payment's `auto_renewing` is true.
     std::chrono::seconds grace_period_duration;
 
     /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
@@ -369,36 +389,30 @@ struct ProStatusResponse : ResponseBase {
     /// Flag to indicate if the user will automatically renew their subscription.
     bool auto_renewing;
 
-    /// Deadline UNIX timestamp that a user is entitled to Session Pro Proofs. The user is allowed
-    /// to request a Session Pro Proof from the Pro Backend up until this timestamp. Thereafter
-    /// the user is no longer entitled to Session Pro. This deadline includes the grace period if
-    /// applicable.
+    /// The account's PAYMENT-DUE date: the instant the current term was paid through. This does
+    /// NOT include the grace period -- entitlement continues to `expiry_at +
+    /// grace_period_duration`, and the backend judges `user_status` against that sum rather than
+    /// against this value.
     ///
-    /// The grace period is enabled when `auto_renewing` is `true` and is the extra period after a
-    /// user's subscription has elapsed that the payment provider allocates to continue entitlement
-    /// to Session Pro whilst attempting to execute the billing of a Session Pro subscription.
-    ///
-    /// This allows a user to maintain entitlement to Session Pro across billing cycles by giving
-    /// some leeway as to the time required for the payment provider to successfully bill the user.
-    /// This expiry timestamp is hence calculated as:
-    ///
-    ///   expiry_at = subscription_expiry + grace_period_duration
-    ///
-    /// E.g. The subscription expiry timestamp can be calculated by subtracting
-    /// `grace_period_duration` to determine if the user is currently in a grace period. Some
-    /// platforms do not support a grace period so this value can be 0.
-    ///
-    /// Finally, a reminder that the grace period is not activated or included in this deadline
-    /// timestamp if they have configured subscription `auto_renewing` to be off.
+    /// So `expiry_at` alone answers "when is the next payment due", and `[expiry_at,
+    /// expiry_at + grace_period_duration)` is the window where the payment is overdue but service
+    /// continues. Do not subtract the grace from this -- that was the shape before the backend
+    /// stopped folding grace into the stored expiry, and it now yields an instant that means
+    /// nothing.
     ///
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
     std::chrono::sys_seconds expiry_at;
 
-    /// Duration that a user is entitled to for their grace period. This value is to be ignored if
-    /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
-    /// subtracting it from `expiry_at`.
+    /// How much longer entitlement continues PAST `expiry_at`: the payment provider's dunning
+    /// window (the leeway it allows itself to retry a failed renewal) plus the backend's own
+    /// renewal-latency allowance, which covers the gap between a term ending and the backend
+    /// learning whether it renewed.
+    ///
+    /// Add it to `expiry_at` to get the instant entitlement actually ends. 0 when `auto_renewing`
+    /// is false, because neither span applies to a term that is simply ending -- so the sum is
+    /// still correct there without a special case.
     std::chrono::seconds grace_period_duration;
 };
 
