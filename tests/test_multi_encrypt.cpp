@@ -257,8 +257,7 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
     while (!padded_list.is_finished())
         padded_sizes.push_back(padded_list.consume<std::span<const std::byte>>().size());
 
-    CHECK(padded_sizes ==
-          std::vector<size_t>(4, msgs[0].size() + encryption::XCHACHA20_ABYTES));
+    CHECK(padded_sizes == std::vector<size_t>(4, msgs[0].size() + encryption::XCHACHA20_ABYTES));
 
     auto padded_message = decrypt_for_multiple_simple(
             padded, x_keys[3].first, x_keys[3].second, x_keys[0].second, "test suite");
