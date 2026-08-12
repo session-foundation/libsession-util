@@ -11,10 +11,6 @@ using namespace oxen::log::literals;
 
 namespace session::network {
 
-session::network::x25519_pubkey service_node::swarm_pubkey() const {
-    return session::network::compute_x25519_pubkey(remote_pubkey);
-}
-
 std::string service_node::to_string() const {
     return remote_pubkey.hex();
 }

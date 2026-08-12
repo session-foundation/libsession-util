@@ -53,7 +53,6 @@ struct service_node {
 
     std::span<const std::byte, 32> view_remote_key() const { return remote_pubkey; }
     std::string host() const { return ip.to_string(); }
-    session::network::x25519_pubkey swarm_pubkey() const;
 
     std::string to_string() const;
     std::string to_https_string() const;

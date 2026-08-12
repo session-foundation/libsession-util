@@ -847,6 +847,22 @@ void Network::_handle_421_retry(
                 {content_type_plain_text},
                 "Received 421 from a non-service-node destination");
 
+    // A 421 says the account we asked about is not in this node's swarm, so recovering means
+    // re-resolving *that account's* swarm.  Nothing about the node we asked can tell us which
+    // account that was, so a request that did not record one cannot be redirected.
+    if (!original_request.swarm_pubkey) {
+        log::warning(
+                cat,
+                "Request {} received 421 but carries no swarm pubkey to re-resolve.",
+                original_request.request_id);
+        return final_callback(
+                false,
+                false,
+                ERROR_MISDIRECTED_REQUEST,
+                {content_type_plain_text},
+                "421 Misdirected Request for a request with no swarm");
+    }
+
     // If we got a 421 it means our snode cache is outdated (because the swarm the destination node
     // belongs to doesn't match our cache anymore)
     log::info(
@@ -863,7 +879,7 @@ void Network::_handle_421_retry(
              req_to_retry = std::move(original_request),
              cb = std::move(final_callback),
              failed_node = failed_node_copy] {
-                auto swarm_pubkey = failed_node.swarm_pubkey();
+                auto swarm_pubkey = *req_to_retry.swarm_pubkey;
 
                 _snode_pool->get_swarm(
                         swarm_pubkey,
@@ -1785,6 +1801,10 @@ LIBSESSION_C_API void session_network_send_request(
                          : std::nullopt),
                 std::nullopt,
                 request_id};
+
+        if (params->swarm_pubkey_hex)
+            request.swarm_pubkey = x25519_pubkey::from_hex({params->swarm_pubkey_hex, 64});
+
         auto cpp_callback = [c_cb = callback, c_ctx = ctx](
                                     bool success,
                                     bool timeout,

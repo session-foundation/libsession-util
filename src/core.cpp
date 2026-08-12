@@ -41,6 +41,25 @@ static constexpr bool ns_requires_auth(int16_t ns_val) {
     return !(ns_val < 0 && (-ns_val) % 20 == 1);
 }
 
+// Builds a request sent to `node` *about* the account identified by `swarm_pubkey`.  Recording the
+// swarm pubkey is what allows a 421 (the node is no longer in that account's swarm) to be recovered
+// by re-resolving the swarm, so it is bundled in here rather than left to each call site to
+// remember.
+static network::Request swarm_request(
+        const network::service_node& node,
+        const network::x25519_pubkey& swarm_pubkey,
+        std::string endpoint,
+        std::vector<std::byte> body) {
+    network::Request req{
+            node,
+            std::move(endpoint),
+            std::move(body),
+            network::RequestCategory::standard_small,
+            20s};
+    req.swarm_pubkey = swarm_pubkey;
+    return req;
+}
+
 static cleared_b32 seed_from_words(
         std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
     auto n = words.size();
@@ -186,12 +205,7 @@ void Core::_poll() {
 
                 auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
                 net->send_request(
-                        network::Request{
-                                node,
-                                "batch",
-                                to_vector(body_str),
-                                network::RequestCategory::standard_small,
-                                20s},
+                        swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
                         [this, sn_pubkey = node.remote_pubkey, namespaces](
                                 bool success,
                                 bool timeout,
@@ -358,44 +372,42 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
             {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
-    net->get_swarm(x25519_pub, false, [this, net, sid = std::move(sid), params](auto, auto swarm) {
-        if (swarm.empty()) {
-            log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
-            if (callbacks.pfs_keys_fetched)
-                callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
-            return;
-        }
+    net->get_swarm(
+            x25519_pub,
+            false,
+            [this, net, sid = std::move(sid), params, x25519_pub](auto, auto swarm) {
+                if (swarm.empty()) {
+                    log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+                    if (callbacks.pfs_keys_fetched)
+                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+                    return;
+                }
 
-        auto body_str = params.dump();
-        net->send_request(
-                network::Request{
-                        swarm.front(),
-                        "retrieve",
-                        to_vector(body_str),
-                        network::RequestCategory::standard_small,
-                        20s},
-                [this, sid = std::move(sid)](
-                        bool success,
-                        bool timeout,
-                        int16_t /*status_code*/,
-                        std::vector<std::pair<std::string, std::string>> /*headers*/,
-                        std::optional<std::string> body) {
-                    if (!success || !body) {
-                        log::warning(
-                                cat,
-                                "Failed to fetch PFS keys for {}: {}",
-                                sid,
-                                timeout ? "timed out"
-                                : body  ? *body
-                                        : "request failed");
-                        if (callbacks.pfs_keys_fetched)
-                            callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
-                        return;
-                    }
+                auto body_str = params.dump();
+                net->send_request(
+                        swarm_request(swarm.front(), x25519_pub, "retrieve", to_vector(body_str)),
+                        [this, sid = std::move(sid)](
+                                bool success,
+                                bool timeout,
+                                int16_t /*status_code*/,
+                                std::vector<std::pair<std::string, std::string>> /*headers*/,
+                                std::optional<std::string> body) {
+                            if (!success || !body) {
+                                log::warning(
+                                        cat,
+                                        "Failed to fetch PFS keys for {}: {}",
+                                        sid,
+                                        timeout ? "timed out"
+                                        : body  ? *body
+                                                : "request failed");
+                                if (callbacks.pfs_keys_fetched)
+                                    callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+                                return;
+                            }
 
-                    return _handle_pfs_response(sid, std::move(*body));
-                });
-    });
+                            return _handle_pfs_response(sid, std::move(*body));
+                        });
+            });
     return status;
 }
 
@@ -570,7 +582,7 @@ void Core::_send_to_swarm(
     net->get_swarm(
             x25519_pub,
             false,
-            [net, body = std::move(body), on_complete = std::move(on_complete)](
+            [net, body = std::move(body), on_complete = std::move(on_complete), x25519_pub](
                     auto, auto swarm) mutable {
                 if (swarm.empty()) {
                     if (on_complete)
@@ -578,12 +590,7 @@ void Core::_send_to_swarm(
                     return;
                 }
                 net->send_request(
-                        network::Request{
-                                swarm.front(),
-                                "store",
-                                std::move(body),
-                                network::RequestCategory::standard_small,
-                                20s},
+                        swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
                         [on_complete = std::move(on_complete)](
                                 bool success, bool, int16_t, auto, auto) {
                             if (on_complete)
