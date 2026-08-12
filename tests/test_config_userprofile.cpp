@@ -327,6 +327,12 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf2) == -1);
     user_profile_set_blinded_msgreqs(conf2, 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
+
+    CHECK(user_profile_get_pro_auto_renewing(conf2) == 0);
+    user_profile_set_pro_auto_renewing(conf2, 1);
+    CHECK(user_profile_get_pro_auto_renewing(conf2) == 1);
+    user_profile_set_pro_auto_renewing(conf2, 0);
+    CHECK(user_profile_get_pro_auto_renewing(conf2) == 0);
     UserProfileTester::set_profile_updated(conf2, std::chrono::sys_seconds{124s});
 
     // Both have changes, so push need a push
@@ -632,6 +638,16 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     auto access_expiry = std::chrono::sys_seconds{std::chrono::seconds{500}};
     profile.set_pro_access_expiry(access_expiry);
     CHECK(profile.get_pro_access_expiry() == access_expiry);
+
+    // Pro auto-renewing flag: presence-only, defaults to false, and (backend-derived state, not a
+    // user edit) does not stamp the profile-updated timestamp.
+    CHECK_FALSE(profile.get_pro_auto_renewing());
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
+    profile.set_pro_auto_renewing(true);
+    CHECK(profile.get_pro_auto_renewing());
+    CHECK(profile.get_profile_updated().time_since_epoch().count() == 456);
+    profile.set_pro_auto_renewing(false);
+    CHECK_FALSE(profile.get_pro_auto_renewing());
 
     // Refund-requested flag (synced via config, not the Pro backend)
     CHECK_FALSE(profile.get_refund_requested().has_value());
