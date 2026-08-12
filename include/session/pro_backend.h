@@ -133,13 +133,27 @@ typedef struct session_pro_backend_response_header {
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if
-    /// this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
-    /// display / refreshing the cached access expiry only -- NOT an entitlement authority and NOT
-    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
+    /// The end of the paid term (unix seconds) -- coverage runs to this plus the grace below -- or
+    /// 0 if this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2):
+    /// use for display / refreshing the cached access expiry only -- NOT an entitlement authority
+    /// and NOT part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
     /// proof-validity window). Populated on a successful proof and on a `subscription_expired`
     /// failure (a now-past value); 0 on `not_subscribed` / `revoked` / protocol errors.
     int64_t account_expiry_ts;
+    /// How much longer (seconds) the account keeps being served past `account_expiry_ts`, so
+    /// coverage ends at `account_expiry_ts + account_grace_period_duration`. 0 when the
+    /// subscription is not auto-renewing.
+    ///
+    /// Carried with `account_auto_renewing` on a successful proof and on a `subscription_expired`
+    /// failure -- refresh all three together (see `account_expiry_ts`), never the expiry alone. 0
+    /// when the backend omits it (grace not applicable), so a refresh clears any stale cached grace
+    /// rather than preserving it; likewise a truthful 0 on `not_subscribed` / `revoked` / errors.
+    int64_t account_grace_period_duration;
+    /// Whether the subscription behind `account_expiry_ts` renews itself. Travels with
+    /// `account_grace_period_duration`: carried on a successful proof and a `subscription_expired`
+    /// failure, false when the backend omits it. Refresh it with the expiry and grace; a false
+    /// clears the presence-only config flag rather than preserving a stale one.
+    bool account_auto_renewing;
 } session_pro_backend_pro_proof_response;
 
 /// API: session_pro_backend/pro_proof_response_free
@@ -201,7 +215,13 @@ typedef struct session_pro_backend_pro_payment_item {
     /// Provider purchase time, fractional UNIX seconds. Millisecond-precise: the value passes
     /// through a millisecond-resolution representation, so sub-millisecond digits are not retained.
     double purchased_ts;
+    /// When THIS payment's term was paid through.
     int64_t expiry_ts;
+    /// The dunning window this one payment's provider declared -- raw store data. NOT the same
+    /// quantity as the account-level `grace_period_duration` on the status response, which adds the
+    /// backend's renewal-latency allowance and is gated on the account renewing. This one is not
+    /// gated, so a cancelled subscription can still carry a stale non-zero value. For "when does
+    /// entitlement end", use the account-level field.
     int64_t grace_period_duration;
     int64_t platform_refund_expiry_ts;
     /// Provider revocation instant, fractional UNIX seconds (millisecond-precise; 0 if not revoked)
@@ -218,7 +238,17 @@ typedef struct session_pro_backend_get_pro_status_response {
     /// NUL-terminated; points into the response's `internal_`.
     const char* status;
     bool auto_renewing;
+    /// The account's PAYMENT-DUE date: when the current term was paid through. Does NOT include the
+    /// grace period -- entitlement runs to `expiry_ts + grace_period_duration`, and `status` is
+    /// judged against that sum. Do not subtract the grace from this.
     int64_t expiry_ts;
+    /// How much longer (seconds) entitlement continues PAST `expiry_ts`: the provider's dunning
+    /// window plus the backend's renewal-latency allowance. Add it to `expiry_ts` to get the
+    /// instant entitlement ends; `[expiry_ts, expiry_ts + this)` is overdue-but-still-served. 0
+    /// when `auto_renewing` is false, so the sum stays correct there without a special case.
+    ///
+    /// ACCOUNT-level. `latest_payment.grace_period_duration` shares the name and is a different
+    /// quantity -- see there.
     int64_t grace_period_duration;
     /// True if the account has at least one payment, in which case `latest_payment` is populated
     /// with the most recent one; false means the account has no payments and `latest_payment` is

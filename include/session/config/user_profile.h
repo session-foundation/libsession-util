@@ -399,6 +399,65 @@ LIBSESSION_EXPORT int64_t user_profile_get_pro_access_expiry(const config_object
 LIBSESSION_EXPORT void user_profile_set_pro_access_expiry(
         config_object* conf, int64_t access_expiry_ts);
 
+/// API: user_profile/user_profile_get_pro_auto_renewing
+///
+/// Returns whether the account's current Session Pro subscription is auto-renewing. Backend-derived
+/// (the `auto_renewing` field on /get_pro_status); set alongside the access expiry.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int` -- 1 if the subscription is known to be auto-renewing, otherwise 0 (terminal, unknown,
+///   or not Pro).
+LIBSESSION_EXPORT int user_profile_get_pro_auto_renewing(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_auto_renewing
+///
+/// Records whether the current Session Pro subscription is auto-renewing: nonzero stores the flag,
+/// 0 clears it (which is also how it is cleared when the subscription lapses).
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `auto_renewing` -- [in] nonzero if auto-renewing, 0 to clear
+///
+/// Outputs:
+/// - `void`
+LIBSESSION_EXPORT void user_profile_set_pro_auto_renewing(config_object* conf, int auto_renewing);
+
+/// API: user_profile/user_profile_get_pro_grace_period
+///
+/// Returns the account's grace period in seconds (`get_pro_status.grace_period_duration`), or 0 if
+/// none is stored. Backend-derived and synced alongside the access expiry, so any linked device can
+/// compute when coverage actually ends: `access_expiry + grace_period`. The access expiry is the
+/// payment-due date -- the instant the term was paid through -- and `[E, E + G)` is the window
+/// where the payment is overdue but service continues.
+///
+/// There is deliberately no companion presence check: the backend sends 0 whenever the
+/// subscription is not auto-renewing, so "unset" and "zero" describe the same account and both give
+/// `expiry + 0 == expiry`.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- the grace period in seconds, or 0 if unset.
+LIBSESSION_EXPORT int64_t user_profile_get_pro_grace_period(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_grace_period
+///
+/// Sets the account's grace period, in seconds. Set alongside `user_profile_set_pro_access_expiry`
+/// from each `get_pro_status` response; 0 (or negative) clears it.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `grace_seconds` -- [in] the grace period in seconds, or 0 to clear
+///
+/// Outputs:
+/// - `void`
+LIBSESSION_EXPORT void user_profile_set_pro_grace_period(
+        config_object* conf, int64_t grace_seconds);
+
 /// API: user_profile/user_profile_get_refund_requested
 ///
 /// Retrieves the timestamp at which the user requested a refund of their current Session Pro

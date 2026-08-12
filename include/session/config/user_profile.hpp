@@ -40,6 +40,16 @@ using namespace std::literals;
 ///     flight"), so all the account's devices poll the backend to pull the entitlement through.
 ///     Inserted only when not already pro; cleared automatically when entitlement lands; values
 ///     more than a week in the past are ignored on read.
+/// A - set to 1 when the current Session Pro subscription is auto-renewing; omitted when it is
+///     terminal (will not renew), unknown, or the account isn't Pro. Backend-derived
+///     (get_pro_status.auto_renewing) and synced across devices; the client sets it alongside `E`
+///     and clears it (sets false) when the subscription lapses.
+/// G - how much longer the account keeps being served past `E`, in seconds
+///     (get_pro_status.grace_period_duration): the store's dunning window plus the backend's own
+///     renewal-latency allowance. Coverage ends at `E + G`; `[E, E + G)` is the window where the
+///     payment is overdue but service continues. Backend-derived and set alongside `E`. Omitted
+///     when zero, which is also what the backend sends when the subscription is not auto-renewing
+///     -- so an absent `G` and a zero `G` mean the same thing and coverage ends at `E`.
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -338,6 +348,57 @@ class UserProfile : public ConfigBase {
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
     void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
+
+    /// API: user_profile/UserProfile::get_pro_auto_renewing
+    ///
+    /// Returns whether the account's current Session Pro subscription is auto-renewing (true) or
+    /// terminal/unknown (false). Backend-derived (the `auto_renewing` field on /get_pro_status);
+    /// the client sets it alongside `set_pro_access_expiry`. Only a `true` value is stored, so an
+    /// account that isn't Pro, or whose renewal status has not been learned, reads as false.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` -- true iff the subscription is known to be auto-renewing.
+    bool get_pro_auto_renewing() const;
+
+    /// API: user_profile/UserProfile::set_pro_auto_renewing
+    ///
+    /// Records whether the current Session Pro subscription is auto-renewing. `true` stores the
+    /// flag; `false` erases it -- which is also how it is cleared when the subscription lapses.
+    ///
+    /// Inputs:
+    /// - `auto_renewing` -- true if the subscription auto-renews; false to clear the flag.
+    void set_pro_auto_renewing(bool auto_renewing);
+
+    /// API: user_profile/UserProfile::get_pro_grace_period
+    ///
+    /// Returns how much longer the account keeps being served past `E`
+    /// (`get_pro_status.grace_period_duration`), or zero if none is stored.  Backend-derived and
+    /// synced alongside `E`, so any linked device can compute when coverage actually ends:
+    /// `get_pro_access_expiry() + get_pro_grace_period()`.  `E` itself is the payment-due date --
+    /// the instant the term was paid through -- and `[E, E + G)` is the window where the payment is
+    /// overdue but service continues.
+    ///
+    /// Note this deliberately returns a plain duration rather than an optional: the backend sends
+    /// zero when the subscription is not auto-renewing, so "no grace stored" and "a grace of zero"
+    /// describe the same account and both give `E + 0 == E`.  There is no state a caller could act
+    /// on differently, so there is nothing for a presence check to disambiguate.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::seconds` -- the grace period, or `0s` if unset.
+    std::chrono::seconds get_pro_grace_period() const;
+
+    /// API: user_profile/UserProfile::set_pro_grace_period
+    ///
+    /// Records the account's grace period, in seconds.  Set alongside `set_pro_access_expiry` from
+    /// each `get_pro_status` response; a zero (or negative) value erases the key.
+    ///
+    /// Inputs:
+    /// - `grace` -- the grace period; zero or negative clears it.
+    void set_pro_grace_period(std::chrono::seconds grace);
 
     /// API: user_profile/UserProfile::get_refund_requested
     ///
