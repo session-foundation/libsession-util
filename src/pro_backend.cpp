@@ -23,8 +23,6 @@
 
 namespace {
 
-using namespace session::detail;
-
 // Fractional UNIX seconds (double) -> millisecond-precision system time, preserving the provider's
 // sub-second precision (rounded to the nearest millisecond).
 session::sys_ms sys_ms_from_seconds(double seconds) {
@@ -165,17 +163,17 @@ namespace {
     // + `error`. Returns the `result` object to read the payload from when status is "ok" (an empty
     // object otherwise; the caller returns early on `!result`). Throws parse_error on a malformed
     // envelope.
-    nlohmann::json::object_t read_envelope(std::string_view json, ResponseBase& result) {
-        nlohmann::json j = json_parse(json);
-        auto status = json_require<std::string>(j, "status");
+    nlohmann::json::object_t read_envelope(std::string_view json_in, ResponseBase& result) {
+        nlohmann::json j = json::parse(json_in);
+        auto status = json::require<std::string>(j, "status");
         if (status == "ok") {
             result.status = ResponseStatus::Ok;
-            return json_require<nlohmann::json::object_t>(j, "result");
+            return json::require<nlohmann::json::object_t>(j, "result");
         }
         if (status == "fail" || status == "error") {
             result.status = status == "fail" ? ResponseStatus::Fail : ResponseStatus::Error;
-            result.error_code = json_require<std::string>(j, "error_code");
-            result.error = json_require<std::string>(j, "error");
+            result.error_code = json::require<std::string>(j, "error_code");
+            result.error = json::require<std::string>(j, "error");
             return {};
         }
         throw parse_error{fmt::format("Unrecognized response status: '{}'", status)};
@@ -184,33 +182,33 @@ namespace {
     // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
     // proof) from the already-extracted `result` object.
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
-        result.proof.version = json_require<uint8_t>(result_obj, "version");
-        result.proof.expiry_at = json_require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
-        json_require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
-        json_require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
-        json_require_hex(result_obj, "sig", result.proof.sig);
+        result.proof.version = json::require<uint8_t>(result_obj, "version");
+        result.proof.expiry_at = json::require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
+        json::require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
+        json::require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
+        json::require_hex(result_obj, "sig", result.proof.sig);
 
         // Advisory and unsigned (pro-wire-protocol.md §2.2) -- never fed into signature
         // verification -- but required: a proof response without it can't refresh the cached access
         // expiry, which breaks renewal, so treat a missing value as a malformed response.
         result.account_expiry =
-                json_require<std::chrono::sys_seconds>(result_obj, "account_expiry_ts");
+                json::require<std::chrono::sys_seconds>(result_obj, "account_expiry_ts");
 
         // The two values that qualify `account_expiry_ts`. Absent -> keep the {0}/{false} default:
         // the backend sends `0`/`false` whenever grace/renewal don't apply and omits them on a
         // backend that predates them, so a missing field means "not applicable", never "keep the
         // stale value". A present value must still be well-formed (a wrong type throws).
         if (result_obj.contains("account_grace_period_duration"))
-            result.account_grace_period =
-                    json_require<std::chrono::seconds>(result_obj, "account_grace_period_duration");
+            result.account_grace_period = json::require<std::chrono::seconds>(
+                    result_obj, "account_grace_period_duration");
         if (result_obj.contains("account_auto_renewing"))
-            result.account_auto_renewing = json_require<bool>(result_obj, "account_auto_renewing");
+            result.account_auto_renewing = json::require<bool>(result_obj, "account_auto_renewing");
     }
 }  // namespace
 
-GenerateProProofResponse parse_pro_proof(std::string_view json) {
+GenerateProProofResponse parse_pro_proof(std::string_view json_in) {
     GenerateProProofResponse result = {};
-    auto result_obj = read_envelope(json, result);
+    auto result_obj = read_envelope(json_in, result);
     if (!result) {
         // On a subscription_expired failure the account's (now-past) true expiry rides top-level on
         // the envelope, alongside the same grace/renewal qualifiers as the success path
@@ -219,17 +217,17 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
         // grace`, and an expiry has typically NOT changed on this failure (it is a
         // lapse/cancellation) while the grace and flag have -- refreshing only the expiry would
         // leave a stale grace claiming coverage the backend has stopped honouring. Read leniently,
-        // absent -> {0}/{false} as on the success path (the envelope already parsed, so json_parse
+        // absent -> {0}/{false} as on the success path (the envelope already parsed, so json::parse
         // here can't throw).
         if (result.error_code == "subscription_expired") {
-            auto j = json_parse(json);
-            if (auto expiry = json_maybe<std::chrono::sys_seconds>(j, "account_expiry_ts"))
+            auto j = json::parse(json_in);
+            if (auto expiry = json::maybe<std::chrono::sys_seconds>(j, "account_expiry_ts"))
                 result.account_expiry = *expiry;
             if (j.contains("account_grace_period_duration"))
                 result.account_grace_period =
-                        json_require<std::chrono::seconds>(j, "account_grace_period_duration");
+                        json::require<std::chrono::seconds>(j, "account_grace_period_duration");
             if (j.contains("account_auto_renewing"))
-                result.account_auto_renewing = json_require<bool>(j, "account_auto_renewing");
+                result.account_auto_renewing = json::require<bool>(j, "account_auto_renewing");
         }
         return result;
     }
@@ -289,16 +287,16 @@ ProRequest revocations_request(std::int64_t ticket) {
     return {get_pro_revocations_endpoint, application_json, j.dump()};
 }
 
-GetProRevocationsResponse parse_revocations(std::string_view json) {
+GetProRevocationsResponse parse_revocations(std::string_view json_in) {
     GetProRevocationsResponse result = {};
-    auto result_obj = read_envelope(json, result);
+    auto result_obj = read_envelope(json_in, result);
     if (!result)
         return result;
 
     // Parse payload
-    result.ticket = json_require<int64_t>(result_obj, "ticket");
-    result.retry_in = json_require<std::chrono::seconds>(result_obj, "retry_in");
-    result.retain_for = json_require<std::chrono::seconds>(result_obj, "retain_for");
+    result.ticket = json::require<int64_t>(result_obj, "ticket");
+    result.retry_in = json::require<std::chrono::seconds>(result_obj, "retry_in");
+    result.retain_for = json::require<std::chrono::seconds>(result_obj, "retain_for");
 
     // Clamp values against non-sensical/catastrophic values: retry_in of very small would result in
     // excess retries, and an overly long retry (e.g. 10 years) would make the client not properly
@@ -307,7 +305,7 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
     result.retry_in = std::clamp<std::chrono::seconds>(result.retry_in, 60s, 48h);
     result.retain_for = std::clamp<std::chrono::seconds>(result.retain_for, 24h, 365 * 24h);
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items");
+    auto array = json::require<nlohmann::json::array_t>(result_obj, "items");
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
@@ -317,8 +315,8 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
 
         auto obj = it.get<nlohmann::json::object_t>();
         ProRevocationItem item = {};
-        item.effective_at = json_require<std::chrono::sys_seconds>(obj, "effective_ts");
-        json_require_hex(obj, "revocation_tag", item.revocation_tag);
+        item.effective_at = json::require<std::chrono::sys_seconds>(obj, "effective_ts");
+        json::require_hex(obj, "revocation_tag", item.revocation_tag);
         result.items.emplace_back(std::move(item));
     }
 
@@ -379,25 +377,25 @@ namespace {
     // Parse one payment item object (shared by get-pro-status's `latest_payment` and
     // get-payment-details's `items`). Throws parse_error on any malformed field.
     ProPaymentItem parse_payment_item(const nlohmann::json::object_t& obj) {
-        auto status = json_require<std::string>(obj, "status");
-        auto plan_code = json_require<std::string>(obj, "plan");
+        auto status = json::require<std::string>(obj, "status");
+        auto plan_code = json::require<std::string>(obj, "plan");
         auto plan = parse_plan_period(plan_code);
         if (!plan)
             throw parse_error{
                     fmt::format("'plan' is not a recognized billing-period code: '{}'", plan_code)};
-        auto payment_provider = json_require<std::string>(obj, "payment_provider");
-        auto payment_id = json_require<std::string>(obj, "payment_id");
-        auto auto_renewing = json_require<bool>(obj, "auto_renewing");
+        auto payment_provider = json::require<std::string>(obj, "payment_provider");
+        auto payment_id = json::require<std::string>(obj, "payment_id");
+        auto auto_renewing = json::require<bool>(obj, "auto_renewing");
         // purchased_ts and revoked_ts are upstream-provider event instants: floats on the wire
         // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
         // timestamps are whole-second integers.
-        auto purchased_ts = json_require<double>(obj, "purchased_ts");
-        auto expiry_at = json_require<std::chrono::sys_seconds>(obj, "expiry_ts");
+        auto purchased_ts = json::require<double>(obj, "purchased_ts");
+        auto expiry_at = json::require<std::chrono::sys_seconds>(obj, "expiry_ts");
         auto grace_period_duration =
-                json_require<std::chrono::seconds>(obj, "grace_period_duration");
+                json::require<std::chrono::seconds>(obj, "grace_period_duration");
         auto platform_refund_expiry_at =
-                json_require<std::chrono::sys_seconds>(obj, "platform_refund_expiry_ts");
-        auto revoked_ts = json_require<double>(obj, "revoked_ts");
+                json::require<std::chrono::sys_seconds>(obj, "platform_refund_expiry_ts");
+        auto revoked_ts = json::require<double>(obj, "revoked_ts");
 
         ProPaymentItem item = {};
         item.status = std::move(status);
@@ -440,20 +438,20 @@ ProRequest payment_details_request(
                     before)};
 }
 
-ProStatusResponse parse_pro_status(std::string_view json) {
+ProStatusResponse parse_pro_status(std::string_view json_in) {
     ProStatusResponse result = {};
-    auto result_obj = read_envelope(json, result);
+    auto result_obj = read_envelope(json_in, result);
     if (!result)
         return result;
 
     // Parse payload. The account Pro status is an opaque string code ("never"/"active"/"expired");
     // an unknown value passes through unchanged (§1: enums are codes) rather than failing the
     // parse.
-    result.user_status = json_require<std::string>(result_obj, "user_status");
-    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing");
-    result.expiry_at = json_require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
+    result.user_status = json::require<std::string>(result_obj, "user_status");
+    result.auto_renewing = json::require<bool>(result_obj, "auto_renewing");
+    result.expiry_at = json::require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
     result.grace_period_duration =
-            json_require<std::chrono::seconds>(result_obj, "grace_period_duration");
+            json::require<std::chrono::seconds>(result_obj, "grace_period_duration");
 
     // `latest_payment` is a single payment item, or null when the account has no payments.
     if (auto it = result_obj.find("latest_payment"); it == result_obj.end())
@@ -468,15 +466,15 @@ ProStatusResponse parse_pro_status(std::string_view json) {
     return result;
 }
 
-PaymentDetailsResponse parse_payment_details(std::string_view json) {
+PaymentDetailsResponse parse_payment_details(std::string_view json_in) {
     PaymentDetailsResponse result = {};
-    auto result_obj = read_envelope(json, result);
+    auto result_obj = read_envelope(json_in, result);
     if (!result)
         return result;
 
-    result.payments_total = json_require<uint32_t>(result_obj, "payments_total");
+    result.payments_total = json::require<uint32_t>(result_obj, "payments_total");
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items");
+    auto array = json::require<nlohmann::json::array_t>(result_obj, "items");
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];

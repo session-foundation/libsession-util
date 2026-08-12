@@ -11,20 +11,20 @@
 #include <session/types.hpp>
 #include <string_view>
 
-namespace session::detail {
+namespace session::json {
 
 // A T that is carried on the wire as an integer count of seconds: either a duration (seconds) or a
-// system-clock time point at second granularity (sys_seconds). json_require<T>/json_maybe<T> read
+// system-clock time point at second granularity (sys_seconds). require<T>/maybe<T> read
 // the integer and wrap it, so a call site never repeats `sys_seconds{seconds{get<int64_t>()}}`.
 template <typename T>
 concept wire_seconds =
         std::same_as<T, std::chrono::seconds> || std::same_as<T, std::chrono::sys_seconds>;
 
 // Whether the JSON value `v` holds a T, paired with a human name for the type (used in the error
-// message on a mismatch). Single source of truth so json_require and json_maybe cannot drift on
+// message on a mismatch). Single source of truth so require and maybe cannot drift on
 // what counts as a valid T.
 template <typename T>
-std::pair<bool, std::string_view> json_is(const nlohmann::json& v) {
+std::pair<bool, std::string_view> is(const nlohmann::json& v) {
     if constexpr (wire_seconds<T>)
         // Integer seconds on the wire; reject a fractional value rather than truncating it.
         return {v.is_number_integer(), "an integer"};
@@ -48,7 +48,7 @@ std::pair<bool, std::string_view> json_is(const nlohmann::json& v) {
 
 // Extracts an already-type-validated value as T, applying the seconds-wrapping for wire_seconds.
 template <typename T>
-T json_extract(const nlohmann::json& v) {
+T extract(const nlohmann::json& v) {
     if constexpr (wire_seconds<T>)
         return T{std::chrono::seconds{v.template get<int64_t>()}};
     else {
@@ -59,7 +59,7 @@ T json_extract(const nlohmann::json& v) {
 }
 
 // Parse `input` as JSON, throwing parse_error (not a nlohmann exception) if it is not valid JSON.
-inline nlohmann::json json_parse(std::string_view input) {
+inline nlohmann::json parse(std::string_view input) {
     try {
         return nlohmann::json::parse(input);
     } catch (const std::exception& e) {
@@ -69,28 +69,27 @@ inline nlohmann::json json_parse(std::string_view input) {
 
 // Reads a required field: throws parse_error_missing if absent, parse_error_type if the wrong type.
 template <typename T>
-T json_require(const nlohmann::json& j, std::string_view key) {
+T require(const nlohmann::json& j, std::string_view key) {
     auto it = j.find(key);
     if (it == j.end())
         throw parse_error_missing{key};
-    if (auto [ok, type] = json_is<T>(*it); !ok)
+    if (auto [ok, type] = is<T>(*it); !ok)
         throw parse_error_type{key, type, it->dump(1)};
-    return json_extract<T>(*it);
+    return extract<T>(*it);
 }
 
 // Reads an optional field: a missing key or a wrong-typed value both yield nullopt (rather than
 // throwing) -- for advisory fields a caller should read leniently and skip when absent.
 template <typename T>
-std::optional<T> json_maybe(const nlohmann::json& j, std::string_view key) {
+std::optional<T> maybe(const nlohmann::json& j, std::string_view key) {
     auto it = j.find(key);
-    if (it == j.end() || !json_is<T>(*it).first)
+    if (it == j.end() || !is<T>(*it).first)
         return std::nullopt;
-    return json_extract<T>(*it);
+    return extract<T>(*it);
 }
 
-inline void json_require_hex(
-        const nlohmann::json& j, std::string_view key, std::span<std::byte> dest) {
-    auto hex = json_require<std::string_view>(j, key);
+inline void require_hex(const nlohmann::json& j, std::string_view key, std::span<std::byte> dest) {
+    auto hex = require<std::string_view>(j, key);
     if (hex.starts_with("0X") || hex.starts_with("0x"))
         hex = hex.substr(2);
 
@@ -111,4 +110,4 @@ inline void json_require_hex(
     oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
 }
 
-}  // namespace session::detail
+}  // namespace session::json
