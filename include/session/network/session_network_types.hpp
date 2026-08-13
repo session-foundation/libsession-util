@@ -276,11 +276,14 @@ struct FileUploadRequest : FileTransferRequest {
 struct DownloadRequest : FileTransferRequest {
     std::string download_url;
 
-    // Called as data arrives (can be called multiple times) with a non-owning view of the chunk
+    // Called as data arrives, once per chunk received, with a non-owning view of that chunk and the
+    // file's metadata.  `info.size` is the total, and is known before the first chunk arrives, so a
+    // caller wanting transfer progress accumulates the chunk sizes itself rather than being told.
+    //
+    // Any coalescing of these belongs above this layer: throttling here would mean holding payload
+    // to save an in-process call, whereas a consumer relaying progress across a process boundary
+    // can drop redundant notifications for free.
     std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data;
-
-    // Minimum interval between on_data calls (to control callback overhead vs memory usage)
-    std::chrono::milliseconds partial_min_interval = 250ms;
 };
 
 using node_failure_reporter_t = std::function<void(const ed25519_pubkey&, bool)>;

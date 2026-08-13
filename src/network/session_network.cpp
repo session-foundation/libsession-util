@@ -1929,7 +1929,6 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t /*partial_min_interval_ms*/,
         int8_t desired_path_index) {
 
     if (!network || !download_url || !callbacks)

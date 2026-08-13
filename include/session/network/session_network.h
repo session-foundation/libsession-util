@@ -285,7 +285,6 @@ LIBSESSION_EXPORT session_upload_handle_t* session_network_upload(
 /// - `stall_timeout_ms` -- [in] timeout if no progress for this duration
 /// - `request_timeout_ms` -- [in] timeout for the request itself
 /// - `overall_timeout_ms` -- [in] timeout including pre-flight operations (0 to ignore)
-/// - `partial_min_interval_ms` -- [in] minimum interval between on_data calls (default 250ms)
 ///
 /// Returns: handle to the download, or NULL on error. Caller must free with session_download_free()
 LIBSESSION_EXPORT session_download_handle_t* session_network_download(
@@ -295,7 +294,6 @@ LIBSESSION_EXPORT session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t partial_min_interval_ms,
         int8_t desired_path_index);
 
 /// Cancels an in-progress upload
