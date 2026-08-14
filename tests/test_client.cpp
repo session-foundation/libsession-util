@@ -170,56 +170,6 @@ void sync(Client& c) {
     c.core.loop().call_get([] { return 0; });
 }
 
-/// The stores MockNetwork has captured.  Attaching a network means Core also fetches keys and
-/// polls, so what it was asked to send is not only what a test asked it to send.
-std::vector<MockNetwork::SentRequest*> stores(MockNetwork& net) {
-    std::vector<MockNetwork::SentRequest*> found;
-    for (auto& r : net.sent_requests)
-        if (r.request.endpoint == "store")
-            found.push_back(&r);
-    return found;
-}
-
-/// The JSON a store request carries, which is where the namespace and the payload are.
-nlohmann::json store_body(const MockNetwork::SentRequest& r) {
-    REQUIRE(r.request.body.has_value());
-    return nlohmann::json::parse(
-            std::string{
-                    reinterpret_cast<const char*>(r.request.body->data()), r.request.body->size()});
-}
-
-/// The hash accept_stores has the swarm assign a store.  Distinct per destination swarm, so that a
-/// test can tell the copy of an outgoing message left in our own swarm from the recipient's.
-std::string store_hash_for(std::string_view pubkey_hex) {
-    return "hash-for-{}"_format(pubkey_hex);
-}
-
-/// Answers every captured store as the swarm accepting it, leaving anything else alone, and returns
-/// how many there were -- which is itself worth asserting on, since an outgoing message is two
-/// stores and a note to self is one.
-size_t accept_stores(MockNetwork& net) {
-    auto pending = std::exchange(net.sent_requests, {});
-    size_t accepted = 0;
-    std::vector<MockNetwork::SentRequest> others;
-
-    for (auto& r : pending) {
-        if (r.request.endpoint == "store") {
-            nlohmann::json resp = {
-                    {"hash", store_hash_for(store_body(r)["pubkey"].get<std::string_view>())}};
-            r.callback(true, false, 200, {}, resp.dump());
-            accepted++;
-        } else
-            others.push_back(std::move(r));
-    }
-
-    // Appended rather than assigned: answering a store can prompt Core to send something else, and
-    // that belongs in the list too.
-    for (auto& r : others)
-        net.sent_requests.push_back(std::move(r));
-
-    return accepted;
-}
-
 }  // namespace
 
 // ── ConversationId ──────────────────────────────────────────────────────────────────────────────

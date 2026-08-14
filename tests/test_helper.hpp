@@ -1,10 +1,12 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <oxenc/base64.h>
 
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <session/core.hpp>
+#include <session/format.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/key_types.hpp>
 #include <session/network/session_network.hpp>
@@ -52,6 +54,68 @@ class MockNetwork : public network::Network {
         callback(0, {current_node});
     }
 };
+
+/// The store requests a MockNetwork has captured, in the order they were sent.  Filtered rather
+/// than taken wholesale because a Core with a network attached also fetches PFS keys, so a test
+/// that asked for a send finds retrieves in the list it never asked for.
+inline std::vector<MockNetwork::SentRequest*> stores(MockNetwork& net) {
+    std::vector<MockNetwork::SentRequest*> found;
+    for (auto& r : net.sent_requests)
+        if (r.request.endpoint == "store")
+            found.push_back(&r);
+    return found;
+}
+
+/// The JSON a store request carries, which is where the namespace and the payload are.
+inline nlohmann::json store_body(const MockNetwork::SentRequest& r) {
+    if (!r.request.body)
+        throw std::logic_error{"store request has no body"};
+    return parse_json(*r.request.body);
+}
+
+/// The encrypted message a store request is depositing, decoded back out of its base64.
+inline std::vector<std::byte> store_payload(const MockNetwork::SentRequest& r) {
+    return to_vector<std::byte>(oxenc::from_base64(store_body(r)["data"].get<std::string_view>()));
+}
+
+/// The hash answer_stores has the swarm assign a store.  Distinct per destination swarm, so that a
+/// test can tell the copy of an outgoing message left in our own swarm from the recipient's.
+inline std::string store_hash_for(std::string_view pubkey_hex) {
+    return "hash-for-{}"_format(pubkey_hex);
+}
+
+/// Answers every captured store, leaving anything else alone, and returns how many there were --
+/// which is itself worth asserting on, since an outgoing message is two stores and a note to self
+/// is one.
+inline size_t answer_stores(MockNetwork& net, bool accepted) {
+    auto pending = std::exchange(net.sent_requests, {});
+    size_t answered = 0;
+    std::vector<MockNetwork::SentRequest> others;
+
+    for (auto& r : pending) {
+        if (r.request.endpoint == "store") {
+            if (accepted) {
+                nlohmann::json resp = {
+                        {"hash", store_hash_for(store_body(r)["pubkey"].get<std::string_view>())}};
+                r.callback(true, false, 200, {}, resp.dump());
+            } else
+                r.callback(false, false, 500, {}, "nope");
+            answered++;
+        } else
+            others.push_back(std::move(r));
+    }
+
+    // Appended rather than assigned: answering a store can prompt Core to send something else, and
+    // that belongs in the list too.
+    for (auto& r : others)
+        net.sent_requests.push_back(std::move(r));
+
+    return answered;
+}
+
+inline size_t accept_stores(MockNetwork& net) {
+    return answer_stores(net, true);
+}
 
 // Smart-pointer-like RAII wrapper around a Core backed by a unique temporary DB file.
 // The DB file is removed on destruction.  Default encryption uses a zeroed raw_key.
