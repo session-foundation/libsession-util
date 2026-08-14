@@ -1,5 +1,7 @@
 #pragma once
 
+#include <oxen/quic/loop.hpp>
+
 #include <filesystem>
 #include <optional>
 #include <session/client/attachment.hpp>
