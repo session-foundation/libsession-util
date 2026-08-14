@@ -789,6 +789,20 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
 
+    _dispatch_sends(client_id, id, content, synced, now, to_self);
+
+    return client_id;
+}
+
+void Client::_dispatch_sends(
+        int64_t client_id,
+        const ConversationId& id,
+        const SessionProtos::Content& content,
+        const SessionProtos::Content& synced,
+        sys_ms now,
+        bool to_self) {
+    auto self = core.globals.session_id();
+
     auto core_id =
             to_self ? core.send_dm(self, synced, now) : core.send_dm(id.session_id(), content, now);
     _send_ids[core_id] = client_id;
@@ -803,8 +817,6 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
         if (auto stashed = _early_status.extract(sync_id))
             _apply_send_status(client_id, stashed.mapped(), true);
     }
-
-    return client_id;
 }
 
 // -- Core event handling ----------------------------------------------------------------------
