@@ -1,9 +1,11 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <session/client/conversation.hpp>
 #include <session/client/conversation_id.hpp>
 #include <session/client/message.hpp>
+#include <string>
 #include <vector>
 
 namespace session::client {
@@ -24,6 +26,31 @@ namespace session::client {
 /// handlers arrive on which thread.  Without one, everything runs on Core's loop, which is what a
 /// program with no loop of its own wants.
 using dispatcher = std::function<void(std::function<void()>)>;
+
+namespace detail {
+    template <typename Sig>
+    struct failable_function;
+
+    template <typename... A>
+    struct failable_function<void(A...)> {
+        using type = std::function<void(std::optional<std::string> error, A...)>;
+    };
+}  // namespace detail
+
+/// A handler an application passes to one of Client's asynchronous methods, written in terms of
+/// what that method produces: `failable_function<void(int64_t message_id)>` is a handler taking a
+/// message id.
+///
+/// What it adds is the leading `error` argument every one of them carries -- unset when the call
+/// succeeded, and otherwise saying what went wrong.  Every such handler is invoked exactly once,
+/// unless the Client is destroyed before its work runs, so a caller is never left waiting on an
+/// answer that is not coming; the error argument is how a failure says so, since a call that has
+/// been dispatched has no caller left to throw to.
+///
+/// Written as an alias rather than spelled out at each declaration so that the convention is stated
+/// once and the argument cannot be forgotten or put in the wrong place.
+template <typename Sig>
+using failable_function = typename detail::failable_function<Sig>::type;
 
 /// Notifications of everything the conversation layer changes, so that an application never has to
 /// ask.  A caller sets the handlers it cares about and leaves the rest empty; an unset handler is

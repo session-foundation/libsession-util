@@ -50,29 +50,6 @@ constexpr int ATTACHMENT_FLAG_VOICE_MESSAGE = 1;
 constexpr auto ATTACHMENT_REQUEST_TIMEOUT = 60s;
 constexpr auto ATTACHMENT_OVERALL_TIMEOUT = 10min;
 
-// Wraps a handler the application gave us so that calling it goes through the dispatcher.  This is
-// what extends the guarantee past the change notifications: a handler passed to one call arrives on
-// the same thread, in the same queue, as everything else Client reports.
-template <typename... A>
-static std::function<void(A...)> outward(
-        std::shared_ptr<const dispatcher> d, std::function<void(A...)> f) {
-    if (!f)
-        return {};
-    return [d = std::move(d), f = std::move(f)](A... args) {
-        auto job = [f, args = std::make_tuple(std::move(args)...)]() mutable {
-            try {
-                std::apply(f, std::move(args));
-            } catch (const std::exception& e) {
-                log::error(cat, "client handler threw: {}", e.what());
-            }
-        };
-        if (d)
-            (*d)(std::move(job));
-        else
-            job();
-    };
-}
-
 static SendState state_for(core::MessageSendStatus status) {
     switch (status) {
         case core::MessageSendStatus::awaiting_keys: return SendState::pending;
@@ -265,21 +242,21 @@ core::callbacks Client::_FIXME_core_callbacks(core::callbacks from_app) {
 }
 
 void Client::_init() {
-    _jobs.reset(new oxen::quic::JobQueue{core.loop()});
+    _jobs.reset(new oxen::quic::JobQueue{loop});
 
     // Core's send queue is in-memory, so anything still mid-flight when the last run ended is not
     // resumed and its outcome is unknowable.  Say so rather than guessing either way.
     auto c = core.database().conn();
     c.prepared_exec(
             R"(
-        UPDATE messages SET send_state = ?1 WHERE send_state IN (?2, ?3)
+        UPDATE messages SET send_state = ? WHERE send_state IN (?, ?)
     )",
             static_cast<int>(SendState::interrupted),
             static_cast<int>(SendState::pending),
             static_cast<int>(SendState::sending));
     c.prepared_exec(
             R"(
-        UPDATE messages SET sync_send_state = ?1 WHERE sync_send_state IN (?2, ?3)
+        UPDATE messages SET sync_send_state = ? WHERE sync_send_state IN (?, ?)
     )",
             static_cast<int>(SendState::interrupted),
             static_cast<int>(SendState::pending),
@@ -290,11 +267,11 @@ void Client::_init() {
     // failed outright rather than unknowably, and it is squarely retryable -- its attachment rows
     // record which files did get up, so resuming re-uploads only the rest.
     c.prepared_exec(
-            "UPDATE messages SET send_state = ?1 WHERE send_state = ?2",
+            "UPDATE messages SET send_state = ? WHERE send_state = ?",
             static_cast<int>(SendState::failed),
             static_cast<int>(SendState::uploading));
     c.prepared_exec(
-            "UPDATE messages SET sync_send_state = ?1 WHERE sync_send_state = ?2",
+            "UPDATE messages SET sync_send_state = ? WHERE sync_send_state = ?",
             static_cast<int>(SendState::failed),
             static_cast<int>(SendState::uploading));
 }
@@ -306,13 +283,7 @@ void Client::_emit(std::function<void(const callbacks&)> invoke) {
 }
 
 void Client::set_dispatcher(dispatcher d) {
-    auto next = d ? std::make_shared<const dispatcher>(std::move(d))
-                  : std::shared_ptr<const dispatcher>{};
-    std::atomic_store(&_dispatcher, std::move(next));
-}
-
-std::shared_ptr<const dispatcher> Client::_current_dispatcher() const {
-    return std::atomic_load(&_dispatcher);
+    loop.call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
 }
 
 void Client::_dispatch_out(std::function<void()> job) {
@@ -324,8 +295,8 @@ void Client::_dispatch_out(std::function<void()> job) {
         }
     };
 
-    if (auto d = _current_dispatcher())
-        (*d)(std::move(guarded));
+    if (_dispatcher)
+        _dispatcher(std::move(guarded));
     else
         guarded();
 }
@@ -409,16 +380,8 @@ void Client::_require_dm(const ConversationId& id) {
                         static_cast<int>(id.type()))};
 }
 
-void Client::_dispatch(std::function<void()> work) {
-    core.loop().call([work = std::move(work)] {
-        try {
-            work();
-        } catch (const std::exception& e) {
-            // Nowhere to throw to: the caller's stack is gone, and letting this escape would take
-            // the event loop with it.
-            log::error(cat, "Client operation failed: {}", e.what());
-        }
-    });
+void Client::log_operation_failure(const std::exception& e) {
+    log::error(cat, "Client operation failed: {}", e.what());
 }
 
 // Not dispatched onto the loop: reads nothing but the session ID, which cannot change underneath
@@ -431,15 +394,12 @@ bool Client::is_note_to_self(const ConversationId& id) {
 void Client::retry_send(
         int64_t message_id,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
-        std::function<void(bool)> cb) {
-    _dispatch([this,
-               message_id,
-               on_upload = outward(_current_dispatcher(), std::move(on_upload)),
-               cb = outward(_current_dispatcher(), std::move(cb))] {
-        auto started = _retry_send(message_id, on_upload);
-        if (cb)
-            cb(started);
-    });
+        std::function<void(std::optional<std::string>, bool)> cb) {
+    _async(
+            [this, message_id, on_upload = std::move(on_upload)] {
+                return _retry_send(message_id, on_upload);
+            },
+            std::move(cb));
 }
 
 void Client::send_message(
@@ -447,68 +407,68 @@ void Client::send_message(
         std::string_view body,
         std::vector<OutgoingAttachment> attachments,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
-        std::function<void(int64_t)> cb) {
+        std::function<void(std::optional<std::string>, int64_t)> cb) {
     _require_dm(id);
     _require_readable(attachments);
 
-    _dispatch([this,
-               id,
-               body = std::string{body},
-               attachments = std::move(attachments),
-               on_upload = outward(_current_dispatcher(), std::move(on_upload)),
-               cb = outward(_current_dispatcher(), std::move(cb))] {
-        auto msg_id = _send_message(id, body, attachments, on_upload);
-        if (cb)
-            cb(msg_id);
-    });
+    _async([this,
+            id,
+            body = std::string{body},
+            attachments = std::move(attachments),
+            on_upload = std::move(
+                    on_upload)] { return _send_message(id, body, attachments, on_upload); },
+           std::move(cb));
 }
 
 // Callback forms: dispatch and return, delivering the result on the loop thread.
 
-void Client::conversations(std::function<void(std::vector<Conversation>)> cb) {
-    _dispatch([this, cb = outward(_current_dispatcher(), std::move(cb))] { cb(_conversations()); });
+void Client::conversations(
+        std::function<void(std::optional<std::string>, std::vector<Conversation>)> cb) {
+    _async([this] { return _conversations(); }, std::move(cb));
 }
 
 void Client::conversation(
-        const ConversationId& id, std::function<void(std::optional<Conversation>)> cb) {
-    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] {
-        cb(_conversation(id));
-    });
+        const ConversationId& id,
+        std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
+    _async([this, id] { return _conversation(id); }, std::move(cb));
 }
 
-void Client::create_conversation(const ConversationId& id, std::function<void(Conversation)> cb) {
-    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] {
-        cb(_create_conversation(id));
-    });
+void Client::create_conversation(
+        const ConversationId& id,
+        std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
+    _require_dm(id);
+    _async([this, id] { return std::optional{_create_conversation(id)}; }, std::move(cb));
 }
 
-void Client::mark_read(const ConversationId& id, std::function<void()> cb) {
+void Client::mark_read(
+        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
     mark_read(id, std::nullopt, std::move(cb));
 }
 
 void Client::mark_read(
-        const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb) {
-    _dispatch([this, id, up_to, cb = outward(_current_dispatcher(), std::move(cb))] {
-        _mark_read(id, up_to);
-        if (cb)
-            cb();
-    });
+        const ConversationId& id,
+        std::optional<sys_ms> up_to,
+        std::function<void(std::optional<std::string>)> cb) {
+    _async([this, id, up_to] { _mark_read(id, up_to); }, std::move(cb));
 }
 
-void Client::set_priority(const ConversationId& id, int priority, std::function<void()> cb) {
-    _dispatch([this, id, priority, cb = outward(_current_dispatcher(), std::move(cb))] {
-        _set_priority(id, priority);
-        if (cb)
-            cb();
-    });
+void Client::set_priority(
+        const ConversationId& id,
+        int priority,
+        std::function<void(std::optional<std::string>)> cb) {
+    _async([this, id, priority] { _set_priority(id, priority); }, std::move(cb));
 }
 
-void Client::messages(const ConversationId& id, std::function<void(std::vector<Message>)> cb) {
+void Client::messages(
+        const ConversationId& id,
+        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
     messages(id, 50, std::nullopt, std::move(cb));
 }
 
 void Client::messages(
-        const ConversationId& id, int limit, std::function<void(std::vector<Message>)> cb) {
+        const ConversationId& id,
+        int limit,
+        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
     messages(id, limit, std::nullopt, std::move(cb));
 }
 
@@ -516,27 +476,21 @@ void Client::messages(
         const ConversationId& id,
         int limit,
         std::optional<MessageCursor> before,
-        std::function<void(std::vector<Message>)> cb) {
-    _dispatch([this, id, limit, before, cb = outward(_current_dispatcher(), std::move(cb))] {
-        cb(_messages(id, limit, before));
-    });
+        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
+    _async([this, id, limit, before] { return _messages(id, limit, before); }, std::move(cb));
 }
 
-void Client::message(int64_t id, std::function<void(std::optional<Message>)> cb) {
-    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] { cb(_message(id)); });
+void Client::message(
+        int64_t id, std::function<void(std::optional<std::string>, std::optional<Message>)> cb) {
+    _async([this, id] { return _message(id); }, std::move(cb));
 }
 
 void Client::send_message(
-        const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb) {
+        const ConversationId& id,
+        std::string_view body,
+        std::function<void(std::optional<std::string>, int64_t)> cb) {
     _require_dm(id);
-    _dispatch([this,
-               id,
-               body = std::string{body},
-               cb = outward(_current_dispatcher(), std::move(cb))] {
-        auto msg_id = _send_message(id, body);
-        if (cb)
-            cb(msg_id);
-    });
+    _async([this, id, body = std::string{body}] { return _send_message(id, body); }, std::move(cb));
 }
 
 // -- Conversations ----------------------------------------------------------------------------
@@ -1063,48 +1017,60 @@ void Client::_upload_next(
                     std::variant<std::pair<network::file_metadata, cleared_b32>, int16_t> result,
                     bool /*timeout*/) {
                 // Delivered on the network's loop; everything below touches the database, which is
-                // Core's loop's alone.
-                _dispatch([this, client_id, index, on_upload, result = std::move(result)] {
-                    if (auto* err = std::get_if<int16_t>(&result)) {
-                        log::warning(
+                // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
+                // own continuation -- so a failure has to be turned into the message failing, which
+                // is what the application is watching.
+                loop.call([this, client_id, index, on_upload, result = std::move(result)] {
+                    try {
+                        if (auto* err = std::get_if<int16_t>(&result)) {
+                            log::warning(
+                                    cat,
+                                    "Upload of attachment {} of message {} failed: {}",
+                                    index,
+                                    client_id,
+                                    *err);
+                            if (on_upload)
+                                on_upload(index, 0, 0, *err);
+                            return _fail_attachment_send(client_id);
+                        }
+
+                        const auto& [meta, key] = std::get<0>(result);
+                        auto url = network::file_server::generate_download_url(
+                                meta.id, core.network()->file_server_config);
+
+                        {
+                            auto c = core.database().conn();
+                            c.prepared_exec(
+                                    "UPDATE message_attachments SET url = ?, key = ?, size = ?"
+                                    " WHERE message = ? AND idx = ?",
+                                    url,
+                                    std::span<const std::byte>{key},
+                                    meta.size,
+                                    client_id,
+                                    static_cast<int64_t>(index));
+                        }
+
+                        log::debug(
                                 cat,
-                                "Upload of attachment {} of message {} failed: {}",
+                                "Uploaded attachment {} of message {} ({} bytes) to {}",
                                 index,
                                 client_id,
-                                *err);
-                        if (on_upload)
-                            on_upload(index, 0, 0, *err);
-                        return _fail_attachment_send(client_id);
-                    }
-
-                    const auto& [meta, key] = std::get<0>(result);
-                    auto url = network::file_server::generate_download_url(
-                            meta.id, core.network()->file_server_config);
-
-                    {
-                        auto c = core.database().conn();
-                        c.prepared_exec(
-                                "UPDATE message_attachments SET url = ?, key = ?, size = ?"
-                                " WHERE message = ? AND idx = ?",
-                                url,
-                                std::span<const std::byte>{key},
                                 meta.size,
+                                url);
+
+                        if (on_upload)
+                            on_upload(index, meta.size, meta.size, 0);
+
+                        _upload_next(client_id, on_upload);
+                    } catch (const std::exception& e) {
+                        log::error(
+                                cat,
+                                "Recording attachment {} of message {} failed: {}",
+                                index,
                                 client_id,
-                                static_cast<int64_t>(index));
+                                e.what());
+                        _fail_attachment_send(client_id);
                     }
-
-                    log::debug(
-                            cat,
-                            "Uploaded attachment {} of message {} ({} bytes) to {}",
-                            index,
-                            client_id,
-                            meta.size,
-                            url);
-
-                    if (on_upload)
-                        on_upload(index, meta.size, meta.size, 0);
-
-                    _upload_next(client_id, on_upload);
                 });
             };
 

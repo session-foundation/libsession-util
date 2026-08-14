@@ -1102,6 +1102,28 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
 
 // ── Core interoperability ───────────────────────────────────────────────────────────────────────
 
+TEST_CASE("Client: an asynchronous call reports that it succeeded", "[client][callbacks]") {
+    TempClient c;
+    SenderKeys sender;
+    deliver(*c, sender, "hello", from_epoch_ms(1000), "h1");
+    sync(*c);
+
+    // Qualified, because SyncClient masks the asynchronous forms deliberately: choosing the easy
+    // class means choosing it for everything.
+    std::optional<std::string> reported_error = "not called";
+    std::vector<Conversation> got;
+    c->Client::conversations([&](std::optional<std::string> error, std::vector<Conversation> cs) {
+        reported_error = std::move(error);
+        got = std::move(cs);
+    });
+    sync(*c);
+
+    // Called exactly once, and saying it worked rather than leaving the caller to assume so.
+    CHECK_FALSE(reported_error.has_value());
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].id == ConversationId::dm(sender.session_id));
+}
+
 TEST_CASE("Client: handlers arrive through the dispatcher", "[client][callbacks]") {
     // Stands in for an application's loop: jobs are collected rather than run, so a handler that
     // ran on Core's loop instead of being handed over is visible as one that never happened.

@@ -116,23 +116,34 @@ class Client {
     // one was given, so on the application's own thread.  A caller that would rather block on the
     // answer than be handed it uses SyncClient.
     //
+    // **Every `cb` is invoked exactly once**, unless the Client is destroyed before its work runs.
+    // That is what its leading `error` argument is for: unset when the call succeeded, and
+    // otherwise carrying what went wrong, so that a caller is never left waiting on an answer that
+    // will not come.  The other arguments then mean only what they always meant -- an unset
+    // `std::optional<Conversation>` says the conversation does not exist, and never that we could
+    // not find out.
+    //
+    // The message is the thrown exception's, which is generally SQLite's, and is passed along as-is
+    // rather than reduced to a category of our invention: what went wrong is worth more in a log or
+    // a bug report than an enumeration that discarded it.
+    //
     // Argument validation happens on the calling thread, before anything is dispatched, so misuse
-    // still throws where the mistake is.  A later failure (a disk error, say)
-    // is logged rather than thrown, since by then there is no caller stack to reach.
+    // still throws where the mistake is, rather than arriving later as an error argument.
 
     /// All conversations, most recently active first.
     ///
     /// Currently that means every conversation.  Once message requests exist this returns only
     /// approved ones, with the rest reached through their own accessor.
-    void conversations(std::function<void(std::vector<Conversation>)> cb);
+    void conversations(failable_function<void(std::vector<Conversation>)> cb);
 
     /// A single conversation, or nullopt if it does not exist locally.
     void conversation(
-            const ConversationId& id, std::function<void(std::optional<Conversation>)> cb);
+            const ConversationId& id, failable_function<void(std::optional<Conversation>)> cb);
 
     /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
     /// does this implicitly; this is for opening an empty conversation with someone first.
-    void create_conversation(const ConversationId& id, std::function<void(Conversation)> cb);
+    void create_conversation(
+            const ConversationId& id, failable_function<void(std::optional<Conversation>)> cb);
 
     /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
     /// answer as `Conversation::note_to_self`, for a caller holding only an id.
@@ -151,8 +162,9 @@ class Client {
     /// even if its timestamp is older than the one we just read to.
     ///
     /// Never moves the watermark backwards.
-    void mark_read(const ConversationId& id, std::function<void()> cb);
-    void mark_read(const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb);
+    void mark_read(const ConversationId& id, failable_function<void()> cb);
+    void mark_read(
+            const ConversationId& id, std::optional<sys_ms> up_to, failable_function<void()> cb);
 
     /// Sets a conversation's pinning: 0 unpinned, positive pinned with higher values first,
     /// negative hidden.  The value is the one the Contacts and UserGroups configs carry, so this is
@@ -161,22 +173,22 @@ class Client {
     /// Reported to subscribers as `conversation_list_replaced`, not as an update to the one
     /// conversation, because hiding removes a conversation from the list and unhiding returns it —
     /// so what changed is the list, not a row in it.
-    void set_priority(const ConversationId& id, int priority, std::function<void()> cb);
+    void set_priority(const ConversationId& id, int priority, failable_function<void()> cb);
 
     /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
     /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
     /// not repeated.
-    void messages(const ConversationId& id, std::function<void(std::vector<Message>)> cb);
+    void messages(const ConversationId& id, failable_function<void(std::vector<Message>)> cb);
     void messages(
-            const ConversationId& id, int limit, std::function<void(std::vector<Message>)> cb);
+            const ConversationId& id, int limit, failable_function<void(std::vector<Message>)> cb);
     void messages(
             const ConversationId& id,
             int limit,
             std::optional<MessageCursor> before,
-            std::function<void(std::vector<Message>)> cb);
+            failable_function<void(std::vector<Message>)> cb);
 
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
-    void message(int64_t id, std::function<void(std::optional<Message>)> cb);
+    void message(int64_t id, failable_function<void(std::optional<Message>)> cb);
 
     /// Sends a text message, storing it immediately and dispatching it via Core.
     ///
@@ -187,7 +199,9 @@ class Client {
     /// @throws std::invalid_argument if the conversation is not a DM (groups and communities are
     /// not implemented yet); thrown on the calling thread, before anything is dispatched.
     void send_message(
-            const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb);
+            const ConversationId& id,
+            std::string_view body,
+            failable_function<void(int64_t message_id)> cb);
 
     /// Sends a message carrying files, which turns sending into two stages: each attachment is
     /// encrypted and uploaded to the file server, and only then is the message — now able to name
@@ -242,7 +256,7 @@ class Client {
             std::function<
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
-            std::function<void(int64_t)> cb);
+            failable_function<void(int64_t message_id)> cb);
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
     /// reached the file server are left alone and only the ones that did not are uploaded, because
@@ -263,7 +277,7 @@ class Client {
             std::function<
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
-            std::function<void(bool)> cb);
+            failable_function<void(bool started)> cb);
 
     /// Sets, replaces or removes the dispatcher every handler is delivered through, which a caller
     /// whose loop does not exist yet when the Client is built needs: an application typically opens
@@ -299,11 +313,9 @@ class Client {
     // Client is destroyed before it runs.
     std::shared_ptr<callbacks> _cbs;
 
-    // Held by shared_ptr and swapped whole, so that setting one while a handler is being dispatched
-    // gives that handler either the old dispatcher or the new one rather than a torn read.  Null
-    // means run on Core's loop.
-    std::shared_ptr<const dispatcher> _dispatcher;
-    std::shared_ptr<const dispatcher> _current_dispatcher() const;
+    // Read and written only on the loop, which is what set_dispatcher hops onto rather than
+    // synchronising.  Unset means run on the loop.
+    dispatcher _dispatcher;
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.
@@ -404,8 +416,48 @@ class Client {
 
     // Hands anything Client says outward to the dispatcher, or runs it here if there is none.
     // Everything the application supplied goes through this: the change notifications, and the
-    // handlers given to individual calls.
+    // handlers given to individual calls.  Only called on the loop, which is what lets the
+    // dispatcher itself be an ordinary member.
     void _dispatch_out(std::function<void()> job);
+
+    // Calls `cb` with `args`, on the application's thread, if it gave us one.
+    template <typename Cb, typename... A>
+    void _report(Cb& cb, A... args) {
+        if (!cb)
+            return;
+        _dispatch_out([cb, args = std::make_tuple(std::move(args)...)]() mutable {
+            std::apply(cb, std::move(args));
+        });
+    }
+
+    // Runs `produce` on the loop and reports what it produced to `cb`, or reports the reason it
+    // could not.  This is what makes "`cb` is invoked exactly once" true: the work is database
+    // access, which throws on a disk error, and by then the caller's stack is gone -- so the
+    // callback they gave us is the only way left to tell them.  Logging it and returning would
+    // leave them waiting for an answer that is never coming.
+    template <typename Produce, typename Cb>
+    void _async(Produce produce, Cb cb) {
+        loop.call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
+            using Result = decltype(produce());
+            try {
+                if constexpr (std::is_void_v<Result>) {
+                    produce();
+                    _report(cb, std::optional<std::string>{});
+                } else
+                    _report(cb, std::optional<std::string>{}, produce());
+            } catch (const std::exception& e) {
+                log_operation_failure(e);
+                // Whatever a default value is: the caller is being told not to read it.
+                if constexpr (std::is_void_v<Result>)
+                    _report(cb, std::optional{std::string{e.what()}});
+                else
+                    _report(cb, std::optional{std::string{e.what()}}, Result{});
+            }
+        });
+    }
+
+    // Out of line so that the logging category does not have to be reachable from this header.
+    static void log_operation_failure(const std::exception& e);
 
     void _emit_conversation_added(const ConversationId& id);
     void _emit_list_replaced();
@@ -433,6 +485,9 @@ class Client {
     ///
     /// Put anything a Core callback touches *above* this, never below.
     core::Core core;
+
+    /// Helper reference to Core's event loop, which is where this class does its work.
+    oxen::quic::Loop& loop{core.loop()};
 
   private:
     // Client's own queue on Core's loop, rather than the loop's shared one, so that work deferred
