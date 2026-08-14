@@ -215,9 +215,10 @@ class Client {
     ///   network layer's own negative codes.  The message fails as a whole, but this is reported
     ///   per attachment, so a list of them can mark the one that broke rather than all of them.
     ///
-    /// Attachments upload one after another, so a failure means the ones after it were never
-    /// attempted and are reported no further — which is what makes "retry the ones that didn't get
-    /// through" well defined.
+    /// Reports for one attachment arrive in order — progress, then exactly one result — but
+    /// reports for different attachments may interleave, and a failure does not stop the others
+    /// being reported.  An attachment that never produces a result was not attempted, or had not
+    /// finished when the message failed; either way that is not something to read as success.
     ///
     /// It is taken here rather than through `callbacks` because it belongs to this call: those
     /// handlers report what the network did to us, whereas this reports how something we asked for
