@@ -383,66 +383,11 @@ void Client::_dispatch(std::function<void()> work) {
 // already there.  Exceptions propagate back to the caller, which is the whole advantage of this
 // form over the callback one.
 
-std::vector<Conversation> Client::conversations() {
-    return core.loop().call_get([this] { return _conversations(); });
-}
-
-std::optional<Conversation> Client::conversation(const ConversationId& id) {
-    return core.loop().call_get([this, &id] { return _conversation(id); });
-}
-
-Conversation Client::create_conversation(const ConversationId& id) {
-    return core.loop().call_get([this, &id] { return _create_conversation(id); });
-}
-
 // Not dispatched onto the loop: reads nothing but the session ID, which cannot change underneath
 // it.  See the declaration.
 bool Client::is_note_to_self(const ConversationId& id) {
     return id.type() == ConversationId::Type::dm &&
            std::ranges::equal(id.session_id(), _self_or_none());
-}
-
-void Client::mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
-    core.loop().call_get([this, &id, up_to] {
-        _mark_read(id, up_to);
-        return 0;
-    });
-}
-
-void Client::set_priority(const ConversationId& id, int priority) {
-    core.loop().call_get([this, &id, priority] {
-        _set_priority(id, priority);
-        return 0;
-    });
-}
-
-std::vector<Message> Client::messages(
-        const ConversationId& id, int limit, std::optional<MessageCursor> before) {
-    return core.loop().call_get(
-            [this, &id, limit, before] { return _messages(id, limit, before); });
-}
-
-std::optional<Message> Client::message(int64_t id) {
-    return core.loop().call_get([this, id] { return _message(id); });
-}
-
-int64_t Client::send_message(
-        const ConversationId& id,
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
-        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
-    _require_dm(id);
-
-    _require_readable(attachments);
-
-    return core.loop().call_get(
-            [&] { return _send_message(id, body, attachments, std::move(on_upload)); });
-}
-
-bool Client::retry_send(
-        int64_t message_id,
-        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
-    return core.loop().call_get([&] { return _retry_send(message_id, std::move(on_upload)); });
 }
 
 void Client::retry_send(
@@ -475,11 +420,6 @@ void Client::send_message(
         if (cb)
             cb(msg_id);
     });
-}
-
-int64_t Client::send_message(const ConversationId& id, std::string_view body) {
-    _require_dm(id);
-    return core.loop().call_get([this, &id, body] { return _send_message(id, body); });
 }
 
 // Callback forms: dispatch and return, delivering the result on the loop thread.

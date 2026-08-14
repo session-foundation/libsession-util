@@ -119,17 +119,14 @@ class Client {
     ///
     /// Currently that means every conversation.  Once message requests exist this returns only
     /// approved ones, with the rest reached through their own accessor.
-    std::vector<Conversation> conversations();
     void conversations(std::function<void(std::vector<Conversation>)> cb);
 
     /// A single conversation, or nullopt if it does not exist locally.
-    std::optional<Conversation> conversation(const ConversationId& id);
     void conversation(
             const ConversationId& id, std::function<void(std::optional<Conversation>)> cb);
 
     /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
     /// does this implicitly; this is for opening an empty conversation with someone first.
-    Conversation create_conversation(const ConversationId& id);
     void create_conversation(const ConversationId& id, std::function<void(Conversation)> cb);
 
     /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
@@ -149,7 +146,6 @@ class Client {
     /// even if its timestamp is older than the one we just read to.
     ///
     /// Never moves the watermark backwards.
-    void mark_read(const ConversationId& id, std::optional<sys_ms> up_to = std::nullopt);
     void mark_read(const ConversationId& id, std::function<void()> cb);
     void mark_read(const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb);
 
@@ -160,16 +156,11 @@ class Client {
     /// Reported to subscribers as `conversation_list_replaced`, not as an update to the one
     /// conversation, because hiding removes a conversation from the list and unhiding returns it —
     /// so what changed is the list, not a row in it.
-    void set_priority(const ConversationId& id, int priority);
     void set_priority(const ConversationId& id, int priority, std::function<void()> cb);
 
     /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
     /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
     /// not repeated.
-    std::vector<Message> messages(
-            const ConversationId& id,
-            int limit = 50,
-            std::optional<MessageCursor> before = std::nullopt);
     void messages(const ConversationId& id, std::function<void(std::vector<Message>)> cb);
     void messages(
             const ConversationId& id, int limit, std::function<void(std::vector<Message>)> cb);
@@ -180,7 +171,6 @@ class Client {
             std::function<void(std::vector<Message>)> cb);
 
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
-    std::optional<Message> message(int64_t id);
     void message(int64_t id, std::function<void(std::optional<Message>)> cb);
 
     /// Sends a text message, storing it immediately and dispatching it via Core.
@@ -191,7 +181,6 @@ class Client {
     ///
     /// @throws std::invalid_argument if the conversation is not a DM (groups and communities are
     /// not implemented yet); thrown on the calling thread, before anything is dispatched.
-    int64_t send_message(const ConversationId& id, std::string_view body);
     void send_message(
             const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb);
 
@@ -241,13 +230,6 @@ class Client {
     /// @throws std::invalid_argument if the conversation is not a DM, or if any attachment's file
     /// cannot be opened or exceeds the file server's limit; thrown on the calling thread, before
     /// anything is stored or dispatched.
-    int64_t send_message(
-            const ConversationId& id,
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
-            std::function<
-                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
-                    on_upload = nullptr);
     void send_message(
             const ConversationId& id,
             std::string_view body,
@@ -271,11 +253,6 @@ class Client {
     /// for the original send works unchanged for the retry.  Note that a retry is where a file
     /// that has since been deleted is discovered: an attachment that has gone moves the message to
     /// SendState::unsendable, which is terminal.
-    bool retry_send(
-            int64_t message_id,
-            std::function<
-                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
-                    on_upload = nullptr);
     void retry_send(
             int64_t message_id,
             std::function<
@@ -295,6 +272,10 @@ class Client {
     // Anything arriving between 1 and 2 is applied on top of the snapshot and lands on the right
     // answer, because each handler carries the whole of the new state rather than a delta, so
     // applying one twice changes nothing.
+
+  protected:
+    // Reachable by SyncClient, which dispatches onto the loop exactly as the callback forms do.
+    // Everything here assumes it is already on that thread.
 
   private:
     // Declared above `core`, which is declared last: see the note there.
@@ -318,6 +299,7 @@ class Client {
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
+  protected:
     std::span<const std::byte> _self_or_none();
     std::vector<Conversation> _conversations();
     std::optional<Conversation> _conversation(const ConversationId& id);
@@ -367,10 +349,14 @@ class Client {
 
     // Runs `work` on the loop thread, logging rather than propagating anything it throws: an
     // exception escaping there has no caller to reach and would take the loop with it.
+  private:
     void _dispatch(std::function<void()> work);
+
+  protected:
     void _require_dm(const ConversationId& id);
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
+  private:
     core::callbacks _intercept_callbacks(core::callbacks app);
     void _init();
 

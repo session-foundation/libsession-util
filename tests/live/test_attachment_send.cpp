@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
-#include <session/client.hpp>
+#include <session/client/sync_client.hpp>
 #include <session/hash.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/sqlite.hpp>
@@ -24,13 +24,13 @@ constexpr auto CONTENT_HASH_PERS = "SessionMsgIdHash"_b2b_pers;
 
 struct LiveClient {
     std::filesystem::path dir;
-    std::unique_ptr<Client> client;
+    std::unique_ptr<SyncClient> client;
 
     LiveClient() :
             dir{std::filesystem::temp_directory_path() /
                 fmt::format("{}", random::unique_id("live_client", 7))} {
         std::filesystem::create_directories(dir);
-        client = std::make_unique<Client>(dir / "client.db");
+        client = std::make_unique<SyncClient>(dir / "client.db");
         client->core.set_network(make_testnet_network(dir / "netcache"));
     }
 
@@ -40,12 +40,12 @@ struct LiveClient {
         std::filesystem::remove_all(dir, ec);
     }
 
-    Client* operator->() { return client.get(); }
+    SyncClient* operator->() { return client.get(); }
 };
 
 // Waits for the message to leave `uploading`, which is the only state the caller is told nothing
 // more about: everything after it is reported through send state changes.
-bool wait_until_sent(Client& c, int64_t id, std::chrono::seconds limit) {
+bool wait_until_sent(SyncClient& c, int64_t id, std::chrono::seconds limit) {
     auto deadline = std::chrono::steady_clock::now() + limit;
     while (std::chrono::steady_clock::now() < deadline) {
         auto msg = c.message(id);

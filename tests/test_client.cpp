@@ -5,7 +5,7 @@
 #include <fstream>
 #include <future>
 #include <oxen/quic/loop.hpp>
-#include <session/client.hpp>
+#include <session/client/sync_client.hpp>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/crypto/ed25519.hpp>
@@ -39,24 +39,25 @@ struct SenderKeys {
 /// close and reopen the same file, which is how the restart behaviour is exercised.
 struct TempClient {
     std::filesystem::path path;
-    std::unique_ptr<Client> client;
+    std::unique_ptr<SyncClient> client;
 
     template <core::CoreOption... Opts>
     explicit TempClient(Opts&&... opts) :
             path{std::filesystem::temp_directory_path() /
                  fmt::format("{}.db", random::unique_id("test_client", 7))},
-            client{std::make_unique<Client>(path, std::forward<Opts>(opts)...)} {}
+            client{std::make_unique<SyncClient>(path, std::forward<Opts>(opts)...)} {}
 
     template <core::CoreOption... Opts>
     explicit TempClient(callbacks cbs, Opts&&... opts) :
             path{std::filesystem::temp_directory_path() /
                  fmt::format("{}.db", random::unique_id("test_client", 7))},
-            client{std::make_unique<Client>(path, std::move(cbs), std::forward<Opts>(opts)...)} {}
+            client{std::make_unique<SyncClient>(
+                    path, std::move(cbs), std::forward<Opts>(opts)...)} {}
 
     template <core::CoreOption... Opts>
     void reopen(Opts&&... opts) {
         client.reset();
-        client = std::make_unique<Client>(path, std::forward<Opts>(opts)...);
+        client = std::make_unique<SyncClient>(path, std::forward<Opts>(opts)...);
     }
 
     ~TempClient() {
@@ -65,8 +66,8 @@ struct TempClient {
         std::filesystem::remove(path, ec);
     }
 
-    Client* operator->() { return client.get(); }
-    Client& operator*() { return *client; }
+    SyncClient* operator->() { return client.get(); }
+    SyncClient& operator*() { return *client; }
 };
 
 b33 own_sid(Client& c) {
@@ -873,7 +874,7 @@ TEST_CASE(
 TEST_CASE("Client: state is committed before the handler fires", "[client][signals]") {
     SenderKeys sender;
     std::optional<std::string> body_seen_from_handler;
-    Client* self = nullptr;
+    SyncClient* self = nullptr;
 
     TempClient c{callbacks{.message_added = [&](const ConversationId&, const Message& m) {
         body_seen_from_handler = self->message(m.id)->body;
