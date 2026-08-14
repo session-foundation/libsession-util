@@ -14,6 +14,7 @@
 #include <session/network/session_network.hpp>
 #include <session/sqlite.hpp>
 #include <stdexcept>
+#include <tuple>
 
 namespace session::client {
 
@@ -48,6 +49,29 @@ constexpr int ATTACHMENT_FLAG_VOICE_MESSAGE = 1;
 // the per-request one covers a stalled transfer, and the overall one bounds the upload entire.
 constexpr auto ATTACHMENT_REQUEST_TIMEOUT = 60s;
 constexpr auto ATTACHMENT_OVERALL_TIMEOUT = 10min;
+
+// Wraps a handler the application gave us so that calling it goes through the dispatcher.  This is
+// what extends the guarantee past the change notifications: a handler passed to one call arrives on
+// the same thread, in the same queue, as everything else Client reports.
+template <typename... A>
+static std::function<void(A...)> outward(
+        std::shared_ptr<const dispatcher> d, std::function<void(A...)> f) {
+    if (!f)
+        return {};
+    return [d = std::move(d), f = std::move(f)](A... args) {
+        auto job = [f, args = std::make_tuple(std::move(args)...)]() mutable {
+            try {
+                std::apply(f, std::move(args));
+            } catch (const std::exception& e) {
+                log::error(cat, "client handler threw: {}", e.what());
+            }
+        };
+        if (d)
+            (*d)(std::move(job));
+        else
+            job();
+    };
+}
 
 static SendState state_for(core::MessageSendStatus status) {
     switch (status) {
@@ -214,30 +238,27 @@ static std::optional<int64_t> find_conversation(sqlite::Connection& c, const Con
             "SELECT id FROM conversations WHERE {} = ?"_format(kind.column), *subject);
 }
 
-core::callbacks Client::_intercept_callbacks(core::callbacks app) {
+core::callbacks Client::_FIXME_core_callbacks(core::callbacks from_app) {
     // Capturing `this` here is safe despite running in Core's member-init list: the two callbacks
     // we install can only fire from receive_messages() and send_dm(), neither of which Core calls
-    // during its own construction.  Everything else in `app` is passed through untouched and may
-    // fire during construction (device_link_request does) without touching Client.
-    auto cb = std::move(app);
+    // during its own construction.
+    //
+    // These are Client's own wiring rather than anything an application supplies: what an
+    // application is promised is `client::callbacks`, which is reported through the dispatcher and
+    // carries whole state.  Anything it needs that only Core knows is reported by handling it here
+    // and re-reporting it there.
+    // Everything except the two below passes through, which is the part that is temporary: see the
+    // declaration.
+    auto cb = std::move(from_app);
 
-    cb.message_received = [this,
-                           chain = std::move(cb.message_received)](core::ReceivedMessage&& msg) {
-        // Persist first, then notify: a throwing callback is a bug Core can only log, so Client
-        // must never rely on an exception to reject a batch.
-        if (chain) {
-            auto copy = msg;
-            _on_message_received(std::move(msg));
-            chain(std::move(copy));
-        } else
-            _on_message_received(std::move(msg));
+    // Persist first, then notify: a throwing callback is a bug Core can only log, so Client must
+    // never rely on an exception to reject a batch.
+    cb.message_received = [this](core::ReceivedMessage&& msg) {
+        _on_message_received(std::move(msg));
     };
 
-    cb.message_send_status = [this, chain = std::move(cb.message_send_status)](
-                                     int64_t id, core::MessageSendStatus status) {
+    cb.message_send_status = [this](int64_t id, core::MessageSendStatus status) {
         _on_send_status(id, status);
-        if (chain)
-            chain(id, status);
     };
 
     return cb;
@@ -280,21 +301,42 @@ void Client::_init() {
 
 // -- Change notification ----------------------------------------------------------------------
 
-void Client::_emit(const std::function<void(const callbacks&)>& invoke) {
-    try {
-        invoke(_cbs);
-    } catch (const std::exception& e) {
-        log::error(cat, "client change handler threw: {}", e.what());
-    }
+void Client::_emit(std::function<void(const callbacks&)> invoke) {
+    _dispatch_out([cbs = _cbs, invoke = std::move(invoke)] { invoke(*cbs); });
+}
+
+void Client::set_dispatcher(dispatcher d) {
+    auto next = d ? std::make_shared<const dispatcher>(std::move(d))
+                  : std::shared_ptr<const dispatcher>{};
+    std::atomic_store(&_dispatcher, std::move(next));
+}
+
+std::shared_ptr<const dispatcher> Client::_current_dispatcher() const {
+    return std::atomic_load(&_dispatcher);
+}
+
+void Client::_dispatch_out(std::function<void()> job) {
+    auto guarded = [job = std::move(job)] {
+        try {
+            job();
+        } catch (const std::exception& e) {
+            log::error(cat, "client handler threw: {}", e.what());
+        }
+    };
+
+    if (auto d = _current_dispatcher())
+        (*d)(std::move(guarded));
+    else
+        guarded();
 }
 
 void Client::_emit_conversation_added(const ConversationId& id) {
     auto convo = _conversation(id);
     if (!convo)
         return;
-    _emit([&](const callbacks& cbs) {
+    _emit([convo = std::move(*convo)](const callbacks& cbs) {
         if (cbs.conversation_added)
-            cbs.conversation_added(*convo);
+            cbs.conversation_added(convo);
     });
 }
 
@@ -302,10 +344,10 @@ void Client::_emit_message(bool added, const ConversationId& id, int64_t message
     auto msg = _message(message_id);
     if (!msg)
         return;
-    _emit([&](const callbacks& cbs) {
+    _emit([added, id, msg = std::move(*msg)](const callbacks& cbs) {
         const auto& h = added ? cbs.message_added : cbs.message_updated;
         if (h)
-            h(id, *msg);
+            h(id, msg);
     });
 }
 
@@ -335,9 +377,9 @@ void Client::_flush_pending() {
         auto convo = _conversation(id);
         if (!convo)
             continue;
-        _emit([&](const callbacks& cbs) {
+        _emit([convo = std::move(*convo)](const callbacks& cbs) {
             if (cbs.conversation_updated)
-                cbs.conversation_updated(*convo);
+                cbs.conversation_updated(convo);
         });
     }
 }
@@ -379,10 +421,6 @@ void Client::_dispatch(std::function<void()> work) {
     });
 }
 
-// Blocking forms: call_get runs the job on the loop and waits, or runs it inline when the caller is
-// already there.  Exceptions propagate back to the caller, which is the whole advantage of this
-// form over the callback one.
-
 // Not dispatched onto the loop: reads nothing but the session ID, which cannot change underneath
 // it.  See the declaration.
 bool Client::is_note_to_self(const ConversationId& id) {
@@ -394,7 +432,10 @@ void Client::retry_send(
         int64_t message_id,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
         std::function<void(bool)> cb) {
-    _dispatch([this, message_id, on_upload = std::move(on_upload), cb = std::move(cb)] {
+    _dispatch([this,
+               message_id,
+               on_upload = outward(_current_dispatcher(), std::move(on_upload)),
+               cb = outward(_current_dispatcher(), std::move(cb))] {
         auto started = _retry_send(message_id, on_upload);
         if (cb)
             cb(started);
@@ -414,8 +455,8 @@ void Client::send_message(
                id,
                body = std::string{body},
                attachments = std::move(attachments),
-               on_upload = std::move(on_upload),
-               cb = std::move(cb)] {
+               on_upload = outward(_current_dispatcher(), std::move(on_upload)),
+               cb = outward(_current_dispatcher(), std::move(cb))] {
         auto msg_id = _send_message(id, body, attachments, on_upload);
         if (cb)
             cb(msg_id);
@@ -425,16 +466,20 @@ void Client::send_message(
 // Callback forms: dispatch and return, delivering the result on the loop thread.
 
 void Client::conversations(std::function<void(std::vector<Conversation>)> cb) {
-    _dispatch([this, cb = std::move(cb)] { cb(_conversations()); });
+    _dispatch([this, cb = outward(_current_dispatcher(), std::move(cb))] { cb(_conversations()); });
 }
 
 void Client::conversation(
         const ConversationId& id, std::function<void(std::optional<Conversation>)> cb) {
-    _dispatch([this, id, cb = std::move(cb)] { cb(_conversation(id)); });
+    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] {
+        cb(_conversation(id));
+    });
 }
 
 void Client::create_conversation(const ConversationId& id, std::function<void(Conversation)> cb) {
-    _dispatch([this, id, cb = std::move(cb)] { cb(_create_conversation(id)); });
+    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] {
+        cb(_create_conversation(id));
+    });
 }
 
 void Client::mark_read(const ConversationId& id, std::function<void()> cb) {
@@ -443,7 +488,7 @@ void Client::mark_read(const ConversationId& id, std::function<void()> cb) {
 
 void Client::mark_read(
         const ConversationId& id, std::optional<sys_ms> up_to, std::function<void()> cb) {
-    _dispatch([this, id, up_to, cb = std::move(cb)] {
+    _dispatch([this, id, up_to, cb = outward(_current_dispatcher(), std::move(cb))] {
         _mark_read(id, up_to);
         if (cb)
             cb();
@@ -451,7 +496,7 @@ void Client::mark_read(
 }
 
 void Client::set_priority(const ConversationId& id, int priority, std::function<void()> cb) {
-    _dispatch([this, id, priority, cb = std::move(cb)] {
+    _dispatch([this, id, priority, cb = outward(_current_dispatcher(), std::move(cb))] {
         _set_priority(id, priority);
         if (cb)
             cb();
@@ -472,17 +517,22 @@ void Client::messages(
         int limit,
         std::optional<MessageCursor> before,
         std::function<void(std::vector<Message>)> cb) {
-    _dispatch([this, id, limit, before, cb = std::move(cb)] { cb(_messages(id, limit, before)); });
+    _dispatch([this, id, limit, before, cb = outward(_current_dispatcher(), std::move(cb))] {
+        cb(_messages(id, limit, before));
+    });
 }
 
 void Client::message(int64_t id, std::function<void(std::optional<Message>)> cb) {
-    _dispatch([this, id, cb = std::move(cb)] { cb(_message(id)); });
+    _dispatch([this, id, cb = outward(_current_dispatcher(), std::move(cb))] { cb(_message(id)); });
 }
 
 void Client::send_message(
         const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb) {
     _require_dm(id);
-    _dispatch([this, id, body = std::string{body}, cb = std::move(cb)] {
+    _dispatch([this,
+               id,
+               body = std::string{body},
+               cb = outward(_current_dispatcher(), std::move(cb))] {
         auto msg_id = _send_message(id, body);
         if (cb)
             cb(msg_id);
@@ -649,7 +699,7 @@ void Client::_set_priority(const ConversationId& id, int priority) {
 
 void Client::_emit_list_replaced() {
     auto convos = _conversations();
-    _emit([&](const callbacks& cbs) {
+    _emit([convos = std::move(convos)](const callbacks& cbs) {
         if (cbs.conversation_list_replaced)
             cbs.conversation_list_replaced(convos);
     });

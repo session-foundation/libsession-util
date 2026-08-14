@@ -81,16 +81,23 @@ class Client {
     explicit Client(std::filesystem::path db_path, Opts&&... opts) :
             Client{std::move(db_path), callbacks{}, std::forward<Opts>(opts)...} {}
 
+    /// As below, additionally taking the dispatcher every handler is delivered through.  See
+    /// `dispatcher`; without one, handlers run on Core's event loop.
+    template <core::CoreOption... Opts>
+    explicit Client(
+            std::filesystem::path db_path, callbacks cbs, dispatcher dispatch, Opts&&... opts) :
+            Client{std::move(db_path), std::move(cbs), std::forward<Opts>(opts)...} {
+        set_dispatcher(std::move(dispatch));
+    }
+
     /// As above, additionally taking the change notifications to deliver.  They are fixed for the
     /// life of the Client, exactly as core::callbacks are, and are the only way an application is
     /// told anything -- see `callbacks`, and read the startup ordering note there before using it.
     template <core::CoreOption... Opts>
     explicit Client(std::filesystem::path db_path, callbacks cbs, Opts&&... opts) :
-            _cbs{std::move(cbs)},
+            _cbs{std::make_shared<callbacks>(std::move(cbs))},
             core{std::move(db_path),
-                 // Must precede any caller-supplied callbacks: Core takes the first instance in
-                 // the pack, so ours (which chains to theirs) has to be found first.
-                 _intercept_callbacks(
+                 _FIXME_core_callbacks(
                          core::detail::maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
                                  .value_or(core::callbacks{})),
                  core::schema_extension{"client", schema::MIGRATIONS, schema::FULL_SCHEMA},
@@ -100,19 +107,17 @@ class Client {
 
     // -- Conversations and messages ---------------------------------------------------------------
     //
-    // Each of these comes in two forms, and neither touches the database on the calling thread:
-    // both hand the work to Core's event loop, which is the only thread that ever touches it.  That
-    // is not a stylistic choice -- the connection pool is not safe to use from two threads at once,
-    // and reading from one while Core's poll thread writes deadlocks rather than merely racing.
+    // None of these touches the database on the calling thread: they hand the work to Core's event
+    // loop, which is the only thread that ever touches it.  That is not a stylistic choice -- the
+    // connection pool is not safe to use from two threads at once, and reading from one while
+    // Core's poll thread writes deadlocks rather than merely racing.
     //
-    // The blocking form waits for the loop and returns the result, which is what a single-threaded
-    // program or a worker thread wants; it costs nothing when the caller is already on the loop,
-    // since the job then runs inline.  The callback form returns immediately and invokes `cb` on
-    // the loop thread, which is what a UI thread wants -- it must not block on the loop, and it has
-    // to marshal the result back to itself anyway.
+    // Each returns immediately and invokes `cb` when the work is done -- through the dispatcher if
+    // one was given, so on the application's own thread.  A caller that would rather block on the
+    // answer than be handed it uses SyncClient.
     //
     // Argument validation happens on the calling thread, before anything is dispatched, so misuse
-    // still throws where the mistake is.  In the callback form a later failure (a disk error, say)
+    // still throws where the mistake is.  A later failure (a disk error, say)
     // is logged rather than thrown, since by then there is no caller stack to reach.
 
     /// All conversations, most recently active first.
@@ -260,6 +265,17 @@ class Client {
                     on_upload,
             std::function<void(bool)> cb);
 
+    /// Sets, replaces or removes the dispatcher every handler is delivered through, which a caller
+    /// whose loop does not exist yet when the Client is built needs: an application typically opens
+    /// its database, constructs this, and only then creates the window that owns the loop.
+    ///
+    /// Safe to call while Core is running and from any thread.  A handler already on its way either
+    /// goes to the old dispatcher or the new one; there is no flush and none is needed, since
+    /// passing nullptr simply means what no dispatcher has always meant -- handlers run on Core's
+    /// event loop.  An application shutting its loop down therefore has the choice of unsetting
+    /// this or having its own dispatcher run the work inline once posting stops arriving anywhere.
+    void set_dispatcher(dispatcher d);
+
     // -- Change notification ------------------------------------------------------------------
     //
     // Handlers are given at construction; there is no way to add or remove one afterwards.  See
@@ -279,7 +295,15 @@ class Client {
 
   private:
     // Declared above `core`, which is declared last: see the note there.
-    callbacks _cbs;
+    // Shared rather than held, so that a handler queued to another thread stays valid if the
+    // Client is destroyed before it runs.
+    std::shared_ptr<callbacks> _cbs;
+
+    // Held by shared_ptr and swapped whole, so that setting one while a handler is being dispatched
+    // gives that handler either the old dispatcher or the new one rather than a torn read.  Null
+    // means run on Core's loop.
+    std::shared_ptr<const dispatcher> _dispatcher;
+    std::shared_ptr<const dispatcher> _current_dispatcher() const;
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.
@@ -357,7 +381,17 @@ class Client {
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
   private:
-    core::callbacks _intercept_callbacks(core::callbacks app);
+    // FIXME: takes the application's core::callbacks only because send_to_swarm still lives in
+    // there.  That callback lets a caller replace Core's networking wholesale with its own, which
+    // is a test seam that leaked into the implementation -- the test suite is its only user, and it
+    // intercepts after Core has already encoded and encrypted everything, so it stands in for the
+    // one part of a send it does not exercise.
+    //
+    // When it is replaced by a stubbed network object, core::callbacks becomes uniformly
+    // notifications, this loses its parameter, and Client's constructor can static_assert that no
+    // core::callbacks was passed at all: Core's callbacks are Client's wiring, and an application's
+    // contract is client::callbacks.
+    core::callbacks _FIXME_core_callbacks(core::callbacks from_app);
     void _init();
 
     void _on_message_received(core::ReceivedMessage&& msg);
@@ -366,7 +400,12 @@ class Client {
 
     // Runs `invoke` against the application's handlers, swallowing and logging anything it throws:
     // a broken listener is not something a data model can do anything about.
-    void _emit(const std::function<void(const callbacks&)>& invoke);
+    void _emit(std::function<void(const callbacks&)> invoke);
+
+    // Hands anything Client says outward to the dispatcher, or runs it here if there is none.
+    // Everything the application supplied goes through this: the change notifications, and the
+    // handlers given to individual calls.
+    void _dispatch_out(std::function<void()> job);
 
     void _emit_conversation_added(const ConversationId& id);
     void _emit_list_replaced();

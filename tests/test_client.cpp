@@ -1102,42 +1102,48 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
 
 // ── Core interoperability ───────────────────────────────────────────────────────────────────────
 
-TEST_CASE("Client: the application's own Core callbacks still fire", "[client][callbacks]") {
-    std::vector<core::ReceivedMessage> app_received;
-    std::vector<core::MessageSendStatus> app_statuses;
+TEST_CASE("Client: handlers arrive through the dispatcher", "[client][callbacks]") {
+    // Stands in for an application's loop: jobs are collected rather than run, so a handler that
+    // ran on Core's loop instead of being handed over is visible as one that never happened.
+    std::vector<std::function<void()>> queued;
+    std::thread::id dispatched_on;
 
-    core::callbacks cbs;
-    cbs.message_received = [&](core::ReceivedMessage&& m) { app_received.push_back(std::move(m)); };
-    cbs.message_send_status = [&](int64_t, core::MessageSendStatus s) {
-        app_statuses.push_back(s);
-    };
-    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
-                           config::Namespace,
-                           std::vector<std::byte>,
-                           std::chrono::milliseconds,
-                           std::function<void(bool)> on_stored) { on_stored(true); };
+    Recorder r;
+    TempClient c{r.handlers()};
+    c->set_dispatcher([&](std::function<void()> job) {
+        dispatched_on = std::this_thread::get_id();
+        queued.push_back(std::move(job));
+    });
 
-    TempClient c{cbs};
     SenderKeys sender;
+    deliver(*c, sender, "hello", from_epoch_ms(1000), "h1");
+    sync(*c);
 
-    deliver(*c, sender, "seen by both", from_epoch_ms(1000), "h1");
+    // Handed over rather than called: nothing has reached the application yet.
+    CHECK(r.msg_added.empty());
+    CHECK(r.added.empty());
+    REQUIRE(!queued.empty());
 
-    // Client handled it *and* passed it on intact.
-    REQUIRE(app_received.size() == 1);
-    CHECK(app_received[0].hash == "h1");
-    CHECK(app_received[0].sender_session_id == sender.session_id);
-    CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
+    // Handed over from Core's loop, which is the thread an application must not be touched from.
+    CHECK(dispatched_on != std::this_thread::get_id());
 
-    constexpr auto peer =
-            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-    TestHelper::seed_pfs_nak(c->core, peer);
-    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
-    c->send_message(ConversationId::dm(peer), "outbound");
+    for (auto& job : queued)
+        job();
+    queued.clear();
 
-    // Two Core sends, not one: the recipient's copy and the copy deposited in our own swarm for our
-    // other devices.  Both are visible here because these are Core's own callbacks, which report
-    // what Core was asked to do rather than what the conversation layer did.
-    CHECK(std::ranges::count(app_statuses, core::MessageSendStatus::success) == 2);
+    REQUIRE(r.msg_added.size() == 1);
+    CHECK(r.msg_added[0].second.body == "hello");
+    CHECK(r.added.size() == 1);
+
+    // Unsetting puts things back the way they are without one, which is what an application does
+    // when its loop stops accepting work.
+    c->set_dispatcher(nullptr);
+    deliver(*c, sender, "direct", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    CHECK(queued.empty());
+    REQUIRE(r.msg_added.size() == 2);
+    CHECK(r.msg_added[1].second.body == "direct");
 }
 
 TEST_CASE("Client: Core is usable directly through the Client", "[client][callbacks]") {
