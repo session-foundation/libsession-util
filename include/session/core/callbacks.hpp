@@ -198,7 +198,11 @@ struct callbacks {
     /// Parameters:
     /// - message_id -- the value returned by the originating send_dm() call
     /// - status -- the current state of the send
-    std::function<void(int64_t message_id, MessageSendStatus status)> message_send_status;
+    /// - swarm_hash -- the hash the swarm assigned the stored message, on `success` and when the
+    ///   storage server reported one.  Unset for every other status.
+    std::function<void(
+            int64_t message_id, MessageSendStatus status, std::optional<std::string_view> swarm_hash)>
+            message_send_status;
 };
 
 }  // namespace session::core

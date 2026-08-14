@@ -620,9 +620,17 @@ void Core::_send_to_swarm(
         config::Namespace ns,
         std::vector<std::byte> payload,
         std::chrono::milliseconds ttl,
-        std::function<void(bool success)> on_complete) {
+        std::function<void(bool success, std::optional<std::string_view> swarm_hash)> on_complete) {
     if (callbacks.send_to_swarm) {
-        callbacks.send_to_swarm(dest_pubkey, ns, std::move(payload), ttl, std::move(on_complete));
+        callbacks.send_to_swarm(
+                dest_pubkey,
+                ns,
+                std::move(payload),
+                ttl,
+                [on_complete = std::move(on_complete)](bool success) {
+                    if (on_complete)
+                        on_complete(success, std::nullopt);
+                });
         return;
     }
 
@@ -691,7 +699,7 @@ void Core::_send_to_swarm(
                 if (swarm.empty()) {
                     log::warning(cat, "Cannot store: no swarm nodes available");
                     if (on_complete)
-                        on_complete(false);
+                        on_complete(false, std::nullopt);
                     return;
                 }
                 // The two values a 421 turns on: which swarm we resolved, and which of its nodes we
@@ -718,8 +726,24 @@ void Core::_send_to_swarm(
                                         "Store request failed ({}): {}",
                                         timeout ? "timed out" : "status {}"_format(status),
                                         resp.value_or("no response body"));
-                            if (on_complete)
-                                on_complete(success);
+                            if (!on_complete)
+                                return;
+
+                            std::optional<std::string> hash;
+                            if (success && resp) {
+                                try {
+                                    auto json = nlohmann::json::parse(*resp);
+                                    if (auto h = json.find("hash");
+                                        h != json.end() && h->is_string())
+                                        hash = h->get<std::string>();
+                                } catch (const std::exception& e) {
+                                    log::warning(
+                                            cat, "Could not read stored message hash: {}", e.what());
+                                }
+                            }
+                            on_complete(
+                                    success,
+                                    hash ? std::optional<std::string_view>{*hash} : std::nullopt);
                         });
             });
 }
@@ -735,7 +759,7 @@ void Core::_do_send_dm(
     auto fire_status = [&](MessageSendStatus status) {
         if (callbacks.message_send_status) {
             try {
-                callbacks.message_send_status(message_id, status);
+                callbacks.message_send_status(message_id, status, std::nullopt);
             } catch (const std::exception& e) {
                 log::error(cat, "message_send_status callback threw: {}", e.what());
             }
@@ -807,13 +831,14 @@ void Core::_do_send_dm(
                 config::Namespace::Default,
                 std::move(payload),
                 ttl,
-                [this, message_id](bool success) {
+                [this, message_id](bool success, std::optional<std::string_view> swarm_hash) {
                     if (callbacks.message_send_status) {
                         try {
                             callbacks.message_send_status(
                                     message_id,
                                     success ? MessageSendStatus::success
-                                            : MessageSendStatus::network_error);
+                                            : MessageSendStatus::network_error,
+                                    swarm_hash);
                         } catch (const std::exception& e) {
                             log::error(cat, "message_send_status callback threw: {}", e.what());
                         }
@@ -911,13 +936,13 @@ int64_t Core::send_dm(
         _pending_sends.push_back(std::move(pending));
 
         if (callbacks.message_send_status)
-            callbacks.message_send_status(id, MessageSendStatus::awaiting_keys);
+            callbacks.message_send_status(id, MessageSendStatus::awaiting_keys, std::nullopt);
 
         prefetch_pfs_keys(recipient_session_id);
     } else {
         // No cache and no network: fire immediate failure.
         if (callbacks.message_send_status)
-            callbacks.message_send_status(id, MessageSendStatus::no_network);
+            callbacks.message_send_status(id, MessageSendStatus::no_network, std::nullopt);
     }
 
     return id;

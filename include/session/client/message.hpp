@@ -86,7 +86,13 @@ struct Message {
     /// and `send_state` already describes the only send there was.
     std::optional<SendState> sync_send_state;
 
-    /// Swarm-assigned hash; unset for an outgoing message that has not been stored yet.
+    /// Swarm-assigned hash of the copy of this message held in *our own* swarm: for an incoming
+    /// message the one we retrieved, and for an outgoing one the copy we deposit for our other
+    /// devices (which for a note to self is the only copy there is).  The copy sent to someone
+    /// else is stored in their swarm under a different hash, which is not reported here.
+    ///
+    /// Unset for an outgoing message that has not been stored yet, and for one stored by a build
+    /// whose storage server did not report a hash.
     std::optional<std::string> hash;
 
     MessageCursor cursor() const { return {timestamp, id}; }

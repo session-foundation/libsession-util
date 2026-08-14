@@ -45,7 +45,7 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
     std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
                                    config::Namespace ns,
                                    std::vector<std::byte> payload,
@@ -98,7 +98,7 @@ TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
     std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
                                    config::Namespace,
                                    std::vector<std::byte> payload,
@@ -145,7 +145,7 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
     std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
                                    config::Namespace,
                                    std::vector<std::byte> payload,
@@ -191,7 +191,7 @@ TEST_CASE("send_dm: no_network when no callback and no network", "[core][send_dm
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
-    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
 
     TempCore sender{cbs};
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
@@ -209,7 +209,7 @@ TEST_CASE("send_dm: no_network when no cache and no network", "[core][send_dm]")
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
-    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
 
     TempCore sender{cbs};
 
@@ -259,7 +259,7 @@ TEST_CASE("send_dm: network_error when store fails", "[core][send_dm]") {
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
-    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     cbs.send_to_swarm = [](std::span<const std::byte, 33>,
                            config::Namespace,
                            std::vector<std::byte>,
@@ -300,7 +300,7 @@ TEST_CASE("send_dm: dispatches via network when send_to_swarm is not set", "[cor
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
-    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     // Deliberately not setting send_to_swarm — should fall back to the network object.
 
     TempCore sender{cbs};
@@ -424,7 +424,7 @@ TEST_CASE(
     std::vector<std::byte> captured;
 
     callbacks cbs;
-    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     cbs.pfs_keys_fetched = [&](std::span<const std::byte, 33>, PfsKeyFetch r) {
         fetches.push_back(r);
     };

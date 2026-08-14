@@ -383,13 +383,15 @@ class Core {
 
     // Dispatches a fully-encoded payload to a swarm for storage.  Tries the send_to_swarm
     // callback first; falls back to the attached network object; fires on_complete with the
-    // outcome.  Throws std::logic_error if neither delivery path is available.
+    // outcome and, where the storage server reported one, the hash it assigned the message.
+    // Throws std::logic_error if neither delivery path is available.
     void _send_to_swarm(
             std::span<const std::byte, 33> dest_pubkey,
             config::Namespace ns,
             std::vector<std::byte> payload,
             std::chrono::milliseconds ttl,
-            std::function<void(bool success)> on_complete);
+            std::function<void(bool success, std::optional<std::string_view> swarm_hash)>
+                    on_complete);
 
     // Constructs a sqlite::Database from the subset of opts that satisfy sqlite::DatabaseOption.
     template <CoreOption... Opts>

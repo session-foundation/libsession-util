@@ -88,6 +88,12 @@ static SendState state_for(core::MessageSendStatus status) {
     return SendState::failed;
 }
 
+static std::optional<std::string_view> opt_view(const std::optional<std::string>& s) {
+    if (s)
+        return *s;
+    return std::nullopt;
+}
+
 static bool is_terminal(core::MessageSendStatus status) {
     switch (status) {
         case core::MessageSendStatus::success:
@@ -259,8 +265,10 @@ core::callbacks Client::_FIXME_core_callbacks(core::callbacks from_app) {
         _on_message_received(std::move(msg));
     };
 
-    cb.message_send_status = [this](int64_t id, core::MessageSendStatus status) {
-        _on_send_status(id, status);
+    cb.message_send_status = [this](int64_t id,
+                                    core::MessageSendStatus status,
+                                    std::optional<std::string_view> swarm_hash) {
+        _on_send_status(id, status, swarm_hash);
     };
 
     return cb;
@@ -869,17 +877,21 @@ void Client::_dispatch_sends(
 
     auto core_id =
             to_self ? core.send_dm(self, synced, now) : core.send_dm(id.session_id(), content, now);
-    _send_ids[core_id] = client_id;
+    _send_ids[core_id] = OutgoingSend{client_id, to_self};
 
     // send_dm() reports its first status synchronously, i.e. before we knew the id to map it to.
-    if (auto stashed = _early_status.extract(core_id))
-        _apply_send_status(client_id, stashed.mapped(), false);
+    if (auto stashed = _early_status.extract(core_id)) {
+        auto& [status, hash] = stashed.mapped();
+        _apply_send_status(client_id, status, false, to_self ? opt_view(hash) : std::nullopt);
+    }
 
     if (!to_self) {
         auto sync_id = core.send_dm(self, synced, now);
         _sync_sends[sync_id] = client_id;
-        if (auto stashed = _early_status.extract(sync_id))
-            _apply_send_status(client_id, stashed.mapped(), true);
+        if (auto stashed = _early_status.extract(sync_id)) {
+            auto& [status, hash] = stashed.mapped();
+            _apply_send_status(client_id, status, true, opt_view(hash));
+        }
     }
 }
 
@@ -1469,14 +1481,17 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _touch(convo_id);
 }
 
-void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
+void Client::_on_send_status(
+        int64_t core_id,
+        core::MessageSendStatus status,
+        std::optional<std::string_view> swarm_hash) {
     if (auto sync = _sync_sends.find(core_id); sync != _sync_sends.end()) {
         log::debug(
                 cat, "sync copy of send {} reached status {}", core_id, static_cast<int>(status));
         auto client_id = sync->second;
         if (is_terminal(status))
             _sync_sends.erase(sync);
-        _apply_send_status(client_id, status, true);
+        _apply_send_status(client_id, status, true, swarm_hash);
         return;
     }
 
@@ -1484,17 +1499,25 @@ void Client::_on_send_status(int64_t core_id, core::MessageSendStatus status) {
     if (it == _send_ids.end()) {
         // Fired from inside send_dm(), before it returned us the id to map.  send_message() drains
         // this as soon as it has the mapping.
-        _early_status.insert_or_assign(core_id, status);
+        _early_status.insert_or_assign(
+                core_id,
+                EarlyStatus{
+                        status,
+                        swarm_hash ? std::optional{std::string{*swarm_hash}} : std::nullopt});
         return;
     }
 
-    auto client_id = it->second;
+    auto [client_id, own_swarm] = it->second;
     if (is_terminal(status))
         _send_ids.erase(it);
-    _apply_send_status(client_id, status, false);
+    _apply_send_status(client_id, status, false, own_swarm ? swarm_hash : std::nullopt);
 }
 
-void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus status, bool sync) {
+void Client::_apply_send_status(
+        int64_t client_id,
+        core::MessageSendStatus status,
+        bool sync,
+        std::optional<std::string_view> swarm_hash) {
     auto state = state_for(status);
     std::optional<ConversationId> convo;
     {
@@ -1502,10 +1525,23 @@ void Client::_apply_send_status(int64_t client_id, core::MessageSendStatus statu
         SQLite::Transaction tx{c.sql};
         // The two sends own one column each, so a status for one never disturbs the other.
         auto column = sync ? "sync_send_state"sv : "send_state"sv;
-        if (c.prepared_exec(
-                    "UPDATE messages SET {0} = ?1 WHERE id = ?2 AND {0} IS NOT ?1"_format(column),
-                    static_cast<int>(state),
-                    client_id) > 0) {
+        bool changed =
+                c.prepared_exec(
+                        "UPDATE messages SET {0} = ?1 WHERE id = ?2 AND {0} IS NOT ?1"_format(
+                                column),
+                        static_cast<int>(state),
+                        client_id) > 0;
+
+        // Set once and never revised: the hash is what a redelivery of this same message off our
+        // swarm dedupes against, so pointing it at a later store would strand the row it came from.
+        if (swarm_hash)
+            changed |= c.prepared_exec(
+                               "UPDATE messages SET swarm_hash = ? WHERE id = ? AND swarm_hash IS "
+                               "NULL",
+                               *swarm_hash,
+                               client_id) > 0;
+
+        if (changed) {
             auto convo_row = c.prepared_maybe_get<int64_t>(
                     "SELECT conversation FROM messages WHERE id = ?", client_id);
             if (convo_row)

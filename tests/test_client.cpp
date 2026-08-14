@@ -188,6 +188,12 @@ nlohmann::json store_body(const MockNetwork::SentRequest& r) {
                     reinterpret_cast<const char*>(r.request.body->data()), r.request.body->size()});
 }
 
+/// The hash accept_stores has the swarm assign a store.  Distinct per destination swarm, so that a
+/// test can tell the copy of an outgoing message left in our own swarm from the recipient's.
+std::string store_hash_for(std::string_view pubkey_hex) {
+    return "hash-for-{}"_format(pubkey_hex);
+}
+
 /// Answers every captured store as the swarm accepting it, leaving anything else alone, and returns
 /// how many there were -- which is itself worth asserting on, since an outgoing message is two
 /// stores and a note to self is one.
@@ -198,7 +204,9 @@ size_t accept_stores(MockNetwork& net) {
 
     for (auto& r : pending) {
         if (r.request.endpoint == "store") {
-            r.callback(true, false, 200, {}, "{}");
+            nlohmann::json resp = {
+                    {"hash", store_hash_for(store_body(r)["pubkey"].get<std::string_view>())}};
+            r.callback(true, false, 200, {}, resp.dump());
             accepted++;
         } else
             others.push_back(std::move(r));
@@ -783,6 +791,10 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     CHECK(msg->sender == own_sid(*c));
     CHECK(msg->send_state == SendState::sent);
 
+    // Of the two hashes the two stores were assigned, the one kept is our own swarm's: it is the
+    // copy we can still act on, and the one a redelivery would arrive under.
+    CHECK(msg->hash == store_hash_for(oxenc::to_hex(own_sid(*c))));
+
     // The conversation was created by the send and shows the outgoing message as its preview.
     auto convos = c->conversations();
     REQUIRE(convos.size() == 1);
@@ -968,6 +980,10 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
     REQUIRE(r.msg_updated.size() == 1);
     CHECK(r.msg_updated[0].second.id == id);
     CHECK(r.msg_updated[0].second.send_state == SendState::sent);
+
+    // The only store that landed was the recipient's, and that hash belongs to their swarm: it is
+    // not something we could ever look up, so it is not recorded as ours.
+    CHECK_FALSE(r.msg_updated[0].second.hash.has_value());
 }
 
 TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
@@ -1115,6 +1131,9 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     // One swarm, so one send: there is no separate sync copy to have a state for.
     CHECK(c->message(id)->send_state.has_value());
     CHECK_FALSE(c->message(id)->sync_send_state.has_value());
+
+    // That single store went to our own swarm, so its hash is one worth keeping.
+    CHECK(c->message(id)->hash == store_hash_for(oxenc::to_hex(me)));
     CHECK(c->messages(ConversationId::dm(me)).size() == 1);
 
     // ...and when our own swarm hands it straight back on the next poll, which is what note to self

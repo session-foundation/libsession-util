@@ -336,11 +336,21 @@ class Client {
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.
-    std::unordered_map<int64_t, int64_t> _send_ids;  // core send id -> client message id
+    struct OutgoingSend {
+        int64_t client_id;
+        // A note to self goes to our own swarm, so its swarm hash is one we can act on later; a
+        // send to someone else deposits on their swarm, and that hash is theirs to expire.
+        bool own_swarm;
+    };
+    std::unordered_map<int64_t, OutgoingSend> _send_ids;  // core send id -> the send it belongs to
 
     // Status updates that arrived from send_dm() before it returned, i.e. before we knew the core
     // send id to map.  Drained by send_message() once the mapping is registered.
-    std::unordered_map<int64_t, core::MessageSendStatus> _early_status;
+    struct EarlyStatus {
+        core::MessageSendStatus status;
+        std::optional<std::string> swarm_hash;
+    };
+    std::unordered_map<int64_t, EarlyStatus> _early_status;
 
     // Core send ids belonging to the copy of an outgoing message deposited in our own swarm.  Their
     // delivery status is deliberately not reported: what the application waits on is the copy going
@@ -424,8 +434,18 @@ class Client {
     void _init();
 
     void _on_message_received(core::ReceivedMessage&& msg);
-    void _on_send_status(int64_t core_id, core::MessageSendStatus status);
-    void _apply_send_status(int64_t client_id, core::MessageSendStatus status, bool sync);
+    void _on_send_status(
+            int64_t core_id,
+            core::MessageSendStatus status,
+            std::optional<std::string_view> swarm_hash);
+
+    // `swarm_hash` is recorded against the message only when it names a copy in our own swarm; the
+    // caller passes nullopt for the copy sent to someone else, whose hash is meaningless here.
+    void _apply_send_status(
+            int64_t client_id,
+            core::MessageSendStatus status,
+            bool sync,
+            std::optional<std::string_view> swarm_hash);
 
     // Runs `invoke` against the application's handlers, swallowing and logging anything it throws:
     // a broken listener is not something a data model can do anything about.
