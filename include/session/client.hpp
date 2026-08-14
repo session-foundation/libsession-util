@@ -2,9 +2,11 @@
 
 #include <filesystem>
 #include <optional>
+#include <session/client/attachment.hpp>
+#include <session/client/conversation.hpp>
 #include <session/client/conversation_id.hpp>
-#include <session/client/signals.hpp>
-#include <session/client/types.hpp>
+#include <session/client/message.hpp>
+#include <session/client/callbacks.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
 #include <session/util.hpp>
@@ -53,6 +55,12 @@
 /// that thread.
 namespace oxen::quic {
 class JobQueue;
+}
+
+// Forward declared rather than included: the generated protobuf headers are large and this one is
+// public.  Only referenced by private members below.
+namespace SessionProtos {
+class Content;
 }
 
 namespace session::client {
@@ -187,6 +195,56 @@ class Client {
     void send_message(
             const ConversationId& id, std::string_view body, std::function<void(int64_t)> cb);
 
+    /// Sends a message carrying files, which turns sending into two stages: each attachment is
+    /// encrypted and uploaded to the file server, and only then is the message — now able to name
+    /// where those files live — dispatched to the swarms.
+    ///
+    /// Returns as soon as the row is stored, as the plain overload does, so the message is
+    /// displayable immediately; it sits in SendState::uploading until the uploads finish and moves
+    /// on to the ordinary send states from there.  An upload that fails fails the message, leaving
+    /// it in SendState::failed with nothing sent.
+    ///
+    /// `on_upload` follows one attachment, identified by `index`, its position in `attachments`:
+    ///
+    /// - `result` unset — still going.  `sent`/`total` are encrypted bytes, `total` being known
+    ///   before the first call so a progress bar can be sized up front.
+    /// - `result == 0` — done, and the file server gave us an id for it.  Note this is the only
+    ///   thing that means done: `sent == total` merely means the last byte was acknowledged, and
+    ///   the server's decision to accept the file arrives after that.
+    /// - anything else — that attachment failed, with the file server's status code or one of the
+    ///   network layer's own negative codes.  The message fails as a whole, but this is reported
+    ///   per attachment, so a list of them can mark the one that broke rather than all of them.
+    ///
+    /// Attachments upload one after another, so a failure means the ones after it were never
+    /// attempted and are reported no further — which is what makes "retry the ones that didn't get
+    /// through" well defined.
+    ///
+    /// It is taken here rather than through `callbacks` because it belongs to this call: those
+    /// handlers report what the network did to us, whereas this reports how something we asked for
+    /// is going, and a caller passing it here can bind whatever it wants to update without matching
+    /// an id back to it.
+    ///
+    /// Progress fires as often as the transfer reports, which on a fast upload is often; coalescing
+    /// is the caller's to do, since dropping intermediate values loses nothing.  Like the
+    /// `callbacks` handlers it runs on Core's event loop, so it must not block or throw — and note
+    /// it can fire before this function returns, so it must not depend on anything the caller sets
+    /// up afterwards.
+    ///
+    /// The files are read at this point, not when they were attached, so they must still exist.
+    /// Nothing about them is stored: what persists is the message, whose content names the uploaded
+    /// copies.  Re-sending a failed message therefore uploads again.
+    ///
+    /// @throws std::invalid_argument if the conversation is not a DM, or if any attachment's file
+    /// cannot be opened or exceeds the file server's limit; thrown on the calling thread, before
+    /// anything is stored or dispatched.
+    int64_t send_message(
+            const ConversationId& id,
+            std::string_view body,
+            std::vector<OutgoingAttachment> attachments,
+            std::function<
+                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
+                    on_upload = nullptr);
+
     // -- Change notification ------------------------------------------------------------------
     //
     // Handlers are given at construction; there is no way to add or remove one afterwards.  See
@@ -232,6 +290,36 @@ class Client {
             const ConversationId& id, int limit, std::optional<MessageCursor> before);
     std::optional<Message> _message(int64_t id);
     int64_t _send_message(const ConversationId& id, std::string_view body);
+    int64_t _send_message(
+            const ConversationId& id,
+            std::string_view body,
+            const std::vector<OutgoingAttachment>& attachments,
+            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+
+    // Uploads the message's first attachment that has no url yet and, when there are none left,
+    // finishes the send.  Each upload's completion calls this again, so the chain runs one file at
+    // a time and resumes wherever it was left -- which is also what a retry does.
+    void _upload_next(
+            int64_t client_id,
+            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+
+    // Rebuilds the message's content with its now-uploaded attachments named in it, replaces what
+    // was stored, and dispatches it.  Rebuilt from the database rather than from what send_message
+    // was given, so that this is reachable for a message whose uploads finished in an earlier run.
+    void _finish_attachment_send(int64_t client_id);
+
+    // Marks a message as failed because its attachments could not be uploaded, and reports it.
+    void _fail_attachment_send(int64_t client_id);
+
+    // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
+    // copy for our own swarm.  Shared by the plain and attachment-carrying sends.
+    void _dispatch_sends(
+            int64_t client_id,
+            const ConversationId& id,
+            const SessionProtos::Content& content,
+            const SessionProtos::Content& synced,
+            sys_ms now,
+            bool to_self);
 
     // Runs `work` on the loop thread, logging rather than propagating anything it throws: an
     // exception escaping there has no caller to reach and would take the loop with it.

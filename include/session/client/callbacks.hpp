@@ -1,9 +1,9 @@
 #pragma once
 
 #include <functional>
-#include <optional>
+#include <session/client/conversation.hpp>
 #include <session/client/conversation_id.hpp>
-#include <session/client/types.hpp>
+#include <session/client/message.hpp>
 #include <vector>
 
 namespace session::client {
