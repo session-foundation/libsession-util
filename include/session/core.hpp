@@ -381,10 +381,9 @@ class Core {
             std::chrono::milliseconds ttl,
             bool force_v2);
 
-    // Dispatches a fully-encoded payload to a swarm for storage.  Tries the send_to_swarm
-    // callback first; falls back to the attached network object; fires on_complete with the
-    // outcome and, where the storage server reported one, the hash it assigned the message.
-    // Throws std::logic_error if neither delivery path is available.
+    // Dispatches a fully-encoded payload to a swarm for storage via the attached network object,
+    // firing on_complete with the outcome and, where the storage server reported one, the hash it
+    // assigned the message.  Throws std::logic_error if no network is attached.
     void _send_to_swarm(
             std::span<const std::byte, 33> dest_pubkey,
             config::Namespace ns,

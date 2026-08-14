@@ -621,22 +621,9 @@ void Core::_send_to_swarm(
         std::vector<std::byte> payload,
         std::chrono::milliseconds ttl,
         std::function<void(bool success, std::optional<std::string_view> swarm_hash)> on_complete) {
-    if (callbacks.send_to_swarm) {
-        callbacks.send_to_swarm(
-                dest_pubkey,
-                ns,
-                std::move(payload),
-                ttl,
-                [on_complete = std::move(on_complete)](bool success) {
-                    if (on_complete)
-                        on_complete(success, std::nullopt);
-                });
-        return;
-    }
-
     auto net = _network;
     if (!net)
-        throw std::logic_error{"_send_to_swarm: no send_to_swarm callback and no network object"};
+        throw std::logic_error{"_send_to_swarm: no network object"};
 
     auto ns_val = static_cast<int16_t>(ns);
     auto now_ms = epoch_ms(clock_now_ms());

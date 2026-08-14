@@ -97,11 +97,13 @@ class Client {
     explicit Client(std::filesystem::path db_path, callbacks cbs, Opts&&... opts) :
             _cbs{std::make_shared<callbacks>(std::move(cbs))},
             core{std::move(db_path),
-                 _FIXME_core_callbacks(
-                         core::detail::maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
-                                 .value_or(core::callbacks{})),
+                 _core_callbacks(),
                  core::schema_extension{"client", schema::MIGRATIONS, schema::FULL_SCHEMA},
                  std::forward<Opts>(opts)...} {
+        static_assert(
+                (!std::same_as<std::remove_cvref_t<Opts>, core::callbacks> && ...),
+                "A Client's Core callbacks are its own wiring and cannot be supplied: what an "
+                "application is told is client::callbacks, passed as this constructor's `cbs`.");
         _init();
     }
 
@@ -420,17 +422,7 @@ class Client {
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
   private:
-    // FIXME: takes the application's core::callbacks only because send_to_swarm still lives in
-    // there.  That callback lets a caller replace Core's networking wholesale with its own, which
-    // is a test seam that leaked into the implementation -- the test suite is its only user, and it
-    // intercepts after Core has already encoded and encrypted everything, so it stands in for the
-    // one part of a send it does not exercise.
-    //
-    // When it is replaced by a stubbed network object, core::callbacks becomes uniformly
-    // notifications, this loses its parameter, and Client's constructor can static_assert that no
-    // core::callbacks was passed at all: Core's callbacks are Client's wiring, and an application's
-    // contract is client::callbacks.
-    core::callbacks _FIXME_core_callbacks(core::callbacks from_app);
+    core::callbacks _core_callbacks();
     void _init();
 
     void _on_message_received(core::ReceivedMessage&& msg);

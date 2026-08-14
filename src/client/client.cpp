@@ -246,18 +246,16 @@ static std::optional<int64_t> find_conversation(sqlite::Connection& c, const Con
             "SELECT id FROM conversations WHERE {} = ?"_format(kind.column), *subject);
 }
 
-core::callbacks Client::_FIXME_core_callbacks(core::callbacks from_app) {
+core::callbacks Client::_core_callbacks() {
     // Capturing `this` here is safe despite running in Core's member-init list: the two callbacks
     // we install can only fire from receive_messages() and send_dm(), neither of which Core calls
     // during its own construction.
     //
-    // These are Client's own wiring rather than anything an application supplies: what an
-    // application is promised is `client::callbacks`, which is reported through the dispatcher and
-    // carries whole state.  Anything it needs that only Core knows is reported by handling it here
-    // and re-reporting it there.
-    // Everything except the two below passes through, which is the part that is temporary: see the
-    // declaration.
-    auto cb = std::move(from_app);
+    // These are Client's own wiring, and an application cannot supply any of its own: what it is
+    // promised is `client::callbacks`, which is reported through the dispatcher and carries whole
+    // state.  Anything it needs that only Core knows is reported by handling it here and
+    // re-reporting it there.
+    core::callbacks cb;
 
     // Persist first, then notify: a throwing callback is a bug Core can only log, so Client must
     // never rely on an exception to reject a batch.

@@ -64,7 +64,7 @@ enum class MessageSendStatus {
                      ///< implement automatic retry with a maximum retry count.)
     success,         ///< The store request was accepted by a swarm node.
     network_error,   ///< The swarm lookup or store request failed (terminal).
-    no_network,      ///< No send_to_swarm callback is set and no network object is attached.
+    no_network,      ///< No network object is attached.
     encrypt_failed,  ///< Encryption failed (should not normally happen).
 };
 
@@ -168,27 +168,6 @@ struct callbacks {
     /// - reason -- why decryption failed
     std::function<void(const SwarmMessage& msg, MessageDecryptFailure reason)>
             message_decrypt_failed;
-
-    /// Application-provided swarm store function.  If set, Core calls this to deliver outgoing
-    /// messages instead of using its attached network object.
-    ///
-    /// The implementation MUST call on_stored with success (true) or failure (false) when the
-    /// store operation completes or fails.
-    ///
-    /// Parameters:
-    /// - recipient_pubkey -- 33-byte (0x05-prefixed) session ID whose swarm should receive the
-    ///   message
-    /// - ns -- the swarm namespace to store into (e.g. Namespace::Default for DMs)
-    /// - payload -- the fully-encoded message bytes (envelope-wrapped, encrypted)
-    /// - ttl -- requested time-to-live for the stored message
-    /// - on_stored -- callback that MUST be invoked with the outcome
-    std::function<void(
-            std::span<const std::byte, 33> recipient_pubkey,
-            config::Namespace ns,
-            std::vector<std::byte> payload,
-            std::chrono::milliseconds ttl,
-            std::function<void(bool success)> on_stored)>
-            send_to_swarm;
 
     /// Callback fired as a send operation initiated by Core::send_dm() progresses.  This is
     /// typically invoked multiple times for a single message — once or more for intermediate
