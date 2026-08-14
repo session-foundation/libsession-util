@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <fstream>
 #include <future>
 #include <oxen/quic/loop.hpp>
 #include <session/client.hpp>
@@ -1200,4 +1201,62 @@ TEST_CASE("Client: reads are safe while messages arrive on another thread", "[cl
 
     CHECK(reads > 0);  // the reader really did run alongside, rather than after
     CHECK(c->messages(convo, N + 10).size() == N);
+}
+
+TEST_CASE(
+        "Client: a message with attachments needs readable files", "[client][send][attachments]") {
+    TempClient c{};
+    auto me = own_sid(*c);
+
+    CHECK_THROWS_AS(
+            c->send_message(
+                    ConversationId::dm(me),
+                    "here you go",
+                    {OutgoingAttachment{.path = "/nonexistent/nope.png"}}),
+            std::invalid_argument);
+
+    // Rejected before anything was stored, rather than leaving a message that can never be sent.
+    CHECK(c->messages(ConversationId::dm(me), 10, std::nullopt).empty());
+}
+
+TEST_CASE(
+        "Client: attachments that cannot be uploaded fail the message",
+        "[client][send][attachments]") {
+    auto file = std::filesystem::temp_directory_path() / "libsession_attachment_test.bin";
+    {
+        std::ofstream out{file, std::ios::binary};
+        out << "some file contents";
+    }
+
+    Recorder r;
+    TempClient c{r.handlers()};
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
+
+    // No network is attached, so the upload cannot even be attempted.  The message must still end
+    // up somewhere final: the failure is what a caller waits on, and a message left in `uploading`
+    // would wait forever.
+    auto id = c->send_message(
+            ConversationId::dm(me),
+            "here you go",
+            {OutgoingAttachment{.path = file}},
+            [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
+                reports.emplace_back(idx, sent, total, result);
+            });
+    sync(*c);
+
+    auto msg = c->message(id);
+    REQUIRE(msg);
+    CHECK(msg->body == "here you go");
+    CHECK(msg->send_state == SendState::failed);
+
+    REQUIRE(reports.size() == 1);
+    auto [idx, sent, total, result] = reports.front();
+    CHECK(idx == 0);
+    REQUIRE(result.has_value());
+    CHECK(*result != 0);
+
+    std::filesystem::remove(file);
 }

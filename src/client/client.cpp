@@ -3,11 +3,15 @@
 #include <oxenc/hex.h>
 
 #include <algorithm>
+#include <charconv>
 #include <oxen/log.hpp>
 #include <oxen/quic/loop.hpp>
+#include <session/attachments.hpp>
 #include <session/client.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
+#include <session/network/backends/session_file_server.hpp>
+#include <session/network/session_network.hpp>
 #include <session/sqlite.hpp>
 #include <stdexcept>
 
@@ -35,6 +39,15 @@ static std::array<std::byte, 32> content_hash(
         std::span<const std::byte, 33> sender, std::span<const std::byte> content) {
     return hash::blake2b_pers<32>(CONTENT_HASH_PERS, sender, content);
 }
+
+// AttachmentPointer.Flags.VOICE_MESSAGE.  Mirrored rather than taken from the generated header so
+// that the column's meaning is legible where it is written.
+constexpr int ATTACHMENT_FLAG_VOICE_MESSAGE = 1;
+
+// An attachment is a whole file rather than a swarm request, so it gets its own, longer allowances:
+// the per-request one covers a stalled transfer, and the overall one bounds the upload entire.
+constexpr auto ATTACHMENT_REQUEST_TIMEOUT = 60s;
+constexpr auto ATTACHMENT_OVERALL_TIMEOUT = 10min;
 
 static SendState state_for(core::MessageSendStatus status) {
     switch (status) {
@@ -250,6 +263,19 @@ void Client::_init() {
             static_cast<int>(SendState::interrupted),
             static_cast<int>(SendState::pending),
             static_cast<int>(SendState::sending));
+
+    // A message whose attachments were still uploading is not in that same doubt: nothing can have
+    // reached a swarm, because the message could not be built until the uploads finished.  So it
+    // failed outright rather than unknowably, and it is squarely retryable -- its attachment rows
+    // record which files did get up, so resuming re-uploads only the rest.
+    c.prepared_exec(
+            "UPDATE messages SET send_state = ?1 WHERE send_state = ?2",
+            static_cast<int>(SendState::failed),
+            static_cast<int>(SendState::uploading));
+    c.prepared_exec(
+            "UPDATE messages SET sync_send_state = ?1 WHERE sync_send_state = ?2",
+            static_cast<int>(SendState::failed),
+            static_cast<int>(SendState::uploading));
 }
 
 // -- Change notification ----------------------------------------------------------------------
@@ -384,6 +410,29 @@ std::vector<Message> Client::messages(
 
 std::optional<Message> Client::message(int64_t id) {
     return core.loop().call_get([this, id] { return _message(id); });
+}
+
+int64_t Client::send_message(
+        const ConversationId& id,
+        std::string_view body,
+        std::vector<OutgoingAttachment> attachments,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    _require_dm(id);
+
+    // Checked here rather than at upload time so that an unreadable file throws where the mistake
+    // was made, instead of failing a message that has already been stored and shown.
+    for (const auto& a : attachments) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(a.path, ec) || ec)
+            throw std::invalid_argument{
+                    "send_message: attachment {} is not a readable file"_format(a.path.string())};
+        if (std::filesystem::file_size(a.path, ec) == 0 || ec)
+            throw std::invalid_argument{
+                    "send_message: attachment {} is empty"_format(a.path.string())};
+    }
+
+    return core.loop().call_get(
+            [&] { return _send_message(id, body, attachments, std::move(on_upload)); });
 }
 
 int64_t Client::send_message(const ConversationId& id, std::string_view body) {
@@ -817,6 +866,348 @@ void Client::_dispatch_sends(
         if (auto stashed = _early_status.extract(sync_id))
             _apply_send_status(client_id, stashed.mapped(), true);
     }
+}
+
+// -- Attachments ------------------------------------------------------------------------------
+
+int64_t Client::_send_message(
+        const ConversationId& id,
+        std::string_view body,
+        const std::vector<OutgoingAttachment>& attachments,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    if (attachments.empty())
+        return _send_message(id, body);
+
+    auto now = clock_now_ms();
+    auto self = core.globals.session_id();
+    bool to_self = std::ranges::equal(id.session_id(), self);
+
+    // Stored with the body alone for now.  What finally goes to the swarms also names the uploaded
+    // files, which nothing knows yet -- that is what the uploads are for -- so the content and its
+    // hash are rewritten in _finish_attachment_send once they do.
+    SessionProtos::Content content;
+    content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    auto* data = content.mutable_datamessage();
+    data->set_body(std::string{body});
+    data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
+
+    auto serialised = content.SerializeAsString();
+    auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
+    auto cid = content_hash(self, raw);
+
+    bool created;
+    int64_t client_id;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = ensure_conversation(c, id, now);
+        created = convo.created;
+
+        c.prepared_exec(
+                R"(
+            INSERT INTO messages
+                (conversation, content_hash, sender, outgoing, timestamp, body, send_state,
+                 sync_send_state)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+        )",
+                convo.id,
+                cid,
+                account_id(c, self),
+                to_ms(now),
+                body,
+                static_cast<int>(SendState::uploading),
+                to_self ? std::optional<int>{}
+                        : std::optional{static_cast<int>(SendState::uploading)});
+        client_id = c.sql.getLastInsertRowid();
+
+        c.prepared_exec(
+                "INSERT INTO message_raw_content (message, content) VALUES (?, ?)", client_id, raw);
+
+        for (size_t i = 0; i < attachments.size(); i++) {
+            const auto& a = attachments[i];
+            c.prepared_exec(
+                    R"(
+                INSERT INTO message_attachments
+                    (message, idx, path, content_type, filename, caption, flags, width, height)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            )",
+                    client_id,
+                    static_cast<int64_t>(i),
+                    a.path.string(),
+                    a.content_type,
+                    a.filename ? a.filename : std::optional{a.path.filename().string()},
+                    a.caption,
+                    a.voice_message ? ATTACHMENT_FLAG_VOICE_MESSAGE : 0,
+                    a.width ? std::optional<int64_t>{*a.width} : std::nullopt,
+                    a.height ? std::optional<int64_t>{*a.height} : std::nullopt);
+        }
+
+        tx.commit();
+    }
+
+    if (created)
+        _emit_conversation_added(id);
+    _emit_message(true, id, client_id);
+    _touch(id);
+
+    log::debug(
+            cat,
+            "send_message: message {} to conversation {} with {} attachment(s)",
+            client_id,
+            id.to_string(),
+            attachments.size());
+
+    _upload_next(client_id, std::move(on_upload));
+    return client_id;
+}
+
+void Client::_upload_next(
+        int64_t client_id,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    std::optional<std::tuple<int64_t, std::string>> next;
+    {
+        auto c = core.database().conn();
+        next = c.prepared_maybe_get<int64_t, std::string>(
+                R"(
+            SELECT idx, path FROM message_attachments
+            WHERE message = ? AND url IS NULL
+            ORDER BY idx LIMIT 1
+        )",
+                client_id);
+    }
+
+    // Nothing left without a url means every file is up, and the message can finally be built.
+    if (!next)
+        return _finish_attachment_send(client_id);
+
+    auto [idx, path] = *next;
+    auto index = static_cast<size_t>(idx);
+
+    auto net = core.network();
+    if (!net) {
+        log::warning(
+                cat,
+                "Cannot upload attachment {} of message {}: no network is attached",
+                idx,
+                client_id);
+        if (on_upload)
+            on_upload(index, 0, 0, network::ERROR_NO_TRANSPORT_LAYER);
+        return _fail_attachment_send(client_id);
+    }
+
+    network::FileUploadRequest req;
+    req.file = path;
+    req.domain = attachment::Domain::ATTACHMENT;
+    // The limit this guards is the one onion requests impose, and an attachment goes to the file
+    // server rather than through them; the server enforces its own.
+    req.allow_large = true;
+    req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
+    req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
+
+    if (on_upload)
+        req.on_progress = [index, on_upload](int64_t sent, int64_t total) {
+            on_upload(index, sent, total, std::nullopt);
+        };
+
+    req.on_complete =
+            [this, client_id, index, on_upload](
+                    std::variant<std::pair<network::file_metadata, cleared_b32>, int16_t> result,
+                    bool /*timeout*/) {
+                // Delivered on the network's loop; everything below touches the database, which is
+                // Core's loop's alone.
+                _dispatch([this, client_id, index, on_upload, result = std::move(result)] {
+                    if (auto* err = std::get_if<int16_t>(&result)) {
+                        log::warning(
+                                cat,
+                                "Upload of attachment {} of message {} failed: {}",
+                                index,
+                                client_id,
+                                *err);
+                        if (on_upload)
+                            on_upload(index, 0, 0, *err);
+                        return _fail_attachment_send(client_id);
+                    }
+
+                    const auto& [meta, key] = std::get<0>(result);
+                    auto url = network::file_server::generate_download_url(
+                            meta.id, core.network()->file_server_config);
+
+                    {
+                        auto c = core.database().conn();
+                        c.prepared_exec(
+                                "UPDATE message_attachments SET url = ?, key = ?, size = ?"
+                                " WHERE message = ? AND idx = ?",
+                                url,
+                                std::span<const std::byte>{key},
+                                meta.size,
+                                client_id,
+                                static_cast<int64_t>(index));
+                    }
+
+                    log::debug(
+                            cat,
+                            "Uploaded attachment {} of message {} ({} bytes) to {}",
+                            index,
+                            client_id,
+                            meta.size,
+                            url);
+
+                    if (on_upload)
+                        on_upload(index, meta.size, meta.size, 0);
+
+                    _upload_next(client_id, on_upload);
+                });
+            };
+
+    log::debug(cat, "Uploading attachment {} of message {}: {}", idx, client_id, path);
+    // Bound to a name: the accessor's span is deliberately unavailable on a temporary.
+    auto seed_access = core.globals.account_seed();
+    net->upload_file(std::move(req), seed_access.seed());
+}
+
+void Client::_finish_attachment_send(int64_t client_id) {
+    auto self = core.globals.session_id();
+
+    // Rebuilt from the database rather than from what send_message was handed, so that a message
+    // whose uploads finished can be completed by anything that finds it -- a retry, or a later run.
+    std::optional<ConversationId> convo_id;
+    std::string body;
+    int64_t timestamp = 0;
+    SessionProtos::Content content;
+
+    {
+        auto c = core.database().conn();
+
+        auto row = c.prepared_maybe_get<int64_t, std::string, int64_t>(
+                "SELECT conversation, body, timestamp FROM messages WHERE id = ?", client_id);
+        if (!row) {
+            log::warning(cat, "Cannot finish message {}: it is gone", client_id);
+            return;
+        }
+        auto [convo_row, msg_body, msg_ts] = *row;
+        convo_id = conversation_id_at(c, convo_row);
+        body = std::move(msg_body);
+        timestamp = msg_ts;
+
+        content.set_sigtimestamp(static_cast<uint64_t>(timestamp));
+        auto* data = content.mutable_datamessage();
+        data->set_body(body);
+        data->set_timestamp(static_cast<uint64_t>(timestamp));
+
+        for (auto&& [url, key, size, ctype, fname, caption, flags, width, height] :
+             c.prepared_results<
+                     std::string,
+                     std::string,
+                     int64_t,
+                     std::optional<std::string>,
+                     std::optional<std::string>,
+                     std::optional<std::string>,
+                     int,
+                     std::optional<int>,
+                     std::optional<int>>(
+                     R"(
+            SELECT url, key, size, content_type, filename, caption, flags, width, height
+            FROM message_attachments WHERE message = ? ORDER BY idx
+        )",
+                     client_id)) {
+            auto* ptr = data->add_attachments();
+            ptr->set_url(url);
+
+            // Deprecated in favour of `url`, which is what current clients read, but still required
+            // by the protobuf and still read by old ones.  It is the url's last segment, so it is
+            // taken back out of the url rather than tracked separately -- and it is only a number
+            // for as long as the file server hands out numbers, which it is expected to stop doing.
+            uint64_t legacy_id = 0;
+            if (auto parsed = network::file_server::parse_download_url(url)) {
+                const auto& fid = parsed->file_id;
+                if (!fid.empty() &&
+                    std::ranges::all_of(fid, [](char ch) { return ch >= '0' && ch <= '9'; })) {
+                    auto [_, ec] = std::from_chars(fid.data(), fid.data() + fid.size(), legacy_id);
+                    if (ec != std::errc{})
+                        legacy_id = 0;
+                }
+            }
+            ptr->set_id(legacy_id);
+
+            ptr->set_key(key.data(), key.size());
+            ptr->set_size(static_cast<uint32_t>(size));
+
+            if (ctype)
+                ptr->set_contenttype(*ctype);
+            if (fname)
+                ptr->set_filename(*fname);
+            if (caption)
+                ptr->set_caption(*caption);
+            if (flags != 0)
+                ptr->set_flags(static_cast<uint32_t>(flags));
+            if (width)
+                ptr->set_width(static_cast<uint32_t>(*width));
+            if (height)
+                ptr->set_height(static_cast<uint32_t>(*height));
+        }
+    }
+
+    bool to_self = std::ranges::equal(convo_id->session_id(), self);
+
+    SessionProtos::Content synced = content;
+    synced.mutable_datamessage()->set_synctarget(oxenc::to_hex(convo_id->session_id()));
+
+    // What we store is the sync copy, as the plain send does, and its hash has to be the hash of
+    // what we store: it is what the copy coming back off our own swarm dedupes against, and the
+    // provisional one written before the uploads describes content nobody will ever send.
+    auto serialised = synced.SerializeAsString();
+    auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
+    auto cid = content_hash(self, raw);
+
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+        c.prepared_exec(
+                "UPDATE messages SET content_hash = ?, send_state = ?, sync_send_state = ?"
+                " WHERE id = ?",
+                cid,
+                static_cast<int>(SendState::pending),
+                to_self ? std::optional<int>{}
+                        : std::optional{static_cast<int>(SendState::pending)},
+                client_id);
+        c.prepared_exec(
+                "UPDATE message_raw_content SET content = ? WHERE message = ?", raw, client_id);
+        tx.commit();
+    }
+
+    _emit_message(false, *convo_id, client_id);
+
+    _dispatch_sends(
+            client_id,
+            *convo_id,
+            content,
+            synced,
+            sys_ms{std::chrono::milliseconds{timestamp}},
+            to_self);
+}
+
+void Client::_fail_attachment_send(int64_t client_id) {
+    std::optional<ConversationId> convo_id;
+    {
+        auto c = core.database().conn();
+        auto convo = c.prepared_maybe_get<int64_t>(
+                "SELECT conversation FROM messages WHERE id = ?", client_id);
+        if (!convo)
+            return;
+        convo_id = conversation_id_at(c, *convo);
+
+        // The rows are left alone: what has already been uploaded stays recorded, which is what
+        // makes retrying send only what did not get through.
+        c.prepared_exec(
+                "UPDATE messages SET send_state = ?, sync_send_state ="
+                " CASE WHEN sync_send_state IS NULL THEN NULL ELSE ? END WHERE id = ?",
+                static_cast<int>(SendState::failed),
+                static_cast<int>(SendState::failed),
+                client_id);
+    }
+
+    _emit_message(false, *convo_id, client_id);
 }
 
 // -- Core event handling ----------------------------------------------------------------------
