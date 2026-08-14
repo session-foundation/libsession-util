@@ -206,8 +206,11 @@ class Client {
     ///
     /// `on_upload` follows one attachment, identified by `index`, its position in `attachments`:
     ///
-    /// - `result` unset — still going.  `sent`/`total` are encrypted bytes, `total` being known
-    ///   before the first call so a progress bar can be sized up front.
+    /// - `result` unset — under way.  `sent`/`total` are encrypted bytes.  The first such report
+    ///   for an attachment is always 0/0 and means it has started rather than that it has sent
+    ///   nothing: it comes before the transfer is established, which is what tells an attachment
+    ///   being worked on from one still waiting its turn.  The size is not known until then, so a
+    ///   progress bar is sized from the first report carrying a non-zero total.
     /// - `result == 0` — done, and the file server gave us an id for it.  Note this is the only
     ///   thing that means done: `sent == total` merely means the last byte was acknowledged, and
     ///   the server's decision to accept the file arrives after that.
@@ -245,6 +248,14 @@ class Client {
             std::function<
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload = nullptr);
+    void send_message(
+            const ConversationId& id,
+            std::string_view body,
+            std::vector<OutgoingAttachment> attachments,
+            std::function<
+                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
+                    on_upload,
+            std::function<void(int64_t)> cb);
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
     /// reached the file server are left alone and only the ones that did not are uploaded, because
@@ -358,6 +369,7 @@ class Client {
     // exception escaping there has no caller to reach and would take the loop with it.
     void _dispatch(std::function<void()> work);
     void _require_dm(const ConversationId& id);
+    void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
     core::callbacks _intercept_callbacks(core::callbacks app);
     void _init();

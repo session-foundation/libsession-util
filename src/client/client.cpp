@@ -344,6 +344,20 @@ void Client::_flush_pending() {
 
 // -- Asynchronous interface ---------------------------------------------------------------------
 
+// Checked on the calling thread so that an unreadable file throws where the mistake was made,
+// rather than failing a message that has already been stored and shown.
+void Client::_require_readable(const std::vector<OutgoingAttachment>& attachments) {
+    for (const auto& a : attachments) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(a.path, ec) || ec)
+            throw std::invalid_argument{
+                    "send_message: attachment {} is not a readable file"_format(a.path.string())};
+        if (std::filesystem::file_size(a.path, ec) == 0 || ec)
+            throw std::invalid_argument{
+                    "send_message: attachment {} is empty"_format(a.path.string())};
+    }
+}
+
 void Client::_require_dm(const ConversationId& id) {
     // Checked on the calling thread so caller error surfaces at the call site rather than inside
     // the loop, where the callback form would only be able to log it.
@@ -419,17 +433,7 @@ int64_t Client::send_message(
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
     _require_dm(id);
 
-    // Checked here rather than at upload time so that an unreadable file throws where the mistake
-    // was made, instead of failing a message that has already been stored and shown.
-    for (const auto& a : attachments) {
-        std::error_code ec;
-        if (!std::filesystem::is_regular_file(a.path, ec) || ec)
-            throw std::invalid_argument{
-                    "send_message: attachment {} is not a readable file"_format(a.path.string())};
-        if (std::filesystem::file_size(a.path, ec) == 0 || ec)
-            throw std::invalid_argument{
-                    "send_message: attachment {} is empty"_format(a.path.string())};
-    }
+    _require_readable(attachments);
 
     return core.loop().call_get(
             [&] { return _send_message(id, body, attachments, std::move(on_upload)); });
@@ -449,6 +453,27 @@ void Client::retry_send(
         auto started = _retry_send(message_id, on_upload);
         if (cb)
             cb(started);
+    });
+}
+
+void Client::send_message(
+        const ConversationId& id,
+        std::string_view body,
+        std::vector<OutgoingAttachment> attachments,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
+        std::function<void(int64_t)> cb) {
+    _require_dm(id);
+    _require_readable(attachments);
+
+    _dispatch([this,
+               id,
+               body = std::string{body},
+               attachments = std::move(attachments),
+               on_upload = std::move(on_upload),
+               cb = std::move(cb)] {
+        auto msg_id = _send_message(id, body, attachments, on_upload);
+        if (cb)
+            cb(msg_id);
     });
 }
 
