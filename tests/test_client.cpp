@@ -1290,6 +1290,43 @@ TEST_CASE(
     std::filesystem::remove(file);
 }
 
+TEST_CASE(
+        "Client: throttling never squelches what a caller must hear",
+        "[client][send][attachments]") {
+    auto file = std::filesystem::temp_directory_path() / "libsession_throttle_test.bin";
+    {
+        std::ofstream out{file, std::ios::binary};
+        out << "some file contents";
+    }
+
+    TempClient c;
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    // Long enough that anything passing through the throttle would be dropped: what arrives is
+    // exactly what is exempt from it.
+    c->set_high_freq_dispatch_interval(1h);
+
+    std::vector<std::optional<int>> results;
+    auto id = c->send_message(
+            ConversationId::dm(me),
+            "here you go",
+            {OutgoingAttachment{.path = file}},
+            [&](size_t, int64_t, int64_t, std::optional<int> result) {
+                results.push_back(result);
+            });
+    sync(*c);
+
+    // With no network the upload cannot start, so the one report is its failure -- which is the
+    // point: an outcome is never a thing the throttle may drop.
+    CHECK(c->message(id)->send_state == SendState::failed);
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().has_value());
+    CHECK(*results.front() != 0);
+
+    std::filesystem::remove(file);
+}
+
 TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachments]") {
     auto file = std::filesystem::temp_directory_path() / "libsession_retry_test.bin";
     {

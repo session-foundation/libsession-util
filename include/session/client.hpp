@@ -290,6 +290,20 @@ class Client {
     /// this or having its own dispatcher run the work inline once posting stops arriving anywhere.
     void set_dispatcher(dispatcher d);
 
+    /// How often a handler that reports continuously — such as attachment upload progress — is
+    /// allowed to fire, per thing being reported on.  Defaults to 100ms; zero lets every update
+    /// through.
+    ///
+    /// A transfer reports far faster than a display can use, and with a dispatcher each of those
+    /// reports is a job handed to the application's loop, which for some toolkits means a repaint.
+    /// Squelching the ones in between costs nothing, because each update supersedes the last.
+    /// Whatever a caller must not miss — an upload starting, finishing, or failing — is reported
+    /// outside this and is never squelched.
+    ///
+    /// Safe to call while Core is running and from any thread; it applies to transfers begun after
+    /// it takes effect.
+    void set_high_freq_dispatch_interval(std::chrono::milliseconds interval);
+
     // -- Change notification ------------------------------------------------------------------
     //
     // Handlers are given at construction; there is no way to add or remove one afterwards.  See
@@ -316,6 +330,9 @@ class Client {
     // Read and written only on the loop, which is what set_dispatcher hops onto rather than
     // synchronising.  Unset means run on the loop.
     dispatcher _dispatcher;
+
+    // As above, and for the same reason.
+    std::chrono::milliseconds _high_freq_dispatch_interval{100};
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.

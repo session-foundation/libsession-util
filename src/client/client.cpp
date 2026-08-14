@@ -50,6 +50,31 @@ constexpr int ATTACHMENT_FLAG_VOICE_MESSAGE = 1;
 constexpr auto ATTACHMENT_REQUEST_TIMEOUT = 60s;
 constexpr auto ATTACHMENT_OVERALL_TIMEOUT = 10min;
 
+// Rate limits one stream of updates, so that a producer reporting faster than a consumer can
+// usefully act on cannot flood it.  `allow()` is true at most once per interval.
+//
+// One of these belongs to each thing being reported on, never to the reporter: a single instance
+// shared between several streams would let whichever of them happened to be first in each window
+// squelch the others indefinitely, so a transfer could appear to have stalled while it was in fact
+// progressing.
+class update_throttle {
+    std::chrono::milliseconds _interval;
+    std::optional<std::chrono::steady_clock::time_point> _emitted;
+
+  public:
+    explicit update_throttle(std::chrono::milliseconds interval) : _interval{interval} {}
+
+    bool allow() {
+        if (_interval <= 0ms)
+            return true;
+        auto now = std::chrono::steady_clock::now();
+        if (_emitted && now - *_emitted < _interval)
+            return false;
+        _emitted = now;
+        return true;
+    }
+};
+
 static SendState state_for(core::MessageSendStatus status) {
     switch (status) {
         case core::MessageSendStatus::awaiting_keys: return SendState::pending;
@@ -284,6 +309,10 @@ void Client::_emit(std::function<void(const callbacks&)> invoke) {
 
 void Client::set_dispatcher(dispatcher d) {
     loop.call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
+}
+
+void Client::set_high_freq_dispatch_interval(std::chrono::milliseconds interval) {
+    loop.call([this, interval] { _high_freq_dispatch_interval = interval; });
 }
 
 void Client::_dispatch_out(std::function<void()> job) {
@@ -1007,10 +1036,16 @@ void Client::_upload_next(
     req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
     req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
 
-    if (on_upload)
-        req.on_progress = [index, on_upload](int64_t sent, int64_t total) {
-            on_upload(index, sent, total, std::nullopt);
+    if (on_upload) {
+        // This attachment's own throttle, so that uploads running alongside each other cannot
+        // squelch one another.  Only progress passes through it: starting and finishing are things
+        // a caller must always hear, and they are reported from elsewhere.
+        auto throttle = std::make_shared<update_throttle>(_high_freq_dispatch_interval);
+        req.on_progress = [index, on_upload, throttle](int64_t sent, int64_t total) {
+            if (throttle->allow())
+                on_upload(index, sent, total, std::nullopt);
         };
+    }
 
     req.on_complete =
             [this, client_id, index, on_upload](
