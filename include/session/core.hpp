@@ -39,8 +39,8 @@
 /// account keys, because that state *is* Core's rather than a conversation's.
 ///
 /// Core can drive its own network once one is attached with set_network(), after which it polls the
-/// account's swarms on a timer; without one, the integrating application is responsible for feeding
-/// it (receive_messages(), and callbacks::send_to_swarm for outbound).
+/// account's swarms on a timer.  Without one it can still be fed inbound messages through
+/// receive_messages(), but it cannot send: a send with no network attached reports no_network.
 ///
 /// The typical intended flow for using the Core is to construct it early in the application and
 /// store it for the application duration:

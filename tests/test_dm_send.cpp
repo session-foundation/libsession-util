@@ -182,9 +182,9 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
     CHECK_FALSE(received[0].pfs_encrypted);
 }
 
-// ── No network error (NAK, no send_to_swarm, no network) ───────────────────────────────────────
+// ── No network error ────────────────────────────────────────────────────────────────────────────
 
-TEST_CASE("send_dm: no_network when no callback and no network", "[core][send_dm]") {
+TEST_CASE("send_dm: no_network once the keys are known but nothing can send", "[core][send_dm]") {
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
