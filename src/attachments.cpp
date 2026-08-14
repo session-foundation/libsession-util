@@ -301,13 +301,19 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
         const std::filesystem::path& file,
         Domain domain,
         std::function<std::span<std::byte>(size_t enc_size)> make_buffer,
-        bool /*allow_large*/) {
+        bool allow_large) {
+
+    if (seed.size() < 32)
+        throw std::invalid_argument{"attachment::encrypt requires a 32-byte uploader seed"};
 
     std::ifstream in;
     in.exceptions(std::ios::badbit);
     in.open(file, std::ios::binary | std::ios::ate);
     size_t size = in.tellg();
     in.seekg(0, std::ios::beg);
+
+    if (size > MAX_REGULAR_SIZE && !allow_large)
+        throw std::invalid_argument{"data to encrypt is too large"};
 
     size = encrypted_size(size);
 
