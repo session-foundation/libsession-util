@@ -6,6 +6,13 @@
 
 namespace session::client {
 
+/// Reported through send_message's upload handler when an attachment's file is no longer at the
+/// path it was attached from, which can happen between attaching and sending, or to a message
+/// being resumed in a later run.  Deliberately outside the network layer's code space: nothing
+/// about this came from the network, and the message becomes SendState::unsendable rather than
+/// merely failed.
+constexpr int ATTACHMENT_FILE_MISSING = -20001;
+
 /// A file to attach to an outgoing message.  Attaching costs nothing: the file is read, encrypted
 /// and uploaded when the message is sent, not when it is attached, so a caller can hold these
 /// against a draft for as long as the user takes to write it.

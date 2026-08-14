@@ -30,6 +30,14 @@ enum class SendState : int {
     /// because Core's in-flight send queue does not survive a restart.
     interrupted = 4,
 
+    /// Terminal, and unlike `failed` not worth trying again: something the message needs is gone
+    /// rather than merely unreachable.  Currently that means an attachment whose file is no longer
+    /// where it was — retrying re-reads the same path and will fail identically every time.
+    ///
+    /// Kept apart from `failed` so that an application knows which failures to offer a retry for,
+    /// and which to offer only deletion.
+    unsendable = 6,
+
     /// Attachments are being uploaded to the file server.  The message exists and is displayable,
     /// but nothing has gone to a swarm yet: it cannot, because the message has to carry the
     /// pointers the upload is still producing.  How far along that is, is reported to whoever asked

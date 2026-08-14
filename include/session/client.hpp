@@ -3,10 +3,10 @@
 #include <filesystem>
 #include <optional>
 #include <session/client/attachment.hpp>
+#include <session/client/callbacks.hpp>
 #include <session/client/conversation.hpp>
 #include <session/client/conversation_id.hpp>
 #include <session/client/message.hpp>
-#include <session/client/callbacks.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
 #include <session/util.hpp>
@@ -309,7 +309,9 @@ class Client {
     void _finish_attachment_send(int64_t client_id);
 
     // Marks a message as failed because its attachments could not be uploaded, and reports it.
-    void _fail_attachment_send(int64_t client_id);
+    // `permanent` distinguishes a file that is gone, which no amount of retrying will fix, from a
+    // transfer that merely did not work this time.
+    void _fail_attachment_send(int64_t client_id, bool permanent = false);
 
     // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
     // copy for our own swarm.  Shared by the plain and attachment-carrying sends.

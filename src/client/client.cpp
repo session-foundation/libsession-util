@@ -984,6 +984,22 @@ void Client::_upload_next(
     auto [idx, path] = *next;
     auto index = static_cast<size_t>(idx);
 
+    // Checked here rather than only at send_message, because that check is on the other side of
+    // however long the message sat waiting: a file present when it was attached can be gone by the
+    // time its turn comes, and a message resumed in a later run may have been waiting for days.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+        log::warning(
+                cat,
+                "Attachment {} of message {} is gone ({}); the message cannot be sent",
+                idx,
+                client_id,
+                path);
+        if (on_upload)
+            on_upload(index, 0, 0, ATTACHMENT_FILE_MISSING);
+        return _fail_attachment_send(client_id, /*permanent=*/true);
+    }
+
     auto net = core.network();
     if (!net) {
         log::warning(
@@ -1187,7 +1203,8 @@ void Client::_finish_attachment_send(int64_t client_id) {
             to_self);
 }
 
-void Client::_fail_attachment_send(int64_t client_id) {
+void Client::_fail_attachment_send(int64_t client_id, bool permanent) {
+    auto state = static_cast<int>(permanent ? SendState::unsendable : SendState::failed);
     std::optional<ConversationId> convo_id;
     {
         auto c = core.database().conn();
@@ -1202,8 +1219,8 @@ void Client::_fail_attachment_send(int64_t client_id) {
         c.prepared_exec(
                 "UPDATE messages SET send_state = ?, sync_send_state ="
                 " CASE WHEN sync_send_state IS NULL THEN NULL ELSE ? END WHERE id = ?",
-                static_cast<int>(SendState::failed),
-                static_cast<int>(SendState::failed),
+                state,
+                state,
                 client_id);
     }
 
