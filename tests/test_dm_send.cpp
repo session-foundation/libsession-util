@@ -42,18 +42,10 @@ std::span<const std::byte> content_bytes() {
 TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
     std::vector<ReceivedMessage> received;
     std::vector<MessageSendStatus> statuses;
-    std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
-    sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                                   config::Namespace ns,
-                                   std::vector<std::byte> payload,
-                                   std::chrono::milliseconds,
-                                   std::function<void(bool)> on_stored) {
-        CHECK(ns == config::Namespace::Default);
-        captured_payload = std::move(payload);
-        on_stored(true);
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) {
+        statuses.push_back(s);
     };
 
     callbacks recip_cbs;
@@ -61,6 +53,8 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     recipient->devices.active_account_keys();
     auto [x25519_pub, mlkem_pub] = TestHelper::active_account_pubkeys(*recipient);
@@ -70,14 +64,19 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
     auto msg_id = sender->send_dm(recip_sid, content_bytes(), clock_now_ms());
     CHECK(msg_id == 1);
 
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 1);
+    CHECK(store_body(*sent[0])["namespace"] == static_cast<int16_t>(config::Namespace::Default));
+    auto payload = store_payload(*sent[0]);
+    REQUIRE(accept_stores(*net) == 1);
+
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == MessageSendStatus::sending);
     CHECK(statuses[1] == MessageSendStatus::success);
 
-    // Feed the captured payload into recipient to verify decryption.
-    REQUIRE(!captured_payload.empty());
+    // What went onto the wire, fed back in as the recipient's swarm would deliver it.
     SwarmMessage sm;
-    sm.data = captured_payload;
+    sm.data = payload;
     sm.hash = "send_test_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;
@@ -95,17 +94,10 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
 TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
     std::vector<ReceivedMessage> received;
     std::vector<MessageSendStatus> statuses;
-    std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
-    sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                                   config::Namespace,
-                                   std::vector<std::byte> payload,
-                                   std::chrono::milliseconds,
-                                   std::function<void(bool)> on_stored) {
-        captured_payload = std::move(payload);
-        on_stored(true);
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) {
+        statuses.push_back(s);
     };
 
     callbacks recip_cbs;
@@ -113,19 +105,25 @@ TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     auto recip_sid = sid_bytes(*recipient);
     TestHelper::seed_pfs_nak(*sender, recip_sid);
 
     sender->send_dm(recip_sid, content_bytes(), clock_now_ms());
 
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 1);
+    auto payload = store_payload(*sent[0]);
+    REQUIRE(accept_stores(*net) == 1);
+
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == MessageSendStatus::sending);
     CHECK(statuses[1] == MessageSendStatus::success);
 
-    REQUIRE(!captured_payload.empty());
     SwarmMessage sm;
-    sm.data = captured_payload;
+    sm.data = payload;
     sm.hash = "v1_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;
@@ -142,17 +140,10 @@ TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
 TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
     std::vector<ReceivedMessage> received;
     std::vector<MessageSendStatus> statuses;
-    std::vector<std::byte> captured_payload;
 
     callbacks sender_cbs;
-    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
-    sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                                   config::Namespace,
-                                   std::vector<std::byte> payload,
-                                   std::chrono::milliseconds,
-                                   std::function<void(bool)> on_stored) {
-        captured_payload = std::move(payload);
-        on_stored(true);
+    sender_cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) {
+        statuses.push_back(s);
     };
 
     callbacks recip_cbs;
@@ -160,6 +151,8 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     auto recip_sid = sid_bytes(*recipient);
     TestHelper::seed_pfs_nak(*sender, recip_sid);
@@ -167,13 +160,17 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
     sender->send_dm(
             recip_sid, content_bytes(), clock_now_ms(), std::nullopt, 14 * 24h, /*force_v2=*/true);
 
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 1);
+    auto payload = store_payload(*sent[0]);
+    REQUIRE(accept_stores(*net) == 1);
+
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == MessageSendStatus::sending);
     CHECK(statuses[1] == MessageSendStatus::success);
 
-    REQUIRE(!captured_payload.empty());
     SwarmMessage sm;
-    sm.data = captured_payload;
+    sm.data = payload;
     sm.hash = "nopfs_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;
@@ -220,37 +217,24 @@ TEST_CASE("send_dm: no_network when no cache and no network", "[core][send_dm]")
     CHECK(statuses[0] == MessageSendStatus::no_network);
 }
 
-// ── send_to_swarm callback receives correct arguments ───────────────────────────────────────────
+// ── The store request a send produces ───────────────────────────────────────────────────────────
 
-TEST_CASE("send_dm: send_to_swarm callback receives expected args", "[core][send_dm]") {
-    config::Namespace captured_ns{};
-    std::chrono::milliseconds captured_ttl{};
-    std::array<std::byte, 33> captured_pubkey{};
-    bool callback_called = false;
+TEST_CASE("send_dm: the store names the recipient, namespace and ttl", "[core][send_dm]") {
+    TempCore sender{};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
-    callbacks cbs;
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33> pk,
-                            config::Namespace ns,
-                            std::vector<std::byte>,
-                            std::chrono::milliseconds ttl,
-                            std::function<void(bool)> on_stored) {
-        std::ranges::copy(pk, captured_pubkey.begin());
-        captured_ns = ns;
-        captured_ttl = ttl;
-        callback_called = true;
-        on_stored(true);
-    };
-
-    TempCore sender{cbs};
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
     auto custom_ttl = std::chrono::milliseconds{7 * 24h};
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms(), std::nullopt, custom_ttl);
 
-    REQUIRE(callback_called);
-    CHECK(captured_ns == config::Namespace::Default);
-    CHECK(captured_ttl == custom_ttl);
-    CHECK(std::ranges::equal(captured_pubkey, DUMMY_SID));
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 1);
+    auto body = store_body(*sent[0]);
+    CHECK(body["pubkey"] == oxenc::to_hex(DUMMY_SID));
+    CHECK(body["namespace"] == static_cast<int16_t>(config::Namespace::Default));
+    CHECK(body["ttl"] == custom_ttl.count());
 }
 
 // ── Network error status ────────────────────────────────────────────────────────────────────────
@@ -260,16 +244,15 @@ TEST_CASE("send_dm: network_error when store fails", "[core][send_dm]") {
 
     callbacks cbs;
     cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
-    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
-                           config::Namespace,
-                           std::vector<std::byte>,
-                           std::chrono::milliseconds,
-                           std::function<void(bool)> on_stored) { on_stored(false); };
 
     TempCore sender{cbs};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
+
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
+    REQUIRE(answer_stores(*net, false) == 1);
 
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[0] == MessageSendStatus::sending);
@@ -279,10 +262,10 @@ TEST_CASE("send_dm: network_error when store fails", "[core][send_dm]") {
 // ── Monotonic message IDs ───────────────────────────────────────────────────────────────────────
 
 TEST_CASE("send_dm: message IDs are monotonically increasing", "[core][send_dm]") {
-    callbacks cbs;
-    cbs.send_to_swarm = [](auto, auto, auto, auto, auto on_stored) { on_stored(true); };
+    TempCore sender{};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
-    TempCore sender{cbs};
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
     auto id1 = sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
@@ -294,33 +277,28 @@ TEST_CASE("send_dm: message IDs are monotonically increasing", "[core][send_dm]"
     CHECK(id3 == 3);
 }
 
-// ── Network fallback when send_to_swarm is not set ──────────────────────────────────────────────
+// ── Success is the swarm's answer, not the dispatch ─────────────────────────────────────────────
 
-TEST_CASE("send_dm: dispatches via network when send_to_swarm is not set", "[core][send_dm]") {
+TEST_CASE("send_dm: success waits for the store to be answered", "[core][send_dm]") {
     std::vector<MessageSendStatus> statuses;
 
     callbacks cbs;
     cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
-    // Deliberately not setting send_to_swarm — should fall back to the network object.
 
     TempCore sender{cbs};
-    auto mock_net = std::make_shared<MockNetwork>();
-    sender->set_network(mock_net);
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
 
-    // The sending status fires immediately; the network dispatch is async via MockNetwork.
+    // `sending` means dispatched, and stops there: nothing has come back from the swarm yet.
     REQUIRE(statuses.size() == 1);
     CHECK(statuses[0] == MessageSendStatus::sending);
+    REQUIRE(stores(*net).size() == 1);
 
-    // MockNetwork should have captured a store request.
-    REQUIRE(mock_net->sent_requests.size() == 1);
-    CHECK(mock_net->sent_requests[0].request.endpoint == "store");
-
-    // Simulate a successful store response.
-    mock_net->sent_requests[0].callback(true, false, 200, {}, "{}");
+    REQUIRE(accept_stores(*net) == 1);
 
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[1] == MessageSendStatus::success);
@@ -330,23 +308,14 @@ TEST_CASE("send_dm: dispatches via network when send_to_swarm is not set", "[cor
 
 TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
     std::vector<ReceivedMessage> received;
-    std::vector<std::byte> captured_payload;
-
-    callbacks sender_cbs;
-    sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                                   config::Namespace,
-                                   std::vector<std::byte> payload,
-                                   std::chrono::milliseconds,
-                                   std::function<void(bool)> on_stored) {
-        captured_payload = std::move(payload);
-        on_stored(true);
-    };
 
     callbacks recip_cbs;
     recip_cbs.message_received = [&](ReceivedMessage&& m) { received.push_back(std::move(m)); };
 
-    TempCore sender{sender_cbs};
+    TempCore sender{};
     TempCore recipient{recip_cbs};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     recipient->devices.active_account_keys();
     auto [x25519_pub, mlkem_pub] = TestHelper::active_account_pubkeys(*recipient);
@@ -359,9 +328,12 @@ TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
 
     sender->send_dm(recip_sid, content, ts);
 
-    REQUIRE(!captured_payload.empty());
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 1);
+    auto payload = store_payload(*sent[0]);
+
     SwarmMessage sm;
-    sm.data = captured_payload;
+    sm.data = payload;
     sm.hash = "content_overload_hash";
     sm.timestamp = ts;
     sm.expiry = ts + 24h;
@@ -379,19 +351,10 @@ TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
 }
 
 TEST_CASE("send_dm: Content overload preserves a matching sigTimestamp", "[core][send_dm]") {
-    std::vector<std::byte> captured_payload;
+    TempCore sender{};
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
-    callbacks cbs;
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace,
-                            std::vector<std::byte> payload,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        captured_payload = std::move(payload);
-        on_stored(true);
-    };
-
-    TempCore sender{cbs};
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
     auto ts = clock_now_ms();
@@ -400,7 +363,7 @@ TEST_CASE("send_dm: Content overload preserves a matching sigTimestamp", "[core]
     content.mutable_datamessage()->set_body("explicit timestamp");
 
     CHECK_NOTHROW(sender->send_dm(DUMMY_SID, content, ts));
-    CHECK(!captured_payload.empty());
+    CHECK(stores(*net).size() == 1);
 }
 
 TEST_CASE("send_dm: Content overload rejects a mismatched sigTimestamp", "[core][send_dm]") {
@@ -421,41 +384,32 @@ TEST_CASE(
         "[core][send_dm]") {
     std::vector<MessageSendStatus> statuses;
     std::vector<PfsKeyFetch> fetches;
-    std::vector<std::byte> captured;
 
     callbacks cbs;
     cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
     cbs.pfs_keys_fetched = [&](std::span<const std::byte, 33>, PfsKeyFetch r) {
         fetches.push_back(r);
     };
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace,
-                            std::vector<std::byte> payload,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        captured = std::move(payload);
-        on_stored(true);
-    };
 
     TempCore sender{cbs};
-    auto mock = std::make_shared<MockNetwork>();
-    sender->set_network(mock);
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     // Nothing cached for this recipient, so the send is queued behind a key fetch.
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
 
     REQUIRE(statuses.size() == 1);
     CHECK(statuses[0] == MessageSendStatus::awaiting_keys);
-    CHECK(captured.empty());
-    REQUIRE(mock->sent_requests.size() == 1);
-    CHECK(mock->sent_requests[0].request.endpoint == "retrieve");
+    CHECK(stores(*net).empty());
+    REQUIRE(net->sent_requests.size() == 1);
+    CHECK(net->sent_requests[0].request.endpoint == "retrieve");
 
     // A *failed* fetch must still release the send rather than stranding it forever.
-    mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt);
+    REQUIRE(fail_retrieves(*net) == 1);
 
     REQUIRE(fetches.size() == 1);
     CHECK(fetches[0] == PfsKeyFetch::failed);
-    CHECK(!captured.empty());
+    REQUIRE(accept_stores(*net) == 1);
     REQUIRE(statuses.size() >= 2);
     CHECK(statuses.back() == MessageSendStatus::success);
 }
@@ -464,65 +418,47 @@ TEST_CASE(
         "send_dm: every send queued for one recipient is released by a single fetch",
         "[core][send_dm]") {
     std::vector<PfsKeyFetch> fetches;
-    int stored = 0;
 
     callbacks cbs;
     cbs.pfs_keys_fetched = [&](std::span<const std::byte, 33>, PfsKeyFetch r) {
         fetches.push_back(r);
     };
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace,
-                            std::vector<std::byte>,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        stored++;
-        on_stored(true);
-    };
 
     TempCore sender{cbs};
-    auto mock = std::make_shared<MockNetwork>();
-    sender->set_network(mock);
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     for (int i = 0; i < 3; i++)
         sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
 
-    CHECK(stored == 0);
-    REQUIRE(!mock->sent_requests.empty());
+    CHECK(stores(*net).empty());
+    REQUIRE(!net->sent_requests.empty());
 
-    // Settling one fetch drains the whole queue for that recipient.
-    mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt);
+    // Settling one fetch drains the whole queue for that recipient, even though each send asked
+    // for the keys in its own right.
+    REQUIRE(fail_retrieves(*net, 1) == 1);
 
-    CHECK(stored == 3);
+    CHECK(stores(*net).size() == 3);
     CHECK(fetches.size() == 1);
 }
 
 TEST_CASE(
         "send_dm: a throwing pfs_keys_fetched callback does not strand queued sends",
         "[core][send_dm]") {
-    int stored = 0;
-
     callbacks cbs;
     // Callbacks are not permitted to throw, but a buggy one must not take the queued sends with
     // it: the flush happens regardless.
     cbs.pfs_keys_fetched = [](std::span<const std::byte, 33>, PfsKeyFetch) {
         throw std::runtime_error{"buggy application callback"};
     };
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace,
-                            std::vector<std::byte>,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        stored++;
-        on_stored(true);
-    };
 
     TempCore sender{cbs};
-    auto mock = std::make_shared<MockNetwork>();
-    sender->set_network(mock);
+    auto net = std::make_shared<MockNetwork>();
+    sender->set_network(net);
 
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
-    REQUIRE(!mock->sent_requests.empty());
+    REQUIRE(!net->sent_requests.empty());
 
-    CHECK_NOTHROW(mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt));
-    CHECK(stored == 1);
+    CHECK_NOTHROW(fail_retrieves(*net));
+    CHECK(stores(*net).size() == 1);
 }

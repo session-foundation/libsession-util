@@ -84,37 +84,60 @@ inline std::string store_hash_for(std::string_view pubkey_hex) {
     return "hash-for-{}"_format(pubkey_hex);
 }
 
-/// Answers every captured store, leaving anything else alone, and returns how many there were --
-/// which is itself worth asserting on, since an outgoing message is two stores and a note to self
-/// is one.
-inline size_t answer_stores(MockNetwork& net, bool accepted) {
+/// Hands the first `max` captured requests for `endpoint` to `respond`, leaving everything else
+/// pending, and returns how many were answered.
+///
+/// The pending list is taken away before any of it runs, and must be: a response can prompt Core to
+/// send something new, and that push_back would otherwise reallocate `sent_requests` out from under
+/// the very callback being invoked.
+inline size_t answer_requests(
+        MockNetwork& net,
+        std::string_view endpoint,
+        const std::function<void(MockNetwork::SentRequest&)>& respond,
+        size_t max = std::numeric_limits<size_t>::max()) {
     auto pending = std::exchange(net.sent_requests, {});
     size_t answered = 0;
     std::vector<MockNetwork::SentRequest> others;
 
     for (auto& r : pending) {
-        if (r.request.endpoint == "store") {
-            if (accepted) {
-                nlohmann::json resp = {
-                        {"hash", store_hash_for(store_body(r)["pubkey"].get<std::string_view>())}};
-                r.callback(true, false, 200, {}, resp.dump());
-            } else
-                r.callback(false, false, 500, {}, "nope");
+        if (r.request.endpoint == endpoint && answered < max) {
+            respond(r);
             answered++;
         } else
             others.push_back(std::move(r));
     }
 
-    // Appended rather than assigned: answering a store can prompt Core to send something else, and
-    // that belongs in the list too.
+    // Appended rather than assigned: whatever the responses prompted belongs in the list too.
     for (auto& r : others)
         net.sent_requests.push_back(std::move(r));
 
     return answered;
 }
 
+/// Answers every captured store, and returns how many there were -- which is itself worth asserting
+/// on, since an outgoing message is two stores and a note to self is one.
+inline size_t answer_stores(MockNetwork& net, bool accepted) {
+    return answer_requests(net, "store", [accepted](MockNetwork::SentRequest& r) {
+        if (accepted) {
+            nlohmann::json resp = {
+                    {"hash", store_hash_for(store_body(r)["pubkey"].get<std::string_view>())}};
+            r.callback(true, false, 200, {}, resp.dump());
+        } else
+            r.callback(false, false, 500, {}, "nope");
+    });
+}
+
 inline size_t accept_stores(MockNetwork& net) {
     return answer_stores(net, true);
+}
+
+/// Times out captured key fetches, which is what releases a send queued behind one.
+inline size_t fail_retrieves(MockNetwork& net, size_t max = std::numeric_limits<size_t>::max()) {
+    return answer_requests(
+            net,
+            "retrieve",
+            [](MockNetwork::SentRequest& r) { r.callback(false, true, 0, {}, std::nullopt); },
+            max);
 }
 
 // Smart-pointer-like RAII wrapper around a Core backed by a unique temporary DB file.
