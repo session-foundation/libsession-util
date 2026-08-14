@@ -1210,8 +1210,8 @@ void Client::_finish_attachment_send(int64_t client_id) {
             FROM message_attachments WHERE message = ? ORDER BY idx
         )",
                      client_id)) {
-            auto* ptr = data->add_attachments();
-            ptr->set_url(url);
+            auto* attach = data->add_attachments();
+            attach->set_url(url);
 
             // Deprecated in favour of `url`, which is what current clients read, but still required
             // by the protobuf and still read by old ones.  It is the url's last segment, so it is
@@ -1227,25 +1227,25 @@ void Client::_finish_attachment_send(int64_t client_id) {
                         legacy_id = 0;
                 }
             }
-            ptr->set_id(legacy_id);
+            attach->set_id(legacy_id);
 
             // `key` views the statement's current row, so it has to be copied out before the loop
             // steps to the next one.
-            ptr->set_key(reinterpret_cast<const char*>(key.data()), key.size());
-            ptr->set_size(static_cast<uint32_t>(size));
+            attach->set_key(reinterpret_cast<const char*>(key.data()), key.size());
+            attach->set_size(static_cast<uint32_t>(size));
 
             if (ctype)
-                ptr->set_contenttype(*ctype);
+                attach->set_contenttype(*ctype);
             if (fname)
-                ptr->set_filename(*fname);
+                attach->set_filename(*fname);
             if (caption)
-                ptr->set_caption(*caption);
+                attach->set_caption(*caption);
             if (flags != 0)
-                ptr->set_flags(static_cast<uint32_t>(flags));
+                attach->set_flags(static_cast<uint32_t>(flags));
             if (width)
-                ptr->set_width(static_cast<uint32_t>(*width));
+                attach->set_width(static_cast<uint32_t>(*width));
             if (height)
-                ptr->set_height(static_cast<uint32_t>(*height));
+                attach->set_height(static_cast<uint32_t>(*height));
         }
     }
 
