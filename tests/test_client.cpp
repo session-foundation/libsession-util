@@ -170,6 +170,48 @@ void sync(Client& c) {
     c.core.loop().call_get([] { return 0; });
 }
 
+/// The stores MockNetwork has captured.  Attaching a network means Core also fetches keys and
+/// polls, so what it was asked to send is not only what a test asked it to send.
+std::vector<MockNetwork::SentRequest*> stores(MockNetwork& net) {
+    std::vector<MockNetwork::SentRequest*> found;
+    for (auto& r : net.sent_requests)
+        if (r.request.endpoint == "store")
+            found.push_back(&r);
+    return found;
+}
+
+/// The JSON a store request carries, which is where the namespace and the payload are.
+nlohmann::json store_body(const MockNetwork::SentRequest& r) {
+    REQUIRE(r.request.body.has_value());
+    return nlohmann::json::parse(
+            std::string{
+                    reinterpret_cast<const char*>(r.request.body->data()), r.request.body->size()});
+}
+
+/// Answers every captured store as the swarm accepting it, leaving anything else alone, and returns
+/// how many there were -- which is itself worth asserting on, since an outgoing message is two
+/// stores and a note to self is one.
+size_t accept_stores(MockNetwork& net) {
+    auto pending = std::exchange(net.sent_requests, {});
+    size_t accepted = 0;
+    std::vector<MockNetwork::SentRequest> others;
+
+    for (auto& r : pending) {
+        if (r.request.endpoint == "store") {
+            r.callback(true, false, 200, {}, "{}");
+            accepted++;
+        } else
+            others.push_back(std::move(r));
+    }
+
+    // Appended rather than assigned: answering a store can prompt Core to send something else, and
+    // that belongs in the list too.
+    for (auto& r : others)
+        net.sent_requests.push_back(std::move(r));
+
+    return accepted;
+}
+
 }  // namespace
 
 // ── ConversationId ──────────────────────────────────────────────────────────────────────────────
@@ -708,28 +750,31 @@ TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages
 // ── Sending ─────────────────────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][send]") {
-    std::vector<std::byte> payload;
-    core::callbacks cbs;
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace ns,
-                            std::vector<std::byte> p,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        CHECK(ns == config::Namespace::Default);
-        payload = std::move(p);
-        on_stored(true);
-    };
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
 
-    TempClient c{cbs};
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     auto convo = ConversationId::dm(peer);
 
-    // No PFS keys published for the peer, so this falls back to a v1 send without needing network.
+    // No PFS keys published for either of us, so these fall back to v1 sends: the recipient's copy
+    // and the copy for our own swarm, which needs our own keys answered too.
     TestHelper::seed_pfs_nak(c->core, peer);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
     auto id = c->send_message(convo, "general kenobi");
-    CHECK_FALSE(payload.empty());
+
+    // A store to the recipient's swarm and one to our own, both into the default namespace, with
+    // something in them.
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 2);
+    for (const auto* r : sent) {
+        auto body = store_body(*r);
+        CHECK(body["namespace"] == static_cast<int16_t>(config::Namespace::Default));
+        CHECK_FALSE(body["data"].get<std::string>().empty());
+    }
+    CHECK(accept_stores(*net) == 2);
 
     auto msg = c->message(id);
     REQUIRE(msg.has_value());
@@ -747,19 +792,23 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
 }
 
 TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
-    core::callbacks cbs;
-    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
-                           config::Namespace,
-                           std::vector<std::byte>,
-                           std::chrono::milliseconds,
-                           std::function<void(bool)> on_stored) { on_stored(false); };
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
 
-    TempClient c{cbs};
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
     auto id = c->send_message(ConversationId::dm(peer), "into the void");
+
+    // The swarm refusing the store is what a failure is, rather than us declining to attempt one.
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 2);
+    for (auto* r : sent)
+        r->callback(false, false, 500, {}, "nope");
+
     CHECK(c->message(id)->send_state == SendState::failed);
 }
 
@@ -770,19 +819,16 @@ TEST_CASE("Client: sending to a non-DM conversation is rejected", "[client][send
 }
 
 TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[client][send]") {
-    // Never completing the store leaves the message mid-flight, which is exactly the state a
-    // crash would leave behind.
-    core::callbacks cbs;
-    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
-                           config::Namespace,
-                           std::vector<std::byte>,
-                           std::chrono::milliseconds,
-                           std::function<void(bool)>) {};
+    // The store is captured and never answered, which leaves the message mid-flight -- exactly the
+    // state a crash would leave behind.
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
 
-    TempClient c{cbs};
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
     auto id = c->send_message(ConversationId::dm(peer), "did this land?");
     CHECK(c->message(id)->send_state == SendState::sending);
@@ -898,20 +944,17 @@ TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
 }
 
 TEST_CASE("Client: send status changes are reported as message_updated", "[client][signals]") {
-    std::function<void(bool)> finish_store;
-    core::callbacks cbs;
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
-                            config::Namespace,
-                            std::vector<std::byte>,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        finish_store = std::move(on_stored);
-    };
-
     Recorder r;
-    TempClient c{r.handlers(), cbs};
+    TempClient c{r.handlers()};
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+
+    // Only the peer's keys are answered, so only the recipient's copy is dispatched: the copy for
+    // our own swarm stays waiting on our keys.  That is what makes the single update below the one
+    // for `send_state` rather than for the sync copy's.
     TestHelper::seed_pfs_nak(c->core, peer);
 
     auto id = c->send_message(ConversationId::dm(peer), "hello");
@@ -919,8 +962,7 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
     r.order.clear();
     r.msg_updated.clear();
 
-    REQUIRE(finish_store);
-    finish_store(true);
+    REQUIRE(accept_stores(*net) == 1);
 
     CHECK(r.order == std::vector<std::string>{"message_updated"});
     REQUIRE(r.msg_updated.size() == 1);
@@ -1014,55 +1056,47 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
 }
 
 TEST_CASE("Client: the two copies of a send report separately", "[client][send]") {
-    // Capture each store so the recipient's copy and the sync copy can be completed independently,
-    // in either order.
-    std::vector<std::pair<b33, std::function<void(bool)>>> stores;
-    core::callbacks cbs;
-    cbs.send_to_swarm = [&](std::span<const std::byte, 33> dest,
-                            config::Namespace,
-                            std::vector<std::byte>,
-                            std::chrono::milliseconds,
-                            std::function<void(bool)> on_stored) {
-        b33 to;
-        std::ranges::copy(dest, to.begin());
-        stores.emplace_back(to, std::move(on_stored));
-    };
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
 
-    TempClient c{cbs};
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
     auto id = c->send_message(ConversationId::dm(peer), "two ways");
-    REQUIRE(stores.size() == 2);
 
-    auto me = own_sid(*c);
-    auto to_peer = std::ranges::find_if(stores, [&](const auto& s) { return s.first != me; });
-    auto to_self = std::ranges::find_if(stores, [&](const auto& s) { return s.first == me; });
-    REQUIRE(to_peer != stores.end());
-    REQUIRE(to_self != stores.end());
+    // Which swarm a store is bound for is the pubkey it names, so the two copies can be answered
+    // independently and in either order.
+    auto sent = stores(*net);
+    REQUIRE(sent.size() == 2);
+
+    auto my_hex = oxenc::to_hex(own_sid(*c));
+    auto is_self = [&](const MockNetwork::SentRequest* r) {
+        return store_body(*r)["pubkey"].get<std::string>() == my_hex;
+    };
+    auto to_peer = std::ranges::find_if_not(sent, is_self);
+    auto to_self = std::ranges::find_if(sent, is_self);
+    REQUIRE(to_peer != sent.end());
+    REQUIRE(to_self != sent.end());
 
     // The recipient's copy lands; our own swarm has not answered yet.
-    to_peer->second(true);
+    (*to_peer)->callback(true, false, 200, {}, "{}");
     CHECK(c->message(id)->send_state == SendState::sent);
     CHECK(c->message(id)->sync_send_state == SendState::sending);
 
     // The sync copy fails, which says nothing about whether the message arrived.
-    to_self->second(false);
+    (*to_self)->callback(false, false, 500, {}, "nope");
     CHECK(c->message(id)->send_state == SendState::sent);
     CHECK(c->message(id)->sync_send_state == SendState::failed);
 }
 
 TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
-    core::callbacks cbs;
-    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
-                           config::Namespace,
-                           std::vector<std::byte>,
-                           std::chrono::milliseconds,
-                           std::function<void(bool)> on_stored) { on_stored(true); };
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
 
-    TempClient c{cbs};
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
 
@@ -1073,6 +1107,10 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     auto id = c->send_message(ConversationId::dm(me), "note to self");
     CHECK(c->message(id)->body == "note to self");
     CHECK(c->conversation(ConversationId::dm(me))->last_message == "note to self");
+
+    // One store reaching the swarm, not two: our own swarm is the recipient's, so the sync copy
+    // would be the same store twice.
+    CHECK(accept_stores(*net) == 1);
 
     // One swarm, so one send: there is no separate sync copy to have a state for.
     CHECK(c->message(id)->send_state.has_value());
