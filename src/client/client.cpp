@@ -1220,12 +1220,10 @@ void Client::_finish_attachment_send(int64_t client_id) {
             uint64_t legacy_id = 0;
             if (auto parsed = network::file_server::parse_download_url(url)) {
                 const auto& fid = parsed->file_id;
-                if (!fid.empty() &&
-                    std::ranges::all_of(fid, [](char ch) { return ch >= '0' && ch <= '9'; })) {
-                    auto [_, ec] = std::from_chars(fid.data(), fid.data() + fid.size(), legacy_id);
-                    if (ec != std::errc{})
-                        legacy_id = 0;
-                }
+                const auto* end = fid.data() + fid.size();
+                if (auto [stop, ec] = std::from_chars(fid.data(), end, legacy_id);
+                    ec != std::errc{} || stop != end)
+                    legacy_id = 0;
             }
             attach->set_id(legacy_id);
 
