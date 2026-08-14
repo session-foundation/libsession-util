@@ -1197,7 +1197,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
         for (auto&& [url, key, size, ctype, fname, caption, flags, width, height] :
              c.prepared_results<
                      std::string,
-                     std::string,
+                     sqlite::blobn<32>,
                      int64_t,
                      std::optional<std::string>,
                      std::optional<std::string>,
@@ -1229,7 +1229,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
             }
             ptr->set_id(legacy_id);
 
-            ptr->set_key(key.data(), key.size());
+            ptr->set_key(reinterpret_cast<const char*>(key.data()), key.size());
             ptr->set_size(static_cast<uint32_t>(size));
 
             if (ctype)

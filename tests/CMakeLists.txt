@@ -116,7 +116,8 @@ if(BUILD_LIVE_TESTS)
         live/main.cpp
         live/test_swarm.cpp
         live/test_pubkey_xfer.cpp
-        live/test_file_transfer.cpp)
+        live/test_file_transfer.cpp
+        live/test_attachment_send.cpp)
     target_link_libraries(testLive PRIVATE
         test_libs
         Catch2::Catch2)
