@@ -1229,6 +1229,8 @@ void Client::_finish_attachment_send(int64_t client_id) {
             }
             ptr->set_id(legacy_id);
 
+            // `key` views the statement's current row, so it has to be copied out before the loop
+            // steps to the next one.
             ptr->set_key(reinterpret_cast<const char*>(key.data()), key.size());
             ptr->set_size(static_cast<uint32_t>(size));
 
