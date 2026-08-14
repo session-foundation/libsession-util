@@ -7,22 +7,56 @@
 #include "session/network/session_network_types.hpp"
 #include "session/platform.hpp"
 
-namespace session::network::config {
-struct FileServer {
-    std::string scheme;
-    std::string host;
-    uint16_t port;
-    std::string pubkey_hex;
-
-    uint64_t max_file_size;
-    bool use_stream_encryption;
-};
-}  // namespace session::network::config
-
 namespace session::network::file_server {
 
 /// Default QUIC file server port (first 5 non-zero Fibonacci digits).
 constexpr uint16_t QUIC_DEFAULT_PORT = 11235;
+
+/// Session-router address of a QUIC file server endpoint, as carried in the `sr=` fragment of a
+/// download URL, e.g. `sr=abcdef.sesh:11235`.  The port is left out of the fragment when it is the
+/// default one.
+struct SRouterTarget {
+    std::string address;  // e.g. "abcdef...xyz.sesh" or "name.loki"
+    uint16_t port = QUIC_DEFAULT_PORT;
+};
+
+}  // namespace session::network::file_server
+
+namespace session::network::config {
+struct FileServer {
+    // Where the server's HTTP interface lives; these three form the base of the URLs we generate
+    // and of the requests we proxy to it, e.g. "http" + "filev2.getsession.org" + 80.  This is the
+    // legacy interface: it is what a request falls back to when the QUIC endpoint below cannot be
+    // reached, and it is what the URLs handed to other clients point at.
+    std::string scheme;
+    std::string host;
+    uint16_t port;
+
+    // The server's X25519 pubkey, used to encrypt requests to it as an onion request destination.
+    // Note this is a different key from the Ed25519 one its QUIC endpoint is identified by.  It
+    // also doubles as the server's identity for our purposes: a config whose pubkey differs from
+    // the built-in one is treated as a custom server, which is what puts a `p=` fragment in
+    // generated URLs and stops the built-in QUIC endpoint from being assumed.
+    std::string pubkey_hex;
+
+    // Largest upload we will attempt.  The server enforces its own limit; this one only stops us
+    // making requests we already know it will reject.
+    uint64_t max_file_size;
+
+    // Whether uploads use XChaCha20 stream encryption, which is also deterministic and so lets the
+    // server deduplicate identical files.  Generated URLs carry a `d` fragment when this is set,
+    // which is how a recipient knows to decrypt that way rather than the legacy scheme.
+    bool use_stream_encryption;
+
+    // Session-router endpoint of this server, advertised in the `sr=` fragment of the download URLs
+    // we generate.  The built-in servers do not need it: a recipient resolves their QUIC endpoint
+    // from the network it is on.  A custom server has no such mapping, so without this a recipient
+    // can only reach it over the legacy HTTP path.
+    std::optional<file_server::SRouterTarget> srouter;
+};
+}  // namespace session::network::config
+
+namespace session::network::file_server {
 
 extern const config::FileServer DEFAULT_CONFIG;
 extern const config::FileServer TESTNET_CONFIG;
@@ -37,12 +71,6 @@ constexpr auto QUIC_FS_ED_PUBKEY_TESTNET =
 /// Session-router .sesh addresses of the QUIC file servers (derived from Ed25519 pubkeys).
 extern const std::string QUIC_FS_SESH_ADDRESS_MAINNET;
 extern const std::string QUIC_FS_SESH_ADDRESS_TESTNET;
-
-/// Parsed session-router address from an `sr=` URL fragment, e.g. `sr=abcdef.sesh:11235`.
-struct SRouterTarget {
-    std::string address;  // e.g. "abcdef...xyz.sesh" or "name.loki"
-    uint16_t port;
-};
 
 struct DownloadInfo {
     std::string scheme;

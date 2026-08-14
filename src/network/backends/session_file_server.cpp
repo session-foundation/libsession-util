@@ -105,9 +105,9 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
                 oxenc::is_hex(fragment.substr(2)) &&
                 fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
             info.custom_pubkey_hex = fragment.substr(2);
-        else if (fragment.starts_with("sr=")) {
-            // sr=address or sr=address:port (port defaults to 11235 if omitted)
-            auto parts = split(fragment.substr(3), ":");
+        else if (fragment.starts_with("{}="_format(backends::FRAGMENT_SROUTER))) {
+            // sr=address or sr=address:port (port defaults to QUIC_DEFAULT_PORT if omitted)
+            auto parts = split(fragment.substr(backends::FRAGMENT_SROUTER.size() + 1), ":");
             if (parts.size() <= 2 && !parts[0].empty()) {
                 uint16_t port = QUIC_DEFAULT_PORT;
                 if (parts.size() == 2 && (!quic::parse_int(parts[1], port) || port == 0))
@@ -145,16 +145,29 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
             config.host,
             fmt::format(file_server::ENDPOINT_FILE_INDIVIDUAL, file_id));
 
-    if (config.use_stream_encryption || has_custom_pubkey) {
-        buf += "#";
+    // Fragments are appended straight onto the url; `sep` starts the list with '#' and joins the
+    // rest with '&'.
+    auto out = std::back_inserter(buf);
+    char sep = '#';
 
-        if (has_custom_pubkey)
-            buf += fmt::format("{}={}", backends::FRAGMENT_PUBKEY, config.pubkey_hex);
+    if (has_custom_pubkey) {
+        fmt::format_to(out, "{}{}={}", sep, backends::FRAGMENT_PUBKEY, config.pubkey_hex);
+        sep = '&';
+    }
 
-        if (config.use_stream_encryption) {
-            buf += (has_custom_pubkey ? "&" : "");
-            buf += backends::FRAGMENT_STREAM_ENCRYPTION;
-        }
+    if (config.use_stream_encryption) {
+        fmt::format_to(out, "{}{}", sep, backends::FRAGMENT_STREAM_ENCRYPTION);
+        sep = '&';
+    }
+
+    // Only a custom server needs to name its QUIC endpoint: the built-in ones are resolved from the
+    // network the recipient is on.  The port is left off when it is the default, since whoever
+    // parses this fills in the same default.
+    if (config.srouter) {
+        fmt::format_to(out, "{}{}={}", sep, backends::FRAGMENT_SROUTER, config.srouter->address);
+        if (config.srouter->port != QUIC_DEFAULT_PORT)
+            fmt::format_to(out, ":{}", config.srouter->port);
+        sep = '&';
     }
 
     return buf;

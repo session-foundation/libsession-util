@@ -47,8 +47,10 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
     // Ignores the pubkey if it matches the default one
-    parsed_download_url = file_server::parse_download_url(fmt::format(
-            "https://example.com/file/abc123#p={}"sv, file_server::DEFAULT_CONFIG.pubkey_hex));
+    parsed_download_url = file_server::parse_download_url(
+            fmt::format(
+                    "https://example.com/file/abc123#p={}"sv,
+                    file_server::DEFAULT_CONFIG.pubkey_hex));
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->scheme == "https"sv);
     CHECK(parsed_download_url->host == "example.com"sv);
@@ -131,4 +133,83 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
             "12345678"sv,
             {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321, false});
     CHECK(url == "https://example2.com/file/12345678");
+
+    // Names a custom server's session router endpoint, leaving out the port when it is the default
+    // one that whoever parses this will assume anyway
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             file_server::DEFAULT_CONFIG.pubkey_hex,
+             12345,
+             false,
+             file_server::SRouterTarget{"somewhere.sesh"}});
+    CHECK(url == "http://example.com/file/abc123#sr=somewhere.sesh");
+
+    // ... but includes it when it isn't
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             file_server::DEFAULT_CONFIG.pubkey_hex,
+             12345,
+             false,
+             file_server::SRouterTarget{"somewhere.sesh", 4567}});
+    CHECK(url == "http://example.com/file/abc123#sr=somewhere.sesh:4567");
+
+    // Joins with the other fragments rather than replacing them
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
+             12345,
+             true,
+             file_server::SRouterTarget{"somewhere.sesh", 4567}});
+    CHECK(url ==
+          "http://example.com/file/"
+          "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d"
+          "&sr=somewhere.sesh:4567");
+}
+
+TEST_CASE("Download url session router round trip", "[backend][session_file_server]") {
+    // What we generate has to be what we parse: the generating side had no way to name a session
+    // router endpoint at all until now, while the parsing side has always understood one, so
+    // nothing checked that the two agreed.
+    auto check_round_trip = [](file_server::SRouterTarget target, uint16_t expected_port) {
+        auto url = file_server::generate_download_url(
+                "abc123"sv,
+                {"http",
+                 "example.com",
+                 123,
+                 file_server::DEFAULT_CONFIG.pubkey_hex,
+                 12345,
+                 true,
+                 target});
+
+        auto parsed = file_server::parse_download_url(url);
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->file_id == "abc123");
+        CHECK(parsed->wants_stream_decryption);
+        REQUIRE(parsed->srouter_target.has_value());
+        CHECK(parsed->srouter_target->address == target.address);
+        CHECK(parsed->srouter_target->port == expected_port);
+    };
+
+    check_round_trip({"somewhere.sesh"}, file_server::QUIC_DEFAULT_PORT);
+    check_round_trip(
+            {"somewhere.sesh", file_server::QUIC_DEFAULT_PORT}, file_server::QUIC_DEFAULT_PORT);
+    check_round_trip({"somewhere.sesh", 4567}, 4567);
+    check_round_trip({"name.loki", 1}, 1);
+
+    // Without a target there is no fragment, and nothing to parse back
+    auto url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+    auto parsed = file_server::parse_download_url(url);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(parsed->srouter_target.has_value());
 }

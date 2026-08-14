@@ -105,6 +105,16 @@ void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
             fsuse.use_stream_encryption);
 }
 
+void Config::handle_config_opt(opt::file_server_srouter fssr) {
+    custom_file_server_srouter_address = fssr.address;
+    custom_file_server_srouter_port = fssr.port;
+    log::debug(
+            cat,
+            "Network config custom file server session router endpoint set to {}:{}",
+            fssr.address,
+            fssr.port ? "{}"_format(*fssr.port) : "<default>");
+}
+
 // MARK: QUIC file server options
 
 void Config::handle_config_opt(opt::quic_file_server_ed_pubkey qfep) {
