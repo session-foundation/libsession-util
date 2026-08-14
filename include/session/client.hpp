@@ -245,6 +245,32 @@ class Client {
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload = nullptr);
 
+    /// Sends a failed message again, resuming rather than restarting: attachments that already
+    /// reached the file server are left alone and only the ones that did not are uploaded, because
+    /// what each upload achieved is recorded against the message.  A message whose files all got
+    /// up but whose send failed is simply dispatched again, uploading nothing.
+    ///
+    /// Returns false, having done nothing, if the message cannot be retried: it does not exist, it
+    /// is not one of ours, it is not in a failed state, or it is SendState::unsendable — that last
+    /// being the one an application should offer deletion for rather than a retry, since what it
+    /// needs is gone rather than merely unreachable.
+    ///
+    /// `on_upload` reports as it does for send_message, indexed the same way, so a display built
+    /// for the original send works unchanged for the retry.  Note that a retry is where a file
+    /// that has since been deleted is discovered: an attachment that has gone moves the message to
+    /// SendState::unsendable, which is terminal.
+    bool retry_send(
+            int64_t message_id,
+            std::function<
+                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
+                    on_upload = nullptr);
+    void retry_send(
+            int64_t message_id,
+            std::function<
+                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
+                    on_upload,
+            std::function<void(bool)> cb);
+
     // -- Change notification ------------------------------------------------------------------
     //
     // Handlers are given at construction; there is no way to add or remove one afterwards.  See
@@ -312,6 +338,10 @@ class Client {
     // `permanent` distinguishes a file that is gone, which no amount of retrying will fix, from a
     // transfer that merely did not work this time.
     void _fail_attachment_send(int64_t client_id, bool permanent = false);
+
+    bool _retry_send(
+            int64_t client_id,
+            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
 
     // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
     // copy for our own swarm.  Shared by the plain and attachment-carrying sends.

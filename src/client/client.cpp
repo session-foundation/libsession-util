@@ -435,6 +435,23 @@ int64_t Client::send_message(
             [&] { return _send_message(id, body, attachments, std::move(on_upload)); });
 }
 
+bool Client::retry_send(
+        int64_t message_id,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    return core.loop().call_get([&] { return _retry_send(message_id, std::move(on_upload)); });
+}
+
+void Client::retry_send(
+        int64_t message_id,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
+        std::function<void(bool)> cb) {
+    _dispatch([this, message_id, on_upload = std::move(on_upload), cb = std::move(cb)] {
+        auto started = _retry_send(message_id, on_upload);
+        if (cb)
+            cb(started);
+    });
+}
+
 int64_t Client::send_message(const ConversationId& id, std::string_view body) {
     _require_dm(id);
     return core.loop().call_get([this, &id, body] { return _send_message(id, body); });
@@ -1080,6 +1097,72 @@ void Client::_upload_next(
     // Bound to a name: the accessor's span is deliberately unavailable on a temporary.
     auto seed_access = core.globals.account_seed();
     net->upload_file(std::move(req), seed_access.seed());
+}
+
+bool Client::_retry_send(
+        int64_t client_id,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    std::optional<ConversationId> convo_id;
+    bool has_uploads_left;
+    {
+        auto c = core.database().conn();
+
+        auto row = c.prepared_maybe_get<int64_t, int, std::optional<int>>(
+                "SELECT conversation, outgoing, send_state FROM messages WHERE id = ?", client_id);
+        if (!row) {
+            log::warning(cat, "Cannot retry message {}: it does not exist", client_id);
+            return false;
+        }
+        auto [convo_row, outgoing, state] = *row;
+
+        // Only a send of ours can be retried, and only one that is over: retrying something still
+        // in flight would double it up on the swarm rather than rescue it.
+        if (!outgoing || !state) {
+            log::warning(cat, "Cannot retry message {}: it is not an outgoing send", client_id);
+            return false;
+        }
+        auto send_state = static_cast<SendState>(*state);
+        if (send_state != SendState::failed && send_state != SendState::interrupted) {
+            log::warning(
+                    cat,
+                    "Cannot retry message {}: it is in state {}, which is not a failure to retry",
+                    client_id,
+                    *state);
+            return false;
+        }
+
+        convo_id = conversation_id_at(c, convo_row);
+
+        has_uploads_left = c.prepared_get<int64_t>(
+                                   "SELECT COUNT(*) FROM message_attachments WHERE message = ? AND "
+                                   "url IS NULL",
+                                   client_id) > 0;
+
+        // Only worth saying while there is uploading left to do; otherwise the message goes
+        // straight back to a send, and _finish_attachment_send sets that state itself.
+        if (has_uploads_left)
+            c.prepared_exec(
+                    "UPDATE messages SET send_state = ?, sync_send_state ="
+                    " CASE WHEN sync_send_state IS NULL THEN NULL ELSE ? END WHERE id = ?",
+                    static_cast<int>(SendState::uploading),
+                    static_cast<int>(SendState::uploading),
+                    client_id);
+    }
+
+    if (has_uploads_left)
+        _emit_message(false, *convo_id, client_id);
+
+    log::debug(
+            cat,
+            "Retrying message {}{}",
+            client_id,
+            has_uploads_left ? " (attachments still to upload)" : "");
+
+    // Resumes wherever it was left: _upload_next takes the first attachment with no url, so the
+    // ones that already got up are not sent again, and a message needing none goes straight to
+    // being dispatched.
+    _upload_next(client_id, std::move(on_upload));
+    return true;
 }
 
 void Client::_finish_attachment_send(int64_t client_id) {

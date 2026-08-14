@@ -1260,3 +1260,47 @@ TEST_CASE(
 
     std::filesystem::remove(file);
 }
+
+TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachments]") {
+    auto file = std::filesystem::temp_directory_path() / "libsession_retry_test.bin";
+    {
+        std::ofstream out{file, std::ios::binary};
+        out << "some file contents";
+    }
+
+    Recorder r;
+    TempClient c{r.handlers()};
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto id = c->send_message(
+            ConversationId::dm(me), "here you go", {OutgoingAttachment{.path = file}});
+    sync(*c);
+    REQUIRE(c->message(id)->send_state == SendState::failed);
+
+    // Retrying is allowed while the failure is one that might not recur, and reports itself as
+    // started rather than as succeeded -- the outcome arrives through the message's state.
+    std::vector<std::optional<int>> results;
+    CHECK(c->retry_send(id, [&](size_t, int64_t, int64_t, std::optional<int> result) {
+        results.push_back(result);
+    }));
+    sync(*c);
+    REQUIRE(results.size() == 1);
+    CHECK(c->message(id)->send_state == SendState::failed);
+
+    // With the file gone the retry can only ever fail the same way, so the message becomes
+    // terminal rather than staying something an application would offer to try again.
+    std::filesystem::remove(file);
+
+    results.clear();
+    CHECK(c->retry_send(id, [&](size_t, int64_t, int64_t, std::optional<int> result) {
+        results.push_back(result);
+    }));
+    sync(*c);
+    REQUIRE(results.size() == 1);
+    CHECK(results.front() == ATTACHMENT_FILE_MISSING);
+    CHECK(c->message(id)->send_state == SendState::unsendable);
+
+    // ... and being terminal, it is refused rather than attempted again.
+    CHECK_FALSE(c->retry_send(id));
+}
