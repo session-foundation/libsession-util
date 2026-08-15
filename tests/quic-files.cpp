@@ -314,7 +314,8 @@ int run(const CliArgs& args, bool is_upload) {
     if (args.dl_source.find("://") != std::string::npos)
         download_url = args.dl_source;
     else
-        download_url = fs::generate_download_url(args.dl_source, network->file_server_config);
+        download_url = fs::generate_download_url(
+                args.dl_source, network->file_server_config, /*stream_encrypted=*/true);
 
     fmt::print(stderr, "Downloading: {}\n", download_url);
     return do_download(args.dl_key_hex, args.dl_output, [&](on_data_t on_data, auto cb) {

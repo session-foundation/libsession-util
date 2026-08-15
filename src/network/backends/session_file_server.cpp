@@ -136,7 +136,8 @@ std::optional<SRouterTarget> default_quic_target(
     return std::nullopt;
 }
 
-std::string generate_download_url(std::string_view file_id, const config::FileServer& config) {
+std::string generate_download_url(
+        std::string_view file_id, const config::FileServer& config, bool stream_encrypted) {
     const auto has_custom_pubkey = (config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex);
 
     auto buf = fmt::format(
@@ -155,7 +156,7 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
         sep = '&';
     }
 
-    if (config.use_stream_encryption) {
+    if (stream_encrypted) {
         fmt::format_to(out, "{}{}", sep, backends::FRAGMENT_STREAM_ENCRYPTION);
         sep = '&';
     }
@@ -439,9 +440,8 @@ LIBSESSION_C_API bool session_file_server_generate_download_url(
         config.host = host;
     if (pubkey_hex)
         config.pubkey_hex = pubkey_hex;
-    config.use_stream_encryption = use_stream_encryption;
 
-    auto result = file_server::generate_download_url(file_id, config);
+    auto result = file_server::generate_download_url(file_id, config, use_stream_encryption);
     if (result.size() >= out_url_len)
         return false;
 

@@ -1203,8 +1203,13 @@ void Client::_upload_next(
                         }
 
                         const auto& [meta, key] = std::get<0>(result);
+                        // upload_file always encrypts with the stream scheme, so the url has to say
+                        // so: without the fragment a recipient reaches for the legacy scheme and
+                        // cannot open the file at all.
                         auto url = network::file_server::generate_download_url(
-                                meta.id, core.network()->file_server_config);
+                                meta.id,
+                                core.network()->file_server_config,
+                                /*stream_encrypted=*/true);
 
                         {
                             auto c = core.database().conn();

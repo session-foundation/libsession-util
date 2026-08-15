@@ -28,7 +28,6 @@ struct Config {
     std::optional<uint64_t> custom_file_server_max_file_size = std::nullopt;
     std::optional<std::string> custom_file_server_srouter_address = std::nullopt;
     std::optional<uint16_t> custom_file_server_srouter_port = std::nullopt;
-    bool file_server_use_stream_encryption = false;
 
     // QUIC file server options
     std::optional<std::string> quic_file_server_ed_pubkey;
@@ -97,7 +96,6 @@ struct Config {
     void handle_config_opt(opt::file_server_port fsp);
     void handle_config_opt(opt::file_server_pubkey_hex fsph);
     void handle_config_opt(opt::file_server_max_file_size fsmfs);
-    void handle_config_opt(opt::file_server_use_stream_encryption fsuse);
     void handle_config_opt(opt::file_server_srouter fssr);
 
     // General options

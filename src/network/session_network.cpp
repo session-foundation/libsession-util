@@ -54,7 +54,6 @@ namespace {
         config::FileServer file_server_config = main_config.netid == opt::netid::Target::testnet
                                                       ? file_server::TESTNET_CONFIG
                                                       : file_server::DEFAULT_CONFIG;
-        file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
 
         if (main_config.custom_file_server_scheme)
             file_server_config.scheme = *main_config.custom_file_server_scheme;
@@ -1231,7 +1230,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
-    config.file_server_use_stream_encryption = cpp_defaults.file_server_use_stream_encryption;
 
     config.increase_no_file_limit = cpp_defaults.increase_no_file_limit;
     config.path_length = cpp_defaults.path_length;
@@ -1353,9 +1351,6 @@ LIBSESSION_C_API bool session_network_init(
         if (config->custom_file_server_max_file_size > 0)
             cpp_opts.emplace_back(
                     opt::file_server_max_file_size(config->custom_file_server_max_file_size));
-
-        cpp_opts.emplace_back(
-                opt::file_server_use_stream_encryption(config->file_server_use_stream_encryption));
 
         // General
         if (config->increase_no_file_limit)

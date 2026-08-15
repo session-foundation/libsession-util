@@ -97,14 +97,6 @@ void Config::handle_config_opt(opt::file_server_max_file_size fsmfs) {
             cat, "Network config custom file server max file size set to {}", fsmfs.max_file_size);
 }
 
-void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
-    file_server_use_stream_encryption = fsuse.use_stream_encryption;
-    log::debug(
-            cat,
-            "Network config file use stream encryption set to {}",
-            fsuse.use_stream_encryption);
-}
-
 void Config::handle_config_opt(opt::file_server_srouter fssr) {
     custom_file_server_srouter_address = fssr.address;
     custom_file_server_srouter_port = fssr.port;

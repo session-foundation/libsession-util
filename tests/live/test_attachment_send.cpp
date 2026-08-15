@@ -134,6 +134,15 @@ TEST_CASE(
     REQUIRE(info);
     CHECK(!info->file_id.empty());
 
+    // ...and it has to say how the file is encrypted.  upload_file only ever uses the stream
+    // scheme, so a url without this fragment sends every recipient to the legacy decryptor, which
+    // cannot open it: an unopenable attachment rather than a failed download.
+    CHECK(info->wants_stream_decryption);
+
+    // Also asserted on the url itself, since the check above would pass just as happily if both
+    // sides of the round trip were wrong together.
+    CHECK(ptr.url().find('#') != std::string::npos);
+
     // And the deprecated numeric id, which old clients still read, has to agree with it while the
     // file server is still issuing numeric ids.
     if (std::ranges::all_of(info->file_id, [](char ch) { return ch >= '0' && ch <= '9'; }))

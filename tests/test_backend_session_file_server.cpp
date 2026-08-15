@@ -97,21 +97,21 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              "example.com",
              123,
              "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
-             12345,
-             true});
+             12345},
+            true);
     CHECK(url ==
           "http://example.com/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d");
 
-    // Omits the stream encryption fragment when disabled
+    // Omits the stream encryption fragment for a file encrypted the legacy way
     url = file_server::generate_download_url(
             "abc123"sv,
             {"http",
              "example.com",
              123,
              "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
-             12345,
-             false});
+             12345},
+            false);
     CHECK(url ==
           "http://example.com/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000");
@@ -119,19 +119,22 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
     // Omits the pubkey when it matches the default pubkey
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, true});
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            true);
     CHECK(url == "http://example.com/file/abc123#d");
 
-    // Omits all fragments when stream encryption is disabled and the default pubkey is used
+    // Omits all fragments for a legacy-encrypted file on the default server
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
     CHECK(url == "http://example.com/file/abc123");
 
     // Works with other values
     url = file_server::generate_download_url(
             "12345678"sv,
-            {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321, false});
+            {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321},
+            false);
     CHECK(url == "https://example2.com/file/12345678");
 
     // Names a custom server's session router endpoint, leaving out the port when it is the default
@@ -143,8 +146,8 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              123,
              file_server::DEFAULT_CONFIG.pubkey_hex,
              12345,
-             false,
-             file_server::SRouterTarget{"somewhere.sesh"}});
+             file_server::SRouterTarget{"somewhere.sesh"}},
+            false);
     CHECK(url == "http://example.com/file/abc123#sr=somewhere.sesh");
 
     // ... but includes it when it isn't
@@ -155,8 +158,8 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              123,
              file_server::DEFAULT_CONFIG.pubkey_hex,
              12345,
-             false,
-             file_server::SRouterTarget{"somewhere.sesh", 4567}});
+             file_server::SRouterTarget{"somewhere.sesh", 4567}},
+            false);
     CHECK(url == "http://example.com/file/abc123#sr=somewhere.sesh:4567");
 
     // Joins with the other fragments rather than replacing them
@@ -167,8 +170,8 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              123,
              "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
              12345,
-             true,
-             file_server::SRouterTarget{"somewhere.sesh", 4567}});
+             file_server::SRouterTarget{"somewhere.sesh", 4567}},
+            true);
     CHECK(url ==
           "http://example.com/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d"
@@ -182,13 +185,8 @@ TEST_CASE("Download url session router round trip", "[backend][session_file_serv
     auto check_round_trip = [](file_server::SRouterTarget target, uint16_t expected_port) {
         auto url = file_server::generate_download_url(
                 "abc123"sv,
-                {"http",
-                 "example.com",
-                 123,
-                 file_server::DEFAULT_CONFIG.pubkey_hex,
-                 12345,
-                 true,
-                 target});
+                {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, target},
+                true);
 
         auto parsed = file_server::parse_download_url(url);
         REQUIRE(parsed.has_value());
@@ -208,7 +206,8 @@ TEST_CASE("Download url session router round trip", "[backend][session_file_serv
     // Without a target there is no fragment, and nothing to parse back
     auto url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
     auto parsed = file_server::parse_download_url(url);
     REQUIRE(parsed.has_value());
     CHECK_FALSE(parsed->srouter_target.has_value());

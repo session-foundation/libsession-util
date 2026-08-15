@@ -173,9 +173,10 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
     REQUIRE(std::holds_alternative<network::file_metadata>(upload_result));
     auto& upload_meta = std::get<network::file_metadata>(upload_result);
 
-    // Download
-    auto download_url =
-            network::file_server::generate_download_url(upload_meta.id, net->file_server_config);
+    // Download.  The bytes went up already encrypted, by the attachment::encrypt call above, so the
+    // url says stream even though the upload path itself did nothing to them.
+    auto download_url = network::file_server::generate_download_url(
+            upload_meta.id, net->file_server_config, /*stream_encrypted=*/true);
 
     std::promise<std::variant<network::file_metadata, int16_t>> download_promise;
     auto download_future = download_promise.get_future();

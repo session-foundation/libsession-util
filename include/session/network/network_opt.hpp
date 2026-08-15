@@ -229,15 +229,6 @@ namespace opt {
                 address{std::move(address)}, port{port} {}
     };
 
-    /// Can be used to override the default (false) flag indicating whether files uploaded to the
-    /// file server should use XChaCha20-stream based encryption.
-    struct file_server_use_stream_encryption {
-        bool use_stream_encryption;
-
-        file_server_use_stream_encryption(bool use_stream_encryption) :
-                use_stream_encryption{use_stream_encryption} {}
-    };
-
     /// Can be used to attempt to increase the NOFILE limit (can cause issues with automated tests).
     struct increase_no_file_limit {};
 
@@ -484,7 +475,6 @@ namespace opt {
             file_server_port,
             file_server_pubkey_hex,
             file_server_max_file_size,
-            file_server_use_stream_encryption,
             file_server_srouter,
 
             // General options
