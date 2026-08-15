@@ -1058,6 +1058,80 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
     CHECK(c->message(id)->sync_send_state == SendState::failed);
 }
 
+TEST_CASE("Client: a message reports the attachments it carries", "[client][send][attachments]") {
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_attach", 7);
+    std::filesystem::create_directories(dir);
+    auto write = [&](std::string_view name) {
+        auto p = dir / name;
+        std::ofstream{p, std::ios::binary} << "not really a file";
+        return p;
+    };
+    // Names chosen for the ways extension parsing goes wrong: several dots, and a dotfile whose
+    // leading dot must not be read as an extension.
+    auto photo = write("holiday.snap.PNG");
+    auto doc = write("notes.pdf");
+    auto mystery = write(".hidden");
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto id = c->send_message(
+            ConversationId::dm(me),
+            "",
+            {OutgoingAttachment{.path = photo, .caption = "on the beach"},
+             OutgoingAttachment{.path = doc, .content_type = "application/x-my-own", .width = 4},
+             OutgoingAttachment{.path = mystery, .voice_message = true}});
+
+    auto msg = c->message(id);
+    REQUIRE(msg.has_value());
+
+    // An attachments-only message: nothing to show but the files, which is exactly the case that
+    // used to be indistinguishable from an empty message.
+    CHECK(msg->body.empty());
+    REQUIRE(msg->attachments.size() == 3);
+
+    // Ordered by position, and that position is what an upload report names.
+    CHECK(msg->attachments[0].index == 0);
+    CHECK(msg->attachments[1].index == 1);
+    CHECK(msg->attachments[2].index == 2);
+
+    // Inferred from the last extension, case-insensitively, when the caller named none...
+    CHECK(msg->attachments[0].content_type == "image/png");
+    CHECK(msg->attachments[0].filename == "holiday.snap.PNG");
+    CHECK(msg->attachments[0].caption == "on the beach");
+    CHECK_FALSE(msg->attachments[0].voice_message);
+
+    // ...and never overriding one the caller did name.
+    CHECK(msg->attachments[1].content_type == "application/x-my-own");
+    CHECK(msg->attachments[1].width == 4);
+    CHECK_FALSE(msg->attachments[1].height.has_value());
+
+    // A dotfile has no extension -- "hidden" is the name, not the type -- so it falls back rather
+    // than being given a type invented out of the filename.
+    CHECK(msg->attachments[2].content_type == "application/octet-stream");
+    CHECK(msg->attachments[2].filename == ".hidden");
+    CHECK(msg->attachments[2].voice_message);
+
+    // Nothing is uploaded until the message is sent, and no size is known before that: what goes in
+    // the pointer is the file's own length, which is read at upload time.
+    for (const auto& a : msg->attachments) {
+        CHECK_FALSE(a.uploaded);
+        CHECK_FALSE(a.size.has_value());
+    }
+
+    // The same list reaches a paged read, not only the single-message one.
+    auto page = c->messages(ConversationId::dm(me));
+    REQUIRE(page.size() == 1);
+    CHECK(page[0].attachments.size() == 3);
+    CHECK(page[0].attachments[0].content_type == "image/png");
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     TempClient c;
     auto net = std::make_shared<MockNetwork>();

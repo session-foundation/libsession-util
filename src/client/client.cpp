@@ -794,6 +794,10 @@ static std::vector<Message> query_messages(
                                                                      *sync_send_state)}
                                                            : std::nullopt,
                         .hash = std::move(swarm_hash)});
+
+    // Done here rather than by each caller so that every path that produces Messages produces whole
+    // ones: a Message with its attachments silently missing is worse than no accessor at all.
+    load_attachments(c, out);
     return out;
 }
 
@@ -953,6 +957,61 @@ void Client::_dispatch_sends(
 
 // -- Attachments ------------------------------------------------------------------------------
 
+// The content type to advertise for a file whose sender did not name one.
+//
+// Deliberately shallow: this is a display hint a recipient uses to pick a viewer, not something
+// any decision depends on, and a platform that has a real UTI database (as every GUI client does)
+// should pass `OutgoingAttachment::content_type` rather than rely on this.  Everything unrecognised
+// is application/octet-stream, which is what Session's other clients also fall back to.
+static std::string infer_content_type(const std::filesystem::path& path) {
+    static const std::unordered_map<std::string_view, std::string_view> types{
+            {"jpg", "image/jpeg"},
+            {"jpeg", "image/jpeg"},
+            {"png", "image/png"},
+            {"gif", "image/gif"},
+            {"webp", "image/webp"},
+            {"heic", "image/heic"},
+            {"bmp", "image/bmp"},
+            {"tiff", "image/tiff"},
+            {"svg", "image/svg+xml"},
+            {"mp4", "video/mp4"},
+            {"mov", "video/quicktime"},
+            {"webm", "video/webm"},
+            {"mkv", "video/x-matroska"},
+            {"avi", "video/x-msvideo"},
+            {"mp3", "audio/mpeg"},
+            {"m4a", "audio/mp4"},
+            {"aac", "audio/aac"},
+            {"ogg", "audio/ogg"},
+            {"opus", "audio/opus"},
+            {"flac", "audio/flac"},
+            {"wav", "audio/wav"},
+            {"pdf", "application/pdf"},
+            {"txt", "text/plain"},
+            {"md", "text/markdown"},
+            {"csv", "text/csv"},
+            {"html", "text/html"},
+            {"json", "application/json"},
+            {"xml", "application/xml"},
+            {"zip", "application/zip"},
+            {"gz", "application/gzip"},
+            {"bz2", "application/x-bzip2"},
+            {"xz", "application/x-xz"},
+            {"7z", "application/x-7z-compressed"},
+            {"tar", "application/x-tar"},
+    };
+
+    auto ext = path.extension().string();
+    if (ext.starts_with('.'))
+        ext.erase(0, 1);
+    for (auto& ch : ext)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+
+    if (auto found = types.find(ext); found != types.end())
+        return std::string{found->second};
+    return "application/octet-stream";
+}
+
 int64_t Client::_send_message(
         const ConversationId& id,
         std::string_view body,
@@ -1018,7 +1077,7 @@ int64_t Client::_send_message(
                     client_id,
                     static_cast<int64_t>(i),
                     a.path.string(),
-                    a.content_type,
+                    a.content_type ? *a.content_type : infer_content_type(a.path),
                     a.filename ? a.filename : std::optional{a.path.filename().string()},
                     a.caption,
                     a.voice_message ? ATTACHMENT_FLAG_VOICE_MESSAGE : 0,
