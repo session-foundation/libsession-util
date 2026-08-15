@@ -992,7 +992,8 @@ class UnsendRequest final :
 
   enum : int {
     kAuthorFieldNumber = 2,
-    kTimestampFieldNumber = 1,
+    kMsgTimestampFieldNumber = 1,
+    kMsgIdFieldNumber = 3,
   };
   // required string author = 2;
   bool has_author() const;
@@ -1012,17 +1013,30 @@ class UnsendRequest final :
   std::string* _internal_mutable_author();
   public:
 
-  // required uint64 timestamp = 1;
-  bool has_timestamp() const;
+  // required uint64 msgTimestamp = 1;
+  bool has_msgtimestamp() const;
   private:
-  bool _internal_has_timestamp() const;
+  bool _internal_has_msgtimestamp() const;
   public:
-  void clear_timestamp();
-  uint64_t timestamp() const;
-  void set_timestamp(uint64_t value);
+  void clear_msgtimestamp();
+  uint64_t msgtimestamp() const;
+  void set_msgtimestamp(uint64_t value);
   private:
-  uint64_t _internal_timestamp() const;
-  void _internal_set_timestamp(uint64_t value);
+  uint64_t _internal_msgtimestamp() const;
+  void _internal_set_msgtimestamp(uint64_t value);
+  public:
+
+  // optional sfixed64 msgId = 3;
+  bool has_msgid() const;
+  private:
+  bool _internal_has_msgid() const;
+  public:
+  void clear_msgid();
+  int64_t msgid() const;
+  void set_msgid(int64_t value);
+  private:
+  int64_t _internal_msgid() const;
+  void _internal_set_msgid(int64_t value);
   public:
 
   // @@protoc_insertion_point(class_scope:SessionProtos.UnsendRequest)
@@ -1039,7 +1053,8 @@ class UnsendRequest final :
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr author_;
-    uint64_t timestamp_;
+    uint64_t msgtimestamp_;
+    int64_t msgid_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -2225,6 +2240,9 @@ class DataExtractionNotification final :
 
   enum : int {
     kTimestampFieldNumber = 2,
+    kMsgTimestampFieldNumber = 3,
+    kMsgIdFieldNumber = 4,
+    kAttIndexFieldNumber = 5,
     kTypeFieldNumber = 1,
   };
   // optional uint64 timestamp = 2;
@@ -2238,6 +2256,45 @@ class DataExtractionNotification final :
   private:
   uint64_t _internal_timestamp() const;
   void _internal_set_timestamp(uint64_t value);
+  public:
+
+  // optional uint64 msgTimestamp = 3;
+  bool has_msgtimestamp() const;
+  private:
+  bool _internal_has_msgtimestamp() const;
+  public:
+  void clear_msgtimestamp();
+  uint64_t msgtimestamp() const;
+  void set_msgtimestamp(uint64_t value);
+  private:
+  uint64_t _internal_msgtimestamp() const;
+  void _internal_set_msgtimestamp(uint64_t value);
+  public:
+
+  // optional sfixed64 msgId = 4;
+  bool has_msgid() const;
+  private:
+  bool _internal_has_msgid() const;
+  public:
+  void clear_msgid();
+  int64_t msgid() const;
+  void set_msgid(int64_t value);
+  private:
+  int64_t _internal_msgid() const;
+  void _internal_set_msgid(int64_t value);
+  public:
+
+  // optional uint32 attIndex = 5;
+  bool has_attindex() const;
+  private:
+  bool _internal_has_attindex() const;
+  public:
+  void clear_attindex();
+  uint32_t attindex() const;
+  void set_attindex(uint32_t value);
+  private:
+  uint32_t _internal_attindex() const;
+  void _internal_set_attindex(uint32_t value);
   public:
 
   // required .SessionProtos.DataExtractionNotification.Type type = 1;
@@ -2264,6 +2321,9 @@ class DataExtractionNotification final :
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint64_t timestamp_;
+    uint64_t msgtimestamp_;
+    int64_t msgid_;
+    uint32_t attindex_;
     int type_;
   };
   union { Impl_ _impl_; };
@@ -2794,7 +2854,8 @@ class DataMessage_Quote final :
     kAttachmentsFieldNumber = 4,
     kAuthorFieldNumber = 2,
     kTextFieldNumber = 3,
-    kIdFieldNumber = 1,
+    kMsgTimestampFieldNumber = 1,
+    kMsgIdFieldNumber = 5,
   };
   // repeated .SessionProtos.DataMessage.Quote.QuotedAttachment attachments = 4;
   int attachments_size() const;
@@ -2850,17 +2911,30 @@ class DataMessage_Quote final :
   std::string* _internal_mutable_text();
   public:
 
-  // required uint64 id = 1;
-  bool has_id() const;
+  // required uint64 msgTimestamp = 1;
+  bool has_msgtimestamp() const;
   private:
-  bool _internal_has_id() const;
+  bool _internal_has_msgtimestamp() const;
   public:
-  void clear_id();
-  uint64_t id() const;
-  void set_id(uint64_t value);
+  void clear_msgtimestamp();
+  uint64_t msgtimestamp() const;
+  void set_msgtimestamp(uint64_t value);
   private:
-  uint64_t _internal_id() const;
-  void _internal_set_id(uint64_t value);
+  uint64_t _internal_msgtimestamp() const;
+  void _internal_set_msgtimestamp(uint64_t value);
+  public:
+
+  // optional sfixed64 msgId = 5;
+  bool has_msgid() const;
+  private:
+  bool _internal_has_msgid() const;
+  public:
+  void clear_msgid();
+  int64_t msgid() const;
+  void set_msgid(int64_t value);
+  private:
+  int64_t _internal_msgid() const;
+  void _internal_set_msgid(int64_t value);
   public:
 
   // @@protoc_insertion_point(class_scope:SessionProtos.DataMessage.Quote)
@@ -2879,7 +2953,8 @@ class DataMessage_Quote final :
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::SessionProtos::DataMessage_Quote_QuotedAttachment > attachments_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr author_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
-    uint64_t id_;
+    uint64_t msgtimestamp_;
+    int64_t msgid_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -3211,7 +3286,8 @@ class DataMessage_Reaction final :
   enum : int {
     kAuthorFieldNumber = 2,
     kEmojiFieldNumber = 3,
-    kIdFieldNumber = 1,
+    kMsgTimestampFieldNumber = 1,
+    kMsgIdFieldNumber = 5,
     kActionFieldNumber = 4,
   };
   // required string author = 2;
@@ -3250,17 +3326,30 @@ class DataMessage_Reaction final :
   std::string* _internal_mutable_emoji();
   public:
 
-  // required uint64 id = 1;
-  bool has_id() const;
+  // required uint64 msgTimestamp = 1;
+  bool has_msgtimestamp() const;
   private:
-  bool _internal_has_id() const;
+  bool _internal_has_msgtimestamp() const;
   public:
-  void clear_id();
-  uint64_t id() const;
-  void set_id(uint64_t value);
+  void clear_msgtimestamp();
+  uint64_t msgtimestamp() const;
+  void set_msgtimestamp(uint64_t value);
   private:
-  uint64_t _internal_id() const;
-  void _internal_set_id(uint64_t value);
+  uint64_t _internal_msgtimestamp() const;
+  void _internal_set_msgtimestamp(uint64_t value);
+  public:
+
+  // optional sfixed64 msgId = 5;
+  bool has_msgid() const;
+  private:
+  bool _internal_has_msgid() const;
+  public:
+  void clear_msgid();
+  int64_t msgid() const;
+  void set_msgid(int64_t value);
+  private:
+  int64_t _internal_msgid() const;
+  void _internal_set_msgid(int64_t value);
   public:
 
   // required .SessionProtos.DataMessage.Reaction.Action action = 4;
@@ -3291,7 +3380,8 @@ class DataMessage_Reaction final :
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr author_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr emoji_;
-    uint64_t id_;
+    uint64_t msgtimestamp_;
+    int64_t msgid_;
     int action_;
   };
   union { Impl_ _impl_; };
@@ -7141,32 +7231,32 @@ inline void TypingMessage::set_action(::SessionProtos::TypingMessage_Action valu
 
 // UnsendRequest
 
-// required uint64 timestamp = 1;
-inline bool UnsendRequest::_internal_has_timestamp() const {
+// required uint64 msgTimestamp = 1;
+inline bool UnsendRequest::_internal_has_msgtimestamp() const {
   bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   return value;
 }
-inline bool UnsendRequest::has_timestamp() const {
-  return _internal_has_timestamp();
+inline bool UnsendRequest::has_msgtimestamp() const {
+  return _internal_has_msgtimestamp();
 }
-inline void UnsendRequest::clear_timestamp() {
-  _impl_.timestamp_ = uint64_t{0u};
+inline void UnsendRequest::clear_msgtimestamp() {
+  _impl_.msgtimestamp_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000002u;
 }
-inline uint64_t UnsendRequest::_internal_timestamp() const {
-  return _impl_.timestamp_;
+inline uint64_t UnsendRequest::_internal_msgtimestamp() const {
+  return _impl_.msgtimestamp_;
 }
-inline uint64_t UnsendRequest::timestamp() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.UnsendRequest.timestamp)
-  return _internal_timestamp();
+inline uint64_t UnsendRequest::msgtimestamp() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.UnsendRequest.msgTimestamp)
+  return _internal_msgtimestamp();
 }
-inline void UnsendRequest::_internal_set_timestamp(uint64_t value) {
+inline void UnsendRequest::_internal_set_msgtimestamp(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000002u;
-  _impl_.timestamp_ = value;
+  _impl_.msgtimestamp_ = value;
 }
-inline void UnsendRequest::set_timestamp(uint64_t value) {
-  _internal_set_timestamp(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.UnsendRequest.timestamp)
+inline void UnsendRequest::set_msgtimestamp(uint64_t value) {
+  _internal_set_msgtimestamp(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.UnsendRequest.msgTimestamp)
 }
 
 // required string author = 2;
@@ -7235,6 +7325,34 @@ inline void UnsendRequest::set_allocated_author(std::string* author) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.UnsendRequest.author)
+}
+
+// optional sfixed64 msgId = 3;
+inline bool UnsendRequest::_internal_has_msgid() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  return value;
+}
+inline bool UnsendRequest::has_msgid() const {
+  return _internal_has_msgid();
+}
+inline void UnsendRequest::clear_msgid() {
+  _impl_.msgid_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000004u;
+}
+inline int64_t UnsendRequest::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline int64_t UnsendRequest::msgid() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.UnsendRequest.msgId)
+  return _internal_msgid();
+}
+inline void UnsendRequest::_internal_set_msgid(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_.msgid_ = value;
+}
+inline void UnsendRequest::set_msgid(int64_t value) {
+  _internal_set_msgid(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.UnsendRequest.msgId)
 }
 
 // -------------------------------------------------------------------
@@ -8866,7 +8984,7 @@ inline void KeyPair::set_allocated_privatekey(std::string* privatekey) {
 
 // required .SessionProtos.DataExtractionNotification.Type type = 1;
 inline bool DataExtractionNotification::_internal_has_type() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
   return value;
 }
 inline bool DataExtractionNotification::has_type() const {
@@ -8874,7 +8992,7 @@ inline bool DataExtractionNotification::has_type() const {
 }
 inline void DataExtractionNotification::clear_type() {
   _impl_.type_ = 1;
-  _impl_._has_bits_[0] &= ~0x00000002u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
 }
 inline ::SessionProtos::DataExtractionNotification_Type DataExtractionNotification::_internal_type() const {
   return static_cast< ::SessionProtos::DataExtractionNotification_Type >(_impl_.type_);
@@ -8885,7 +9003,7 @@ inline ::SessionProtos::DataExtractionNotification_Type DataExtractionNotificati
 }
 inline void DataExtractionNotification::_internal_set_type(::SessionProtos::DataExtractionNotification_Type value) {
   assert(::SessionProtos::DataExtractionNotification_Type_IsValid(value));
-  _impl_._has_bits_[0] |= 0x00000002u;
+  _impl_._has_bits_[0] |= 0x00000010u;
   _impl_.type_ = value;
 }
 inline void DataExtractionNotification::set_type(::SessionProtos::DataExtractionNotification_Type value) {
@@ -8919,6 +9037,90 @@ inline void DataExtractionNotification::_internal_set_timestamp(uint64_t value) 
 inline void DataExtractionNotification::set_timestamp(uint64_t value) {
   _internal_set_timestamp(value);
   // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.timestamp)
+}
+
+// optional uint64 msgTimestamp = 3;
+inline bool DataExtractionNotification::_internal_has_msgtimestamp() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  return value;
+}
+inline bool DataExtractionNotification::has_msgtimestamp() const {
+  return _internal_has_msgtimestamp();
+}
+inline void DataExtractionNotification::clear_msgtimestamp() {
+  _impl_.msgtimestamp_ = uint64_t{0u};
+  _impl_._has_bits_[0] &= ~0x00000002u;
+}
+inline uint64_t DataExtractionNotification::_internal_msgtimestamp() const {
+  return _impl_.msgtimestamp_;
+}
+inline uint64_t DataExtractionNotification::msgtimestamp() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataExtractionNotification.msgTimestamp)
+  return _internal_msgtimestamp();
+}
+inline void DataExtractionNotification::_internal_set_msgtimestamp(uint64_t value) {
+  _impl_._has_bits_[0] |= 0x00000002u;
+  _impl_.msgtimestamp_ = value;
+}
+inline void DataExtractionNotification::set_msgtimestamp(uint64_t value) {
+  _internal_set_msgtimestamp(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.msgTimestamp)
+}
+
+// optional sfixed64 msgId = 4;
+inline bool DataExtractionNotification::_internal_has_msgid() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  return value;
+}
+inline bool DataExtractionNotification::has_msgid() const {
+  return _internal_has_msgid();
+}
+inline void DataExtractionNotification::clear_msgid() {
+  _impl_.msgid_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000004u;
+}
+inline int64_t DataExtractionNotification::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline int64_t DataExtractionNotification::msgid() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataExtractionNotification.msgId)
+  return _internal_msgid();
+}
+inline void DataExtractionNotification::_internal_set_msgid(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_.msgid_ = value;
+}
+inline void DataExtractionNotification::set_msgid(int64_t value) {
+  _internal_set_msgid(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.msgId)
+}
+
+// optional uint32 attIndex = 5;
+inline bool DataExtractionNotification::_internal_has_attindex() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  return value;
+}
+inline bool DataExtractionNotification::has_attindex() const {
+  return _internal_has_attindex();
+}
+inline void DataExtractionNotification::clear_attindex() {
+  _impl_.attindex_ = 0u;
+  _impl_._has_bits_[0] &= ~0x00000008u;
+}
+inline uint32_t DataExtractionNotification::_internal_attindex() const {
+  return _impl_.attindex_;
+}
+inline uint32_t DataExtractionNotification::attindex() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataExtractionNotification.attIndex)
+  return _internal_attindex();
+}
+inline void DataExtractionNotification::_internal_set_attindex(uint32_t value) {
+  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_.attindex_ = value;
+}
+inline void DataExtractionNotification::set_attindex(uint32_t value) {
+  _internal_set_attindex(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.attIndex)
 }
 
 // -------------------------------------------------------------------
@@ -9351,32 +9553,32 @@ inline void DataMessage_Quote_QuotedAttachment::set_flags(uint32_t value) {
 
 // DataMessage_Quote
 
-// required uint64 id = 1;
-inline bool DataMessage_Quote::_internal_has_id() const {
+// required uint64 msgTimestamp = 1;
+inline bool DataMessage_Quote::_internal_has_msgtimestamp() const {
   bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
   return value;
 }
-inline bool DataMessage_Quote::has_id() const {
-  return _internal_has_id();
+inline bool DataMessage_Quote::has_msgtimestamp() const {
+  return _internal_has_msgtimestamp();
 }
-inline void DataMessage_Quote::clear_id() {
-  _impl_.id_ = uint64_t{0u};
+inline void DataMessage_Quote::clear_msgtimestamp() {
+  _impl_.msgtimestamp_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000004u;
 }
-inline uint64_t DataMessage_Quote::_internal_id() const {
-  return _impl_.id_;
+inline uint64_t DataMessage_Quote::_internal_msgtimestamp() const {
+  return _impl_.msgtimestamp_;
 }
-inline uint64_t DataMessage_Quote::id() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Quote.id)
-  return _internal_id();
+inline uint64_t DataMessage_Quote::msgtimestamp() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Quote.msgTimestamp)
+  return _internal_msgtimestamp();
 }
-inline void DataMessage_Quote::_internal_set_id(uint64_t value) {
+inline void DataMessage_Quote::_internal_set_msgtimestamp(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000004u;
-  _impl_.id_ = value;
+  _impl_.msgtimestamp_ = value;
 }
-inline void DataMessage_Quote::set_id(uint64_t value) {
-  _internal_set_id(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Quote.id)
+inline void DataMessage_Quote::set_msgtimestamp(uint64_t value) {
+  _internal_set_msgtimestamp(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Quote.msgTimestamp)
 }
 
 // required string author = 2;
@@ -9553,6 +9755,34 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::SessionProtos::DataMes
 DataMessage_Quote::attachments() const {
   // @@protoc_insertion_point(field_list:SessionProtos.DataMessage.Quote.attachments)
   return _impl_.attachments_;
+}
+
+// optional sfixed64 msgId = 5;
+inline bool DataMessage_Quote::_internal_has_msgid() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  return value;
+}
+inline bool DataMessage_Quote::has_msgid() const {
+  return _internal_has_msgid();
+}
+inline void DataMessage_Quote::clear_msgid() {
+  _impl_.msgid_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000008u;
+}
+inline int64_t DataMessage_Quote::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline int64_t DataMessage_Quote::msgid() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Quote.msgId)
+  return _internal_msgid();
+}
+inline void DataMessage_Quote::_internal_set_msgid(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_.msgid_ = value;
+}
+inline void DataMessage_Quote::set_msgid(int64_t value) {
+  _internal_set_msgid(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Quote.msgId)
 }
 
 // -------------------------------------------------------------------
@@ -9789,32 +10019,32 @@ inline void DataMessage_Preview::set_allocated_image(::SessionProtos::Attachment
 
 // DataMessage_Reaction
 
-// required uint64 id = 1;
-inline bool DataMessage_Reaction::_internal_has_id() const {
+// required uint64 msgTimestamp = 1;
+inline bool DataMessage_Reaction::_internal_has_msgtimestamp() const {
   bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
   return value;
 }
-inline bool DataMessage_Reaction::has_id() const {
-  return _internal_has_id();
+inline bool DataMessage_Reaction::has_msgtimestamp() const {
+  return _internal_has_msgtimestamp();
 }
-inline void DataMessage_Reaction::clear_id() {
-  _impl_.id_ = uint64_t{0u};
+inline void DataMessage_Reaction::clear_msgtimestamp() {
+  _impl_.msgtimestamp_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000004u;
 }
-inline uint64_t DataMessage_Reaction::_internal_id() const {
-  return _impl_.id_;
+inline uint64_t DataMessage_Reaction::_internal_msgtimestamp() const {
+  return _impl_.msgtimestamp_;
 }
-inline uint64_t DataMessage_Reaction::id() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Reaction.id)
-  return _internal_id();
+inline uint64_t DataMessage_Reaction::msgtimestamp() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Reaction.msgTimestamp)
+  return _internal_msgtimestamp();
 }
-inline void DataMessage_Reaction::_internal_set_id(uint64_t value) {
+inline void DataMessage_Reaction::_internal_set_msgtimestamp(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000004u;
-  _impl_.id_ = value;
+  _impl_.msgtimestamp_ = value;
 }
-inline void DataMessage_Reaction::set_id(uint64_t value) {
-  _internal_set_id(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Reaction.id)
+inline void DataMessage_Reaction::set_msgtimestamp(uint64_t value) {
+  _internal_set_msgtimestamp(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Reaction.msgTimestamp)
 }
 
 // required string author = 2;
@@ -9955,7 +10185,7 @@ inline void DataMessage_Reaction::set_allocated_emoji(std::string* emoji) {
 
 // required .SessionProtos.DataMessage.Reaction.Action action = 4;
 inline bool DataMessage_Reaction::_internal_has_action() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
   return value;
 }
 inline bool DataMessage_Reaction::has_action() const {
@@ -9963,7 +10193,7 @@ inline bool DataMessage_Reaction::has_action() const {
 }
 inline void DataMessage_Reaction::clear_action() {
   _impl_.action_ = 0;
-  _impl_._has_bits_[0] &= ~0x00000008u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
 }
 inline ::SessionProtos::DataMessage_Reaction_Action DataMessage_Reaction::_internal_action() const {
   return static_cast< ::SessionProtos::DataMessage_Reaction_Action >(_impl_.action_);
@@ -9974,12 +10204,40 @@ inline ::SessionProtos::DataMessage_Reaction_Action DataMessage_Reaction::action
 }
 inline void DataMessage_Reaction::_internal_set_action(::SessionProtos::DataMessage_Reaction_Action value) {
   assert(::SessionProtos::DataMessage_Reaction_Action_IsValid(value));
-  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_._has_bits_[0] |= 0x00000010u;
   _impl_.action_ = value;
 }
 inline void DataMessage_Reaction::set_action(::SessionProtos::DataMessage_Reaction_Action value) {
   _internal_set_action(value);
   // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Reaction.action)
+}
+
+// optional sfixed64 msgId = 5;
+inline bool DataMessage_Reaction::_internal_has_msgid() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  return value;
+}
+inline bool DataMessage_Reaction::has_msgid() const {
+  return _internal_has_msgid();
+}
+inline void DataMessage_Reaction::clear_msgid() {
+  _impl_.msgid_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000008u;
+}
+inline int64_t DataMessage_Reaction::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline int64_t DataMessage_Reaction::msgid() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.DataMessage.Reaction.msgId)
+  return _internal_msgid();
+}
+inline void DataMessage_Reaction::_internal_set_msgid(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_.msgid_ = value;
+}
+inline void DataMessage_Reaction::set_msgid(int64_t value) {
+  _internal_set_msgid(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.DataMessage.Reaction.msgId)
 }
 
 // -------------------------------------------------------------------

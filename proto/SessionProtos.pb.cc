@@ -58,7 +58,8 @@ PROTOBUF_CONSTEXPR UnsendRequest::UnsendRequest(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.author_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.timestamp_)*/uint64_t{0u}} {}
+  , /*decltype(_impl_.msgtimestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgid_)*/int64_t{0}} {}
 struct UnsendRequestDefaultTypeInternal {
   PROTOBUF_CONSTEXPR UnsendRequestDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -149,6 +150,9 @@ PROTOBUF_CONSTEXPR DataExtractionNotification::DataExtractionNotification(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.timestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgtimestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgid_)*/int64_t{0}
+  , /*decltype(_impl_.attindex_)*/0u
   , /*decltype(_impl_.type_)*/1} {}
 struct DataExtractionNotificationDefaultTypeInternal {
   PROTOBUF_CONSTEXPR DataExtractionNotificationDefaultTypeInternal()
@@ -199,7 +203,8 @@ PROTOBUF_CONSTEXPR DataMessage_Quote::DataMessage_Quote(
   , /*decltype(_impl_.attachments_)*/{}
   , /*decltype(_impl_.author_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.text_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.id_)*/uint64_t{0u}} {}
+  , /*decltype(_impl_.msgtimestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgid_)*/int64_t{0}} {}
 struct DataMessage_QuoteDefaultTypeInternal {
   PROTOBUF_CONSTEXPR DataMessage_QuoteDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -231,7 +236,8 @@ PROTOBUF_CONSTEXPR DataMessage_Reaction::DataMessage_Reaction(
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.author_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.emoji_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.id_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgtimestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgid_)*/int64_t{0}
   , /*decltype(_impl_.action_)*/0} {}
 struct DataMessage_ReactionDefaultTypeInternal {
   PROTOBUF_CONSTEXPR DataMessage_ReactionDefaultTypeInternal()
@@ -2049,11 +2055,14 @@ std::string TypingMessage::GetTypeName() const {
 class UnsendRequest::_Internal {
  public:
   using HasBits = decltype(std::declval<UnsendRequest>()._impl_._has_bits_);
-  static void set_has_timestamp(HasBits* has_bits) {
+  static void set_has_msgtimestamp(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_author(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
+  }
+  static void set_has_msgid(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
   }
   static bool MissingRequiredFields(const HasBits& has_bits) {
     return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
@@ -2073,7 +2082,8 @@ UnsendRequest::UnsendRequest(const UnsendRequest& from)
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.author_){}
-    , decltype(_impl_.timestamp_){}};
+    , decltype(_impl_.msgtimestamp_){}
+    , decltype(_impl_.msgid_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   _impl_.author_.InitDefault();
@@ -2084,7 +2094,9 @@ UnsendRequest::UnsendRequest(const UnsendRequest& from)
     _this->_impl_.author_.Set(from._internal_author(), 
       _this->GetArenaForAllocation());
   }
-  _this->_impl_.timestamp_ = from._impl_.timestamp_;
+  ::memcpy(&_impl_.msgtimestamp_, &from._impl_.msgtimestamp_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msgid_) -
+    reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.msgid_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.UnsendRequest)
 }
 
@@ -2096,7 +2108,8 @@ inline void UnsendRequest::SharedCtor(
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.author_){}
-    , decltype(_impl_.timestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgtimestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgid_){int64_t{0}}
   };
   _impl_.author_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -2132,7 +2145,11 @@ void UnsendRequest::Clear() {
   if (cached_has_bits & 0x00000001u) {
     _impl_.author_.ClearNonDefaultToEmpty();
   }
-  _impl_.timestamp_ = uint64_t{0u};
+  if (cached_has_bits & 0x00000006u) {
+    ::memset(&_impl_.msgtimestamp_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.msgid_) -
+        reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.msgid_));
+  }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -2144,11 +2161,11 @@ const char* UnsendRequest::_InternalParse(const char* ptr, ::_pbi::ParseContext*
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // required uint64 timestamp = 1;
+      // required uint64 msgTimestamp = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _Internal::set_has_timestamp(&has_bits);
-          _impl_.timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _Internal::set_has_msgtimestamp(&has_bits);
+          _impl_.msgtimestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -2159,6 +2176,15 @@ const char* UnsendRequest::_InternalParse(const char* ptr, ::_pbi::ParseContext*
           auto str = _internal_mutable_author();
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional sfixed64 msgId = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 25)) {
+          _Internal::set_has_msgid(&has_bits);
+          _impl_.msgid_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<int64_t>(ptr);
+          ptr += sizeof(int64_t);
         } else
           goto handle_unusual;
         continue;
@@ -2193,16 +2219,22 @@ uint8_t* UnsendRequest::_InternalSerialize(
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  // required uint64 timestamp = 1;
+  // required uint64 msgTimestamp = 1;
   if (cached_has_bits & 0x00000002u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_timestamp(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_msgtimestamp(), target);
   }
 
   // required string author = 2;
   if (cached_has_bits & 0x00000001u) {
     target = stream->WriteStringMaybeAliased(
         2, this->_internal_author(), target);
+  }
+
+  // optional sfixed64 msgId = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteSFixed64ToArray(3, this->_internal_msgid(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -2224,9 +2256,9 @@ size_t UnsendRequest::RequiredFieldsByteSizeFallback() const {
         this->_internal_author());
   }
 
-  if (_internal_has_timestamp()) {
-    // required uint64 timestamp = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
+  if (_internal_has_msgtimestamp()) {
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
   }
 
   return total_size;
@@ -2241,8 +2273,8 @@ size_t UnsendRequest::ByteSizeLong() const {
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_author());
 
-    // required uint64 timestamp = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
 
   } else {
     total_size += RequiredFieldsByteSizeFallback();
@@ -2250,6 +2282,12 @@ size_t UnsendRequest::ByteSizeLong() const {
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // optional sfixed64 msgId = 3;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000004u) {
+    total_size += 1 + 8;
+  }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
@@ -2273,12 +2311,15 @@ void UnsendRequest::MergeFrom(const UnsendRequest& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_author(from._internal_author());
     }
     if (cached_has_bits & 0x00000002u) {
-      _this->_impl_.timestamp_ = from._impl_.timestamp_;
+      _this->_impl_.msgtimestamp_ = from._impl_.msgtimestamp_;
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.msgid_ = from._impl_.msgid_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
@@ -2307,7 +2348,12 @@ void UnsendRequest::InternalSwap(UnsendRequest* other) {
       &_impl_.author_, lhs_arena,
       &other->_impl_.author_, rhs_arena
   );
-  swap(_impl_.timestamp_, other->_impl_.timestamp_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(UnsendRequest, _impl_.msgid_)
+      + sizeof(UnsendRequest::_impl_.msgid_)
+      - PROTOBUF_FIELD_OFFSET(UnsendRequest, _impl_.msgtimestamp_)>(
+          reinterpret_cast<char*>(&_impl_.msgtimestamp_),
+          reinterpret_cast<char*>(&other->_impl_.msgtimestamp_));
 }
 
 std::string UnsendRequest::GetTypeName() const {
@@ -4086,13 +4132,22 @@ class DataExtractionNotification::_Internal {
  public:
   using HasBits = decltype(std::declval<DataExtractionNotification>()._impl_._has_bits_);
   static void set_has_type(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
+    (*has_bits)[0] |= 16u;
   }
   static void set_has_timestamp(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
+  static void set_has_msgtimestamp(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_msgid(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static void set_has_attindex(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
   static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000002) ^ 0x00000002) != 0;
+    return ((has_bits[0] & 0x00000010) ^ 0x00000010) != 0;
   }
 };
 
@@ -4109,6 +4164,9 @@ DataExtractionNotification::DataExtractionNotification(const DataExtractionNotif
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.timestamp_){}
+    , decltype(_impl_.msgtimestamp_){}
+    , decltype(_impl_.msgid_){}
+    , decltype(_impl_.attindex_){}
     , decltype(_impl_.type_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -4126,6 +4184,9 @@ inline void DataExtractionNotification::SharedCtor(
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.timestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgtimestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgid_){int64_t{0}}
+    , decltype(_impl_.attindex_){0u}
     , decltype(_impl_.type_){1}
   };
 }
@@ -4154,8 +4215,10 @@ void DataExtractionNotification::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
-    _impl_.timestamp_ = uint64_t{0u};
+  if (cached_has_bits & 0x0000001fu) {
+    ::memset(&_impl_.timestamp_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.attindex_) -
+        reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.attindex_));
     _impl_.type_ = 1;
   }
   _impl_._has_bits_.Clear();
@@ -4187,6 +4250,33 @@ const char* DataExtractionNotification::_InternalParse(const char* ptr, ::_pbi::
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
           _Internal::set_has_timestamp(&has_bits);
           _impl_.timestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 msgTimestamp = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_msgtimestamp(&has_bits);
+          _impl_.msgtimestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional sfixed64 msgId = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 33)) {
+          _Internal::set_has_msgid(&has_bits);
+          _impl_.msgid_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<int64_t>(ptr);
+          ptr += sizeof(int64_t);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint32 attIndex = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _Internal::set_has_attindex(&has_bits);
+          _impl_.attindex_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -4223,7 +4313,7 @@ uint8_t* DataExtractionNotification::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // required .SessionProtos.DataExtractionNotification.Type type = 1;
-  if (cached_has_bits & 0x00000002u) {
+  if (cached_has_bits & 0x00000010u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       1, this->_internal_type(), target);
@@ -4233,6 +4323,24 @@ uint8_t* DataExtractionNotification::_InternalSerialize(
   if (cached_has_bits & 0x00000001u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_timestamp(), target);
+  }
+
+  // optional uint64 msgTimestamp = 3;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_msgtimestamp(), target);
+  }
+
+  // optional sfixed64 msgId = 4;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteSFixed64ToArray(4, this->_internal_msgid(), target);
+  }
+
+  // optional uint32 attIndex = 5;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(5, this->_internal_attindex(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -4256,12 +4364,29 @@ size_t DataExtractionNotification::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // optional uint64 timestamp = 2;
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000001u) {
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
-  }
+  if (cached_has_bits & 0x0000000fu) {
+    // optional uint64 timestamp = 2;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
+    }
 
+    // optional uint64 msgTimestamp = 3;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
+    }
+
+    // optional sfixed64 msgId = 4;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 + 8;
+    }
+
+    // optional uint32 attIndex = 5;
+    if (cached_has_bits & 0x00000008u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_attindex());
+    }
+
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -4284,11 +4409,20 @@ void DataExtractionNotification::MergeFrom(const DataExtractionNotification& fro
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x0000001fu) {
     if (cached_has_bits & 0x00000001u) {
       _this->_impl_.timestamp_ = from._impl_.timestamp_;
     }
     if (cached_has_bits & 0x00000002u) {
+      _this->_impl_.msgtimestamp_ = from._impl_.msgtimestamp_;
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.msgid_ = from._impl_.msgid_;
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.attindex_ = from._impl_.attindex_;
+    }
+    if (cached_has_bits & 0x00000010u) {
       _this->_impl_.type_ = from._impl_.type_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -4312,7 +4446,12 @@ void DataExtractionNotification::InternalSwap(DataExtractionNotification* other)
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  swap(_impl_.timestamp_, other->_impl_.timestamp_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(DataExtractionNotification, _impl_.attindex_)
+      + sizeof(DataExtractionNotification::_impl_.attindex_)
+      - PROTOBUF_FIELD_OFFSET(DataExtractionNotification, _impl_.timestamp_)>(
+          reinterpret_cast<char*>(&_impl_.timestamp_),
+          reinterpret_cast<char*>(&other->_impl_.timestamp_));
   swap(_impl_.type_, other->_impl_.type_);
 }
 
@@ -4986,7 +5125,7 @@ std::string DataMessage_Quote_QuotedAttachment::GetTypeName() const {
 class DataMessage_Quote::_Internal {
  public:
   using HasBits = decltype(std::declval<DataMessage_Quote>()._impl_._has_bits_);
-  static void set_has_id(HasBits* has_bits) {
+  static void set_has_msgtimestamp(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
   static void set_has_author(HasBits* has_bits) {
@@ -4994,6 +5133,9 @@ class DataMessage_Quote::_Internal {
   }
   static void set_has_text(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
+  }
+  static void set_has_msgid(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
   }
   static bool MissingRequiredFields(const HasBits& has_bits) {
     return ((has_bits[0] & 0x00000005) ^ 0x00000005) != 0;
@@ -5015,7 +5157,8 @@ DataMessage_Quote::DataMessage_Quote(const DataMessage_Quote& from)
     , decltype(_impl_.attachments_){from._impl_.attachments_}
     , decltype(_impl_.author_){}
     , decltype(_impl_.text_){}
-    , decltype(_impl_.id_){}};
+    , decltype(_impl_.msgtimestamp_){}
+    , decltype(_impl_.msgid_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   _impl_.author_.InitDefault();
@@ -5034,7 +5177,9 @@ DataMessage_Quote::DataMessage_Quote(const DataMessage_Quote& from)
     _this->_impl_.text_.Set(from._internal_text(), 
       _this->GetArenaForAllocation());
   }
-  _this->_impl_.id_ = from._impl_.id_;
+  ::memcpy(&_impl_.msgtimestamp_, &from._impl_.msgtimestamp_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msgid_) -
+    reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.msgid_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.DataMessage.Quote)
 }
 
@@ -5048,7 +5193,8 @@ inline void DataMessage_Quote::SharedCtor(
     , decltype(_impl_.attachments_){arena}
     , decltype(_impl_.author_){}
     , decltype(_impl_.text_){}
-    , decltype(_impl_.id_){uint64_t{0u}}
+    , decltype(_impl_.msgtimestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgid_){int64_t{0}}
   };
   _impl_.author_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -5096,7 +5242,11 @@ void DataMessage_Quote::Clear() {
       _impl_.text_.ClearNonDefaultToEmpty();
     }
   }
-  _impl_.id_ = uint64_t{0u};
+  if (cached_has_bits & 0x0000000cu) {
+    ::memset(&_impl_.msgtimestamp_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.msgid_) -
+        reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.msgid_));
+  }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -5108,11 +5258,11 @@ const char* DataMessage_Quote::_InternalParse(const char* ptr, ::_pbi::ParseCont
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // required uint64 id = 1;
+      // required uint64 msgTimestamp = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _Internal::set_has_id(&has_bits);
-          _impl_.id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _Internal::set_has_msgtimestamp(&has_bits);
+          _impl_.msgtimestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -5148,6 +5298,15 @@ const char* DataMessage_Quote::_InternalParse(const char* ptr, ::_pbi::ParseCont
         } else
           goto handle_unusual;
         continue;
+      // optional sfixed64 msgId = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 41)) {
+          _Internal::set_has_msgid(&has_bits);
+          _impl_.msgid_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<int64_t>(ptr);
+          ptr += sizeof(int64_t);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5179,10 +5338,10 @@ uint8_t* DataMessage_Quote::_InternalSerialize(
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  // required uint64 id = 1;
+  // required uint64 msgTimestamp = 1;
   if (cached_has_bits & 0x00000004u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_id(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_msgtimestamp(), target);
   }
 
   // required string author = 2;
@@ -5205,6 +5364,12 @@ uint8_t* DataMessage_Quote::_InternalSerialize(
         InternalWriteMessage(4, repfield, repfield.GetCachedSize(), target, stream);
   }
 
+  // optional sfixed64 msgId = 5;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteSFixed64ToArray(5, this->_internal_msgid(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -5224,9 +5389,9 @@ size_t DataMessage_Quote::RequiredFieldsByteSizeFallback() const {
         this->_internal_author());
   }
 
-  if (_internal_has_id()) {
-    // required uint64 id = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_id());
+  if (_internal_has_msgtimestamp()) {
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
   }
 
   return total_size;
@@ -5241,8 +5406,8 @@ size_t DataMessage_Quote::ByteSizeLong() const {
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_author());
 
-    // required uint64 id = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_id());
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
 
   } else {
     total_size += RequiredFieldsByteSizeFallback();
@@ -5264,6 +5429,11 @@ size_t DataMessage_Quote::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_text());
+  }
+
+  // optional sfixed64 msgId = 5;
+  if (cached_has_bits & 0x00000008u) {
+    total_size += 1 + 8;
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -5289,7 +5459,7 @@ void DataMessage_Quote::MergeFrom(const DataMessage_Quote& from) {
 
   _this->_impl_.attachments_.MergeFrom(from._impl_.attachments_);
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
+  if (cached_has_bits & 0x0000000fu) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_author(from._internal_author());
     }
@@ -5297,7 +5467,10 @@ void DataMessage_Quote::MergeFrom(const DataMessage_Quote& from) {
       _this->_internal_set_text(from._internal_text());
     }
     if (cached_has_bits & 0x00000004u) {
-      _this->_impl_.id_ = from._impl_.id_;
+      _this->_impl_.msgtimestamp_ = from._impl_.msgtimestamp_;
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.msgid_ = from._impl_.msgid_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
@@ -5333,7 +5506,12 @@ void DataMessage_Quote::InternalSwap(DataMessage_Quote* other) {
       &_impl_.text_, lhs_arena,
       &other->_impl_.text_, rhs_arena
   );
-  swap(_impl_.id_, other->_impl_.id_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(DataMessage_Quote, _impl_.msgid_)
+      + sizeof(DataMessage_Quote::_impl_.msgid_)
+      - PROTOBUF_FIELD_OFFSET(DataMessage_Quote, _impl_.msgtimestamp_)>(
+          reinterpret_cast<char*>(&_impl_.msgtimestamp_),
+          reinterpret_cast<char*>(&other->_impl_.msgtimestamp_));
 }
 
 std::string DataMessage_Quote::GetTypeName() const {
@@ -5669,7 +5847,7 @@ std::string DataMessage_Preview::GetTypeName() const {
 class DataMessage_Reaction::_Internal {
  public:
   using HasBits = decltype(std::declval<DataMessage_Reaction>()._impl_._has_bits_);
-  static void set_has_id(HasBits* has_bits) {
+  static void set_has_msgtimestamp(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
   static void set_has_author(HasBits* has_bits) {
@@ -5679,10 +5857,13 @@ class DataMessage_Reaction::_Internal {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_action(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
+  }
+  static void set_has_msgid(HasBits* has_bits) {
     (*has_bits)[0] |= 8u;
   }
   static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x0000000d) ^ 0x0000000d) != 0;
+    return ((has_bits[0] & 0x00000015) ^ 0x00000015) != 0;
   }
 };
 
@@ -5700,7 +5881,8 @@ DataMessage_Reaction::DataMessage_Reaction(const DataMessage_Reaction& from)
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.author_){}
     , decltype(_impl_.emoji_){}
-    , decltype(_impl_.id_){}
+    , decltype(_impl_.msgtimestamp_){}
+    , decltype(_impl_.msgid_){}
     , decltype(_impl_.action_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -5720,9 +5902,9 @@ DataMessage_Reaction::DataMessage_Reaction(const DataMessage_Reaction& from)
     _this->_impl_.emoji_.Set(from._internal_emoji(), 
       _this->GetArenaForAllocation());
   }
-  ::memcpy(&_impl_.id_, &from._impl_.id_,
+  ::memcpy(&_impl_.msgtimestamp_, &from._impl_.msgtimestamp_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.action_) -
-    reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.action_));
+    reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.action_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.DataMessage.Reaction)
 }
 
@@ -5735,7 +5917,8 @@ inline void DataMessage_Reaction::SharedCtor(
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.author_){}
     , decltype(_impl_.emoji_){}
-    , decltype(_impl_.id_){uint64_t{0u}}
+    , decltype(_impl_.msgtimestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgid_){int64_t{0}}
     , decltype(_impl_.action_){0}
   };
   _impl_.author_.InitDefault();
@@ -5782,10 +5965,10 @@ void DataMessage_Reaction::Clear() {
       _impl_.emoji_.ClearNonDefaultToEmpty();
     }
   }
-  if (cached_has_bits & 0x0000000cu) {
-    ::memset(&_impl_.id_, 0, static_cast<size_t>(
+  if (cached_has_bits & 0x0000001cu) {
+    ::memset(&_impl_.msgtimestamp_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.action_) -
-        reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.action_));
+        reinterpret_cast<char*>(&_impl_.msgtimestamp_)) + sizeof(_impl_.action_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -5798,11 +5981,11 @@ const char* DataMessage_Reaction::_InternalParse(const char* ptr, ::_pbi::ParseC
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // required uint64 id = 1;
+      // required uint64 msgTimestamp = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _Internal::set_has_id(&has_bits);
-          _impl_.id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _Internal::set_has_msgtimestamp(&has_bits);
+          _impl_.msgtimestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -5838,6 +6021,15 @@ const char* DataMessage_Reaction::_InternalParse(const char* ptr, ::_pbi::ParseC
         } else
           goto handle_unusual;
         continue;
+      // optional sfixed64 msgId = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 41)) {
+          _Internal::set_has_msgid(&has_bits);
+          _impl_.msgid_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<int64_t>(ptr);
+          ptr += sizeof(int64_t);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5869,10 +6061,10 @@ uint8_t* DataMessage_Reaction::_InternalSerialize(
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  // required uint64 id = 1;
+  // required uint64 msgTimestamp = 1;
   if (cached_has_bits & 0x00000004u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_id(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_msgtimestamp(), target);
   }
 
   // required string author = 2;
@@ -5888,10 +6080,16 @@ uint8_t* DataMessage_Reaction::_InternalSerialize(
   }
 
   // required .SessionProtos.DataMessage.Reaction.Action action = 4;
-  if (cached_has_bits & 0x00000008u) {
+  if (cached_has_bits & 0x00000010u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       4, this->_internal_action(), target);
+  }
+
+  // optional sfixed64 msgId = 5;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteSFixed64ToArray(5, this->_internal_msgid(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -5913,9 +6111,9 @@ size_t DataMessage_Reaction::RequiredFieldsByteSizeFallback() const {
         this->_internal_author());
   }
 
-  if (_internal_has_id()) {
-    // required uint64 id = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_id());
+  if (_internal_has_msgtimestamp()) {
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
   }
 
   if (_internal_has_action()) {
@@ -5930,14 +6128,14 @@ size_t DataMessage_Reaction::ByteSizeLong() const {
 // @@protoc_insertion_point(message_byte_size_start:SessionProtos.DataMessage.Reaction)
   size_t total_size = 0;
 
-  if (((_impl_._has_bits_[0] & 0x0000000d) ^ 0x0000000d) == 0) {  // All required fields are present.
+  if (((_impl_._has_bits_[0] & 0x00000015) ^ 0x00000015) == 0) {  // All required fields are present.
     // required string author = 2;
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_author());
 
-    // required uint64 id = 1;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_id());
+    // required uint64 msgTimestamp = 1;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgtimestamp());
 
     // required .SessionProtos.DataMessage.Reaction.Action action = 4;
     total_size += 1 +
@@ -5956,6 +6154,11 @@ size_t DataMessage_Reaction::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_emoji());
+  }
+
+  // optional sfixed64 msgId = 5;
+  if (cached_has_bits & 0x00000008u) {
+    total_size += 1 + 8;
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -5980,7 +6183,7 @@ void DataMessage_Reaction::MergeFrom(const DataMessage_Reaction& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
+  if (cached_has_bits & 0x0000001fu) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_author(from._internal_author());
     }
@@ -5988,9 +6191,12 @@ void DataMessage_Reaction::MergeFrom(const DataMessage_Reaction& from) {
       _this->_internal_set_emoji(from._internal_emoji());
     }
     if (cached_has_bits & 0x00000004u) {
-      _this->_impl_.id_ = from._impl_.id_;
+      _this->_impl_.msgtimestamp_ = from._impl_.msgtimestamp_;
     }
     if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.msgid_ = from._impl_.msgid_;
+    }
+    if (cached_has_bits & 0x00000010u) {
       _this->_impl_.action_ = from._impl_.action_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -6027,9 +6233,9 @@ void DataMessage_Reaction::InternalSwap(DataMessage_Reaction* other) {
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(DataMessage_Reaction, _impl_.action_)
       + sizeof(DataMessage_Reaction::_impl_.action_)
-      - PROTOBUF_FIELD_OFFSET(DataMessage_Reaction, _impl_.id_)>(
-          reinterpret_cast<char*>(&_impl_.id_),
-          reinterpret_cast<char*>(&other->_impl_.id_));
+      - PROTOBUF_FIELD_OFFSET(DataMessage_Reaction, _impl_.msgtimestamp_)>(
+          reinterpret_cast<char*>(&_impl_.msgtimestamp_),
+          reinterpret_cast<char*>(&other->_impl_.msgtimestamp_));
 }
 
 std::string DataMessage_Reaction::GetTypeName() const {

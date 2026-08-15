@@ -39,10 +39,18 @@ message TypingMessage {
 }
 
 message UnsendRequest {
+    // The message to delete; see Reaction.msgTimestamp, which this mirrors.
+    //
+    // Matching this on the timestamp alone is the most damaging instance of that problem: deleting
+    // the wrong one of several messages sent in the same millisecond destroys content the user did
+    // not ask to remove, and those are exactly the messages a user deletes -- someone pasting
+    // several lines at once and then thinking better of it.  Prefer leaving a request unresolved
+    // over deleting a message you are not sure of.
     // @required
-    required uint64 timestamp = 1;
+    required uint64   msgTimestamp = 1;
     // @required
-    required string author    = 2;
+    required string   author       = 2;
+    optional sfixed64 msgId        = 3;
 }
 
 message MessageRequestResponse {
@@ -195,12 +203,32 @@ message DataExtractionNotification {
 
   enum Type {
     SCREENSHOT  = 1;
-    MEDIA_SAVED = 2; // timestamp
+    MEDIA_SAVED = 2;
   }
 
   // @required
   required Type   type      = 1;
-  optional uint64 timestamp = 2;
+
+  // DEPRECATED: do not write, do not read.  Replaced by msgTimestamp and msgId below.
+  //
+  // This was meant to be the referenced message's timestamp, but nothing ever said so and the three
+  // clients disagreed: session-ios set the message's timestamp, session-android set the *current*
+  // time, and session-desktop set one of several things depending on the path -- the message's, the
+  // server's, the received-at time, or zero.  A receiver had no way to tell which it had been
+  // given, so no value here could be interpreted, not even to test whether it matched a message
+  // already held.
+  optional uint64   timestamp    = 2;
+
+  // The message whose media this is about; see Reaction.msgTimestamp, which these mirror.  Both are
+  // needed to resolve one: a timestamp alone is the ambiguity above, and msgId alone is far too
+  // small to identify a message on its own.
+  optional uint64   msgTimestamp = 3;
+  optional sfixed64 msgId        = 4;
+
+  // Which of that message's attachments, by position in its `attachments` list.  Absent on a
+  // SCREENSHOT, which is about the message rather than any one file, and absent from a MEDIA_SAVED
+  // that saved several -- so its absence means "some of them", not "the first one".
+  optional uint32   attIndex     = 5;
 }
 
 message LokiProfile {
@@ -229,12 +257,14 @@ message DataMessage {
       optional uint32            flags       = 4;
     }
 
+    // The message being quoted; see Reaction.msgTimestamp, which this mirrors exactly.
     // @required
-    required uint64            id          = 1;
+    required uint64            msgTimestamp = 1;
     // @required
-    required string            author      = 2;
-    optional string            text        = 3;
-    repeated QuotedAttachment  attachments = 4;
+    required string            author       = 2;
+    optional string            text         = 3;
+    repeated QuotedAttachment  attachments  = 4;
+    optional sfixed64          msgId        = 5;
   }
 
   message Preview {
@@ -249,13 +279,20 @@ message DataMessage {
         REACT = 0;
         REMOVE = 1;
     }
+    // The message being reacted to: its sigTimestamp, and -- from senders that set one -- its
+    // msgId.  Match on both where both are present; a timestamp alone cannot tell apart messages
+    // sent in the same millisecond, which is what msgId exists to fix.  See Content.msgId.
+    //
+    // Named msgTimestamp rather than `id` because it is not one: it is the referenced message's
+    // time, and calling it `id` next to a field actually called msgId would mislead every reader.
     // @required
-    required uint64 id        = 1; // Message timestamp
+    required uint64   msgTimestamp = 1;
     // @required
-    required string author    = 2;
-    optional string emoji     = 3;
+    required string   author       = 2;
+    optional string   emoji        = 3;
     // @required
-    required Action action    = 4;
+    required Action   action       = 4;
+    optional sfixed64 msgId        = 5;
   }
 
   message OpenGroupInvitation {
