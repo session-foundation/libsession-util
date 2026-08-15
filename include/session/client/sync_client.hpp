@@ -1,5 +1,6 @@
 #pragma once
 
+#include <future>
 #include <oxen/quic/loop.hpp>
 #include <session/client.hpp>
 
@@ -85,6 +86,33 @@ class SyncClient : public Client {
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload = nullptr) {
         return core.loop().call_get([&] { return _retry_send(message_id, std::move(on_upload)); });
+    }
+
+    /// Unlike the rest of these, this waits for the whole operation and not merely its start: a
+    /// save that returned as soon as the download began would tell a synchronous caller nothing
+    /// they could use.  It returns when the file is on disk, and throws if it did not get there.
+    ///
+    /// Note this is the one wrapper that waits on the *callback* rather than on Core's loop, so it
+    /// deadlocks if a dispatcher is set that posts back to this thread.  Not a combination that
+    /// arises in practice -- an application with its own loop wants the asynchronous form -- but
+    /// SyncClient with a dispatcher is a thing that can be typed.
+    void save_attachment(
+            int64_t message_id,
+            size_t index,
+            std::filesystem::path dest,
+            std::function<
+                    void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
+                    on_progress = nullptr) {
+        std::promise<std::optional<std::string>> done;
+        auto waiter = done.get_future();
+        Client::save_attachment(
+                message_id,
+                index,
+                std::move(dest),
+                std::move(on_progress),
+                [&done](std::optional<std::string> error) { done.set_value(std::move(error)); });
+        if (auto error = waiter.get())
+            throw std::runtime_error{*error};
     }
 };
 

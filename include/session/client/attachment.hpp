@@ -13,6 +13,12 @@ namespace session::client {
 /// merely failed.
 constexpr int ATTACHMENT_FILE_MISSING = -20001;
 
+/// Reported through save_attachment's progress handler when the file arrived but could not be
+/// turned back into the file it claims to be: it failed to authenticate, its sender described it
+/// wrongly, or it could not be written.  Distinct from a transfer failure, and unlike one it is not
+/// worth retrying -- the bytes on the file server will be the same bytes next time.
+constexpr int ATTACHMENT_UNREADABLE = -20002;
+
 /// A file to attach to an outgoing message.  Attaching costs nothing: the file is read, encrypted
 /// and uploaded when the message is sent, not when it is attached, so a caller can hold these
 /// against a draft for as long as the user takes to write it.
@@ -38,6 +44,11 @@ struct OutgoingAttachment {
 
     /// Pixel dimensions, for visual media.  Recipients use them to lay out a placeholder before
     /// the file itself has been fetched, so supplying them avoids the layout jumping.
+    ///
+    /// TODO: these are the caller's to supply because libsession cannot read them -- deriving them
+    /// means either an image library or hand-written header parsing of untrusted files.  Worth
+    /// revisiting if libsession takes on an image dependency for other reasons (thumbnailing, say),
+    /// at which point every client stops needing its own.
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
 };

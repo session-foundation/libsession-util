@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/quic/loop.hpp>
 #include <session/attachments.hpp>
@@ -526,6 +527,40 @@ void Client::send_message(
         std::function<void(std::optional<std::string>, int64_t)> cb) {
     _require_dm(id);
     _async([this, id, body = std::string{body}] { return _send_message(id, body); }, std::move(cb));
+}
+
+void Client::save_attachment(
+        int64_t message_id,
+        size_t index,
+        std::filesystem::path dest,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+        failable_function<void()> cb) {
+
+    // Checked on the calling thread so a caller's own mistake surfaces at the call site, where they
+    // still have a stack to make sense of it.
+    if (std::filesystem::is_directory(dest))
+        throw std::invalid_argument{
+                "save_attachment: {} is a directory"_format(dest.string())};
+    if (auto dir = dest.parent_path(); !dir.empty() && !std::filesystem::is_directory(dir))
+        throw std::invalid_argument{
+                "save_attachment: {} does not exist"_format(dir.string())};
+
+    // Not _async: what that reports is the *start* of the transfer, and the answer a caller wants
+    // is whether the file arrived, which is minutes away.  So the callback is carried down to the
+    // download's own completion, and only the failures that happen before it starts come back here.
+    loop.call([this,
+               message_id,
+               index,
+               dest = std::move(dest),
+               on_progress = std::move(on_progress),
+               cb]() mutable {
+        try {
+            _save_attachment(message_id, index, std::move(dest), std::move(on_progress), cb);
+        } catch (const std::exception& e) {
+            log_operation_failure(e);
+            _report(cb, std::optional{std::string{e.what()}});
+        }
+    });
 }
 
 // -- Conversations ----------------------------------------------------------------------------
@@ -1324,6 +1359,210 @@ bool Client::_retry_send(
     return true;
 }
 
+// Where a download is written until it is known to be whole.  A save that dies partway leaves this
+// rather than something that looks like the file the user asked for.
+static std::filesystem::path partial_path(const std::filesystem::path& dest) {
+    auto p = dest;
+    p += ".part";
+    return p;
+}
+
+void Client::_save_attachment(
+        int64_t message_id,
+        size_t index,
+        std::filesystem::path dest,
+        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+        failable_function<void()> cb) {
+
+    std::optional<std::string> url;
+    std::vector<std::byte> key, digest;
+    std::optional<int64_t> claimed_size;
+    {
+        auto c = core.database().conn();
+        // `key` and `digest` vary in length -- 32 bytes for the stream scheme, 64 for legacy -- so
+        // they are read as blob views from a live statement and copied out before it steps.
+        auto st = c.prepared_bind(
+                "SELECT url, key, digest, size FROM message_attachments WHERE message = ? AND idx"
+                " = ?",
+                message_id,
+                static_cast<int64_t>(index));
+        if (!st->executeStep())
+            throw std::runtime_error{
+                    "Message {} has no attachment {}"_format(message_id, index)};
+
+        auto [u, k, d, sz] = sqlite::get<
+                std::optional<std::string>,
+                std::optional<sqlite::blob>,
+                std::optional<sqlite::blob>,
+                std::optional<int64_t>>(*st);
+        url = std::move(u);
+        if (k)
+            key.assign(k->begin(), k->end());
+        if (d)
+            digest.assign(d->begin(), d->end());
+        claimed_size = sz;
+    }
+
+    if (!url)
+        throw std::runtime_error{
+                "Attachment {} of message {} cannot be fetched: its sender gave no url"_format(
+                        index, message_id)};
+
+    auto info = network::file_server::parse_download_url(*url);
+    if (!info)
+        throw std::runtime_error{
+                "Attachment {} of message {} cannot be fetched: {} is not a download url"_format(
+                        index, message_id, *url)};
+
+    auto net = core.network();
+    if (!net)
+        throw std::runtime_error{"Cannot fetch an attachment: no network is attached"};
+
+    bool stream = info->wants_stream_decryption;
+    if (stream ? key.size() != attachment::ENCRYPT_KEY_SIZE
+               : key.size() != attachment::LEGACY_KEY_SIZE)
+        throw std::runtime_error{
+                "Attachment {} of message {} cannot be decrypted: a {} attachment needs a {}-byte "
+                "key and its sender gave {}"_format(
+                        index,
+                        message_id,
+                        stream ? "stream-encrypted" : "legacy",
+                        stream ? attachment::ENCRYPT_KEY_SIZE : attachment::LEGACY_KEY_SIZE,
+                        key.size())};
+    if (!stream && digest.size() != attachment::LEGACY_DIGEST_SIZE)
+        throw std::runtime_error{
+                "Attachment {} of message {} cannot be authenticated: a legacy attachment needs a "
+                "{}-byte digest and its sender gave {}"_format(
+                        index, message_id, attachment::LEGACY_DIGEST_SIZE, digest.size())};
+
+    // Shared with the network's thread, where every callback below runs.  The stream case writes as
+    // it decrypts and so never holds the file; the legacy case has to accumulate, because its MAC
+    // and digest cover the whole ciphertext and neither can be checked until all of it is here.
+    struct SaveState {
+        std::filesystem::path dest, partial;
+        std::ofstream out;
+        std::vector<std::byte> buffered;
+        std::optional<attachment::Decryptor> decryptor;
+        std::optional<std::string> failure;
+        int64_t received = 0;
+    };
+    auto state = std::make_shared<SaveState>();
+    state->dest = std::move(dest);
+    state->partial = partial_path(state->dest);
+    state->out.open(state->partial, std::ios::binary | std::ios::trunc);
+    if (!state->out)
+        throw std::runtime_error{"Cannot write {}"_format(state->partial.string())};
+
+    if (stream) {
+        std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
+        std::ranges::copy(key, k.begin());
+        state->decryptor.emplace(k, [state](std::span<const std::byte> plain) {
+            state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
+        });
+    }
+
+    auto throttle = std::make_shared<update_throttle>(_high_freq_dispatch_interval);
+    auto report = [this, on_progress, index](int64_t done, int64_t total, std::optional<int> r) {
+        if (on_progress)
+            _dispatch_out([on_progress, index, done, total, r] {
+                on_progress(index, done, total, r);
+            });
+    };
+    // As uploads do: the 0/0 that says this one has started, before the size is known.
+    report(0, 0, std::nullopt);
+
+    network::DownloadRequest req;
+    req.download_url = *url;
+    req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
+    req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
+
+    req.on_data = [state, stream, report, throttle](
+                          const network::file_metadata& meta, std::span<const std::byte> data) {
+        if (state->failure)
+            return;
+        try {
+            state->received += static_cast<int64_t>(data.size());
+
+            // Enforced against bytes actually arriving rather than against anything the sender or
+            // the server claimed, so an over-long transfer is cut off rather than accumulated.
+            if (state->received > static_cast<int64_t>(attachment::LEGACY_MAX_ENCRYPTED_SIZE)) {
+                state->failure = "attachment is larger than the file server's maximum";
+                return;
+            }
+
+            if (stream) {
+                if (!state->decryptor->update(data))
+                    state->failure = "decryption failed";
+            } else
+                state->buffered.insert(state->buffered.end(), data.begin(), data.end());
+
+            if (throttle->allow())
+                report(state->received, meta.size, std::nullopt);
+        } catch (const std::exception& e) {
+            state->failure = e.what();
+        }
+    };
+
+    req.on_complete = [this,
+                       state,
+                       stream,
+                       report,
+                       cb = std::move(cb),
+                       key = std::move(key),
+                       digest = std::move(digest),
+                       claimed_size](
+                              std::variant<network::file_metadata, int16_t> result, bool timeout) {
+        auto fail = [&](std::string why, int code) {
+            state->out.close();
+            std::error_code ec;
+            std::filesystem::remove(state->partial, ec);
+            report(0, 0, code);
+            _report(cb, std::optional{std::move(why)});
+        };
+
+        if (auto* err = std::get_if<int16_t>(&result))
+            return fail(
+                    timeout ? "attachment download timed out"s
+                            : "attachment download failed with status {}"_format(*err),
+                    *err);
+
+        if (state->failure)
+            return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
+
+        try {
+            if (stream) {
+                if (!state->decryptor->finalize())
+                    throw std::runtime_error{"attachment ended mid-stream"};
+            } else {
+                std::array<std::byte, attachment::LEGACY_KEY_SIZE> k;
+                std::array<std::byte, attachment::LEGACY_DIGEST_SIZE> d;
+                std::ranges::copy(key, k.begin());
+                std::ranges::copy(digest, d.begin());
+                auto plain = attachment::legacy_decrypt(
+                        state->buffered,
+                        k,
+                        d,
+                        claimed_size ? static_cast<size_t>(*claimed_size) : 0);
+                state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
+            }
+
+            state->out.close();
+            if (!state->out)
+                throw std::runtime_error{"writing {} failed"_format(state->partial.string())};
+
+            // Only now does it get the name the caller asked for.
+            std::filesystem::rename(state->partial, state->dest);
+        } catch (const std::exception& e) {
+            return fail(e.what(), ATTACHMENT_UNREADABLE);
+        }
+
+        report(state->received, state->received, 0);
+        _report(cb, std::optional<std::string>{});
+    };
+
+    net->download(std::move(req));
+}
+
 void Client::_finish_attachment_send(int64_t client_id) {
     auto self = core.globals.session_id();
 
@@ -1471,6 +1710,51 @@ void Client::_fail_attachment_send(int64_t client_id, bool permanent) {
 
 // -- Core event handling ----------------------------------------------------------------------
 
+// Records what an arriving message says about the files it carries.  Nothing is fetched here: an
+// AttachmentPointer is a url and a key, and whether to spend bandwidth on it is the application's
+// decision, made later through save_attachment.
+//
+// Everything the sender listed gets a row, including a pointer too malformed to ever fetch.  The
+// alternative -- dropping the unusable ones -- would make a message of three files look like a
+// message of two, which is a worse lie than a row that cannot be saved: the count and the ordering
+// are what a reader is being shown, and they should match what was actually sent.
+static void store_incoming_attachments(
+        sqlite::Connection& c, int64_t message_id, const SessionProtos::DataMessage& data) {
+    for (int i = 0; i < data.attachments_size(); i++) {
+        const auto& ptr = data.attachments(i);
+
+        // The key is 32 bytes for the stream scheme and 64 for the legacy one; anything else cannot
+        // decrypt, but is still stored so the attachment is at least visible.
+        std::optional<std::span<const std::byte>> key;
+        if (ptr.has_key())
+            key = to_span(ptr.key());
+
+        std::optional<std::span<const std::byte>> digest;
+        if (ptr.has_digest())
+            digest = to_span(ptr.digest());
+
+        c.prepared_exec(
+                R"(
+            INSERT INTO message_attachments
+                (message, idx, url, key, digest, size, content_type, filename, caption, flags,
+                 width, height)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        )",
+                message_id,
+                static_cast<int64_t>(i),
+                ptr.has_url() ? std::optional{ptr.url()} : std::nullopt,
+                key,
+                digest,
+                ptr.has_size() ? std::optional<int64_t>{ptr.size()} : std::nullopt,
+                ptr.has_contenttype() ? std::optional{ptr.contenttype()} : std::nullopt,
+                ptr.has_filename() ? std::optional{ptr.filename()} : std::nullopt,
+                ptr.has_caption() ? std::optional{ptr.caption()} : std::nullopt,
+                static_cast<int>(ptr.flags()),
+                ptr.has_width() ? std::optional<int64_t>{ptr.width()} : std::nullopt,
+                ptr.has_height() ? std::optional<int64_t>{ptr.height()} : std::nullopt);
+    }
+}
+
 void Client::_on_message_received(core::ReceivedMessage&& msg) {
     SessionProtos::Content content;
     if (!content.ParseFromArray(msg.content.data(), static_cast<int>(msg.content.size()))) {
@@ -1483,7 +1767,10 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     if (!content.has_datamessage())
         return;
     const auto& data = content.datamessage();
-    if (data.body().empty())
+
+    // A message of nothing but files is an ordinary message here: what makes something not history
+    // is having no content of either kind, which is what the callbacks above are.
+    if (data.body().empty() && data.attachments_size() == 0)
         return;
 
     // A one-to-one message is stored on both participants' swarms, so our own sent messages come
@@ -1573,6 +1860,8 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                     "INSERT INTO message_raw_content (message, content) VALUES (?, ?)",
                     client_id,
                     std::span<const std::byte>{msg.content});
+
+            store_incoming_attachments(c, client_id, data);
 
             // Whether an arrival is unread is this layer's decision, not the trigger's.  Today
             // that is just "newer than the watermark"; mutes and message requests will land here.

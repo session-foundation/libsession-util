@@ -95,7 +95,8 @@ void deliver(
         sys_ms ts,
         std::string hash,
         std::string_view display_name = "",
-        std::optional<b33> sync_target = std::nullopt) {
+        std::optional<b33> sync_target = std::nullopt,
+        const std::function<void(SessionProtos::DataMessage&)>& decorate = nullptr) {
     SessionProtos::Content content;
     content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()));
     auto* data = content.mutable_datamessage();
@@ -104,6 +105,8 @@ void deliver(
         data->mutable_profile()->set_displayname(std::string{display_name});
     if (sync_target)
         data->set_synctarget(oxenc::to_hex(sync_target->begin(), sync_target->end()));
+    if (decorate)
+        decorate(*data);
 
     auto plaintext = content.SerializeAsString();
     auto encoded = encode_dm_v1(
@@ -1056,6 +1059,86 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
     (*to_self)->callback(false, false, 500, {}, "nope");
     CHECK(c->message(id)->send_state == SendState::sent);
     CHECK(c->message(id)->sync_send_state == SendState::failed);
+}
+
+TEST_CASE("Client: an arriving message records the files it names", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+
+    // `id` is deprecated in favour of `url` but is still `required` by the protobuf, so every
+    // pointer carries one whether or not anything reads it.
+    uint64_t next_id = 111;
+    auto add = [&next_id](
+                       SessionProtos::DataMessage& data,
+                       std::string_view url,
+                       size_t key_len,
+                       auto&& fill) {
+        auto* a = data.add_attachments();
+        a->set_id(next_id++);
+        a->set_url(std::string{url});
+        a->set_key(std::string(key_len, 'k'));
+        fill(a);
+    };
+
+    // Three attachments and no body at all: the case that used to be discarded outright, since a
+    // message was only history if it had text.
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                // Stream-encrypted, as anything we send is: 32-byte key, `d` in the url.
+                add(data, "http://fs.example/file/111#d", 32, [](auto* a) {
+                    a->set_size(4321);
+                    a->set_contenttype("image/png");
+                    a->set_filename("kitten.png");
+                    a->set_width(640);
+                    a->set_height(480);
+                });
+                // Legacy, which is what every current client actually sends: 64-byte key and a
+                // digest, and no fragment on the url.
+                add(data, "http://fs.example/file/222", 64, [](auto* a) {
+                    a->set_digest(std::string(32, 'd'));
+                    a->set_size(99);
+                    a->set_contenttype("application/pdf");
+                    a->set_filename("invoice.pdf");
+                    a->set_caption("last month");
+                    a->set_flags(1);
+                });
+                // A pointer with no url at all: unfetchable, but still one of three files the
+                // sender said were here, so it is not silently dropped.
+                add(data, "", 32, [](auto* a) { a->clear_url(); });
+            });
+    sync(*c);
+
+    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    REQUIRE(msgs.size() == 1);
+    const auto& m = msgs[0];
+    CHECK(m.body.empty());
+    CHECK_FALSE(m.outgoing);
+    REQUIRE(m.attachments.size() == 3);
+
+    CHECK(m.attachments[0].index == 0);
+    CHECK(m.attachments[0].content_type == "image/png");
+    CHECK(m.attachments[0].filename == "kitten.png");
+    CHECK(m.attachments[0].size == 4321);
+    CHECK(m.attachments[0].width == 640);
+    CHECK(m.attachments[0].height == 480);
+    CHECK_FALSE(m.attachments[0].voice_message);
+    // Always true on an incoming attachment: the file server is where it came from.
+    CHECK(m.attachments[0].uploaded);
+
+    CHECK(m.attachments[1].caption == "last month");
+    CHECK(m.attachments[1].voice_message);
+    CHECK(m.attachments[1].uploaded);
+
+    // The unusable one still occupies its position, so the indices keep meaning what the sender
+    // meant by them.
+    CHECK(m.attachments[2].index == 2);
+    CHECK_FALSE(m.attachments[2].uploaded);
 }
 
 TEST_CASE("Client: a message reports the attachments it carries", "[client][send][attachments]") {

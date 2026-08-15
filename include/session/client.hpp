@@ -283,6 +283,43 @@ class Client {
                     on_upload,
             failable_function<void(bool started)> cb);
 
+    /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
+    ///
+    /// Nothing is downloaded until this is called.  An arriving message records where its files are
+    /// and what they are called, and stops there: whether a file is worth the bandwidth is the
+    /// application's decision, and on a metered connection it is the user's.
+    ///
+    /// `dest` is the caller's choice and is not remembered.  Where a file went is the application's
+    /// business — it chose the location and can move it afterwards — so nothing here would stay
+    /// true.  Saving the same attachment twice to two places is therefore fine and means what it
+    /// says.  The file is written whole or not at all: it lands at a temporary name beside `dest`
+    /// and is renamed only once it has been decrypted and verified, so an interrupted save leaves
+    /// no half-file that looks finished.
+    ///
+    /// `on_progress` reports as `send_message`'s `on_upload` does and is indexed the same way, so
+    /// a display built for sending works unchanged in the other direction: `result` unset means
+    /// under way with `done`/`total` in encrypted bytes, `result == 0` means written and verified,
+    /// and anything else is the failure's status code.
+    ///
+    /// Which of Session's two attachment encryptions applies is read from the url, so a caller
+    /// neither chooses nor needs to know: current clients still send the legacy scheme, and files we
+    /// send use the stream one.
+    ///
+    /// The error a failure reports is worth showing rather than a generic one: an attachment that
+    /// the file server no longer holds, one whose sender described it wrongly, and one that failed
+    /// to authenticate are different problems, and only the first is worth retrying.
+    ///
+    /// @throws std::invalid_argument if `dest` names a directory or its parent does not exist;
+    /// thrown on the calling thread, before anything is fetched.
+    void save_attachment(
+            int64_t message_id,
+            size_t index,
+            std::filesystem::path dest,
+            std::function<
+                    void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
+                    on_progress,
+            failable_function<void()> cb);
+
     /// Sets, replaces or removes the dispatcher every handler is delivered through, which a caller
     /// whose loop does not exist yet when the Client is built needs: an application typically opens
     /// its database, constructs this, and only then creates the window that owns the loop.
@@ -403,6 +440,16 @@ class Client {
     bool _retry_send(
             int64_t client_id,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+
+    // Starts the download behind save_attachment.  Everything after the row lookup happens off the
+    // loop, on the network's thread: the file is decrypted and written there, and nothing about it
+    // is recorded, so this is the one attachment path that never comes back to the database.
+    void _save_attachment(
+            int64_t message_id,
+            size_t index,
+            std::filesystem::path dest,
+            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+            failable_function<void()> cb);
 
     // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
     // copy for our own swarm.  Shared by the plain and attachment-carrying sends.
