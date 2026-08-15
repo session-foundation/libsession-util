@@ -192,13 +192,6 @@ message CallMessage {
     required string uuid            = 5;
 }
 
-message KeyPair {
-  // @required
-  required bytes publicKey  = 1;
-  // @required
-  required bytes privateKey = 2;
-}
-
 message DataExtractionNotification {
 
   enum Type {
@@ -225,10 +218,17 @@ message DataExtractionNotification {
   optional uint64   msgTimestamp = 3;
   optional sfixed64 msgId        = 4;
 
-  // Which of that message's attachments, by position in its `attachments` list.  Absent on a
-  // SCREENSHOT, which is about the message rather than any one file, and absent from a MEDIA_SAVED
-  // that saved several -- so its absence means "some of them", not "the first one".
-  optional uint32   attIndex     = 5;
+  // Which of that message's attachments this is about:
+  //
+  //   >= 0  -- that one, by position in the message's `attachments` list
+  //   -1    -- all of them, saved together, which is what saving from a gallery view does
+  //   absent -- not stated.  A SCREENSHOT is about the message rather than any file, and a sender
+  //             predating this field says nothing either way; neither may be read as "the first
+  //             one".
+  //
+  // sint32 rather than int32 because -1 is a common value here and proto2 sign-extends a negative
+  // int32 to ten bytes, where zigzag encodes it in one.
+  optional sint32   attIndex     = 5;
 }
 
 message LokiProfile {
@@ -333,7 +333,19 @@ message ReceiptMessage {
 
   // @required
   required Type   type      = 1;
+
+  // The messages being acknowledged, by their timestamps -- which do not identify them: several
+  // sent in the same millisecond share one.  See Reaction.msgTimestamp.
   repeated uint64 timestamp = 2;
+
+  // Their msgIds, positionally aligned with `timestamp`: entry i belongs to timestamp i.  A batch
+  // can mix messages that carry a msgId with ones that do not, so entries are never skipped -- 0
+  // means "this one has none", which a real msgId is with probability 2^-64.
+  //
+  // A receiver that finds these two of different lengths must ignore this field entirely and match
+  // on timestamps alone, rather than pairing up the prefix: a sender that got the alignment wrong
+  // has no correct prefix to salvage.
+  repeated sfixed64 msgId   = 3 [packed=true];
 }
 
 message AttachmentPointer {

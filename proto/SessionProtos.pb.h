@@ -103,9 +103,6 @@ extern GroupUpdateMessageDefaultTypeInternal _GroupUpdateMessage_default_instanc
 class GroupUpdatePromoteMessage;
 struct GroupUpdatePromoteMessageDefaultTypeInternal;
 extern GroupUpdatePromoteMessageDefaultTypeInternal _GroupUpdatePromoteMessage_default_instance_;
-class KeyPair;
-struct KeyPairDefaultTypeInternal;
-extern KeyPairDefaultTypeInternal _KeyPair_default_instance_;
 class LokiProfile;
 struct LokiProfileDefaultTypeInternal;
 extern LokiProfileDefaultTypeInternal _LokiProfile_default_instance_;
@@ -152,7 +149,6 @@ template<> ::SessionProtos::GroupUpdateMemberLeftMessage* Arena::CreateMaybeMess
 template<> ::SessionProtos::GroupUpdateMemberLeftNotificationMessage* Arena::CreateMaybeMessage<::SessionProtos::GroupUpdateMemberLeftNotificationMessage>(Arena*);
 template<> ::SessionProtos::GroupUpdateMessage* Arena::CreateMaybeMessage<::SessionProtos::GroupUpdateMessage>(Arena*);
 template<> ::SessionProtos::GroupUpdatePromoteMessage* Arena::CreateMaybeMessage<::SessionProtos::GroupUpdatePromoteMessage>(Arena*);
-template<> ::SessionProtos::KeyPair* Arena::CreateMaybeMessage<::SessionProtos::KeyPair>(Arena*);
 template<> ::SessionProtos::LokiProfile* Arena::CreateMaybeMessage<::SessionProtos::LokiProfile>(Arena*);
 template<> ::SessionProtos::MessageRequestResponse* Arena::CreateMaybeMessage<::SessionProtos::MessageRequestResponse>(Arena*);
 template<> ::SessionProtos::ProMessage* Arena::CreateMaybeMessage<::SessionProtos::ProMessage>(Arena*);
@@ -1933,176 +1929,6 @@ class CallMessage final :
 };
 // -------------------------------------------------------------------
 
-class KeyPair final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.KeyPair) */ {
- public:
-  inline KeyPair() : KeyPair(nullptr) {}
-  ~KeyPair() override;
-  explicit PROTOBUF_CONSTEXPR KeyPair(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  KeyPair(const KeyPair& from);
-  KeyPair(KeyPair&& from) noexcept
-    : KeyPair() {
-    *this = ::std::move(from);
-  }
-
-  inline KeyPair& operator=(const KeyPair& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline KeyPair& operator=(KeyPair&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  inline const std::string& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
-  }
-  inline std::string* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<std::string>();
-  }
-
-  static const KeyPair& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const KeyPair* internal_default_instance() {
-    return reinterpret_cast<const KeyPair*>(
-               &_KeyPair_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    6;
-
-  friend void swap(KeyPair& a, KeyPair& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(KeyPair* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(KeyPair* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  KeyPair* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<KeyPair>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const KeyPair& from);
-  void MergeFrom(const KeyPair& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(KeyPair* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "SessionProtos.KeyPair";
-  }
-  protected:
-  explicit KeyPair(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kPublicKeyFieldNumber = 1,
-    kPrivateKeyFieldNumber = 2,
-  };
-  // required bytes publicKey = 1;
-  bool has_publickey() const;
-  private:
-  bool _internal_has_publickey() const;
-  public:
-  void clear_publickey();
-  const std::string& publickey() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_publickey(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_publickey();
-  PROTOBUF_NODISCARD std::string* release_publickey();
-  void set_allocated_publickey(std::string* publickey);
-  private:
-  const std::string& _internal_publickey() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_publickey(const std::string& value);
-  std::string* _internal_mutable_publickey();
-  public:
-
-  // required bytes privateKey = 2;
-  bool has_privatekey() const;
-  private:
-  bool _internal_has_privatekey() const;
-  public:
-  void clear_privatekey();
-  const std::string& privatekey() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_privatekey(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_privatekey();
-  PROTOBUF_NODISCARD std::string* release_privatekey();
-  void set_allocated_privatekey(std::string* privatekey);
-  private:
-  const std::string& _internal_privatekey() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_privatekey(const std::string& value);
-  std::string* _internal_mutable_privatekey();
-  public:
-
-  // @@protoc_insertion_point(class_scope:SessionProtos.KeyPair)
- private:
-  class _Internal;
-
-  // helper for ByteSizeLong()
-  size_t RequiredFieldsByteSizeFallback() const;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr publickey_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr privatekey_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_SessionProtos_2eproto;
-};
-// -------------------------------------------------------------------
-
 class DataExtractionNotification final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataExtractionNotification) */ {
  public:
@@ -2149,7 +1975,7 @@ class DataExtractionNotification final :
                &_DataExtractionNotification_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    6;
 
   friend void swap(DataExtractionNotification& a, DataExtractionNotification& b) {
     a.Swap(&b);
@@ -2284,17 +2110,17 @@ class DataExtractionNotification final :
   void _internal_set_msgid(int64_t value);
   public:
 
-  // optional uint32 attIndex = 5;
+  // optional sint32 attIndex = 5;
   bool has_attindex() const;
   private:
   bool _internal_has_attindex() const;
   public:
   void clear_attindex();
-  uint32_t attindex() const;
-  void set_attindex(uint32_t value);
+  int32_t attindex() const;
+  void set_attindex(int32_t value);
   private:
-  uint32_t _internal_attindex() const;
-  void _internal_set_attindex(uint32_t value);
+  int32_t _internal_attindex() const;
+  void _internal_set_attindex(int32_t value);
   public:
 
   // required .SessionProtos.DataExtractionNotification.Type type = 1;
@@ -2323,7 +2149,7 @@ class DataExtractionNotification final :
     uint64_t timestamp_;
     uint64_t msgtimestamp_;
     int64_t msgid_;
-    uint32_t attindex_;
+    int32_t attindex_;
     int type_;
   };
   union { Impl_ _impl_; };
@@ -2377,7 +2203,7 @@ class LokiProfile final :
                &_LokiProfile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    7;
 
   friend void swap(LokiProfile& a, LokiProfile& b) {
     a.Swap(&b);
@@ -2559,7 +2385,7 @@ class DataMessage_Quote_QuotedAttachment final :
                &_DataMessage_Quote_QuotedAttachment_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    8;
 
   friend void swap(DataMessage_Quote_QuotedAttachment& a, DataMessage_Quote_QuotedAttachment& b) {
     a.Swap(&b);
@@ -2785,7 +2611,7 @@ class DataMessage_Quote final :
                &_DataMessage_Quote_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    9;
 
   friend void swap(DataMessage_Quote& a, DataMessage_Quote& b) {
     a.Swap(&b);
@@ -3007,7 +2833,7 @@ class DataMessage_Preview final :
                &_DataMessage_Preview_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    10;
 
   friend void swap(DataMessage_Preview& a, DataMessage_Preview& b) {
     a.Swap(&b);
@@ -3194,7 +3020,7 @@ class DataMessage_Reaction final :
                &_DataMessage_Reaction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    11;
 
   friend void swap(DataMessage_Reaction& a, DataMessage_Reaction& b) {
     a.Swap(&b);
@@ -3435,7 +3261,7 @@ class DataMessage_OpenGroupInvitation final :
                &_DataMessage_OpenGroupInvitation_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    12;
 
   friend void swap(DataMessage_OpenGroupInvitation& a, DataMessage_OpenGroupInvitation& b) {
     a.Swap(&b);
@@ -3605,7 +3431,7 @@ class DataMessage final :
                &_DataMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    13;
 
   friend void swap(DataMessage& a, DataMessage& b) {
     a.Swap(&b);
@@ -4006,7 +3832,7 @@ class ReceiptMessage final :
                &_ReceiptMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    14;
 
   friend void swap(ReceiptMessage& a, ReceiptMessage& b) {
     a.Swap(&b);
@@ -4097,6 +3923,7 @@ class ReceiptMessage final :
 
   enum : int {
     kTimestampFieldNumber = 2,
+    kMsgIdFieldNumber = 3,
     kTypeFieldNumber = 1,
   };
   // repeated uint64 timestamp = 2;
@@ -4120,6 +3947,28 @@ class ReceiptMessage final :
       timestamp() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint64_t >*
       mutable_timestamp();
+
+  // repeated sfixed64 msgId = 3 [packed = true];
+  int msgid_size() const;
+  private:
+  int _internal_msgid_size() const;
+  public:
+  void clear_msgid();
+  private:
+  int64_t _internal_msgid(int index) const;
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >&
+      _internal_msgid() const;
+  void _internal_add_msgid(int64_t value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
+      _internal_mutable_msgid();
+  public:
+  int64_t msgid(int index) const;
+  void set_msgid(int index, int64_t value);
+  void add_msgid(int64_t value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >&
+      msgid() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
+      mutable_msgid();
 
   // required .SessionProtos.ReceiptMessage.Type type = 1;
   bool has_type() const;
@@ -4145,6 +3994,7 @@ class ReceiptMessage final :
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint64_t > timestamp_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t > msgid_;
     int type_;
   };
   union { Impl_ _impl_; };
@@ -4198,7 +4048,7 @@ class AttachmentPointer final :
                &_AttachmentPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    15;
 
   friend void swap(AttachmentPointer& a, AttachmentPointer& b) {
     a.Swap(&b);
@@ -4564,7 +4414,7 @@ class SharedConfigMessage final :
                &_SharedConfigMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    16;
 
   friend void swap(SharedConfigMessage& a, SharedConfigMessage& b) {
     a.Swap(&b);
@@ -4774,7 +4624,7 @@ class GroupUpdateMessage final :
                &_GroupUpdateMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    17;
 
   friend void swap(GroupUpdateMessage& a, GroupUpdateMessage& b) {
     a.Swap(&b);
@@ -5061,7 +4911,7 @@ class GroupUpdateInviteMessage final :
                &_GroupUpdateInviteMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    19;
+    18;
 
   friend void swap(GroupUpdateInviteMessage& a, GroupUpdateInviteMessage& b) {
     a.Swap(&b);
@@ -5271,7 +5121,7 @@ class GroupUpdatePromoteMessage final :
                &_GroupUpdatePromoteMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    20;
+    19;
 
   friend void swap(GroupUpdatePromoteMessage& a, GroupUpdatePromoteMessage& b) {
     a.Swap(&b);
@@ -5441,7 +5291,7 @@ class GroupUpdateInfoChangeMessage final :
                &_GroupUpdateInfoChangeMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    21;
+    20;
 
   friend void swap(GroupUpdateInfoChangeMessage& a, GroupUpdateInfoChangeMessage& b) {
     a.Swap(&b);
@@ -5669,7 +5519,7 @@ class GroupUpdateMemberChangeMessage final :
                &_GroupUpdateMemberChangeMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    22;
+    21;
 
   friend void swap(GroupUpdateMemberChangeMessage& a, GroupUpdateMemberChangeMessage& b) {
     a.Swap(&b);
@@ -5903,7 +5753,7 @@ class GroupUpdateMemberLeftMessage final :
                &_GroupUpdateMemberLeftMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    23;
+    22;
 
   friend void swap(GroupUpdateMemberLeftMessage& a, GroupUpdateMemberLeftMessage& b) {
     a.Swap(&b);
@@ -6027,7 +5877,7 @@ class GroupUpdateMemberLeftNotificationMessage final :
                &_GroupUpdateMemberLeftNotificationMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    23;
 
   friend void swap(GroupUpdateMemberLeftNotificationMessage& a, GroupUpdateMemberLeftNotificationMessage& b) {
     a.Swap(&b);
@@ -6151,7 +6001,7 @@ class GroupUpdateInviteResponseMessage final :
                &_GroupUpdateInviteResponseMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    24;
 
   friend void swap(GroupUpdateInviteResponseMessage& a, GroupUpdateInviteResponseMessage& b) {
     a.Swap(&b);
@@ -6293,7 +6143,7 @@ class GroupUpdateDeleteMemberContentMessage final :
                &_GroupUpdateDeleteMemberContentMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    25;
 
   friend void swap(GroupUpdateDeleteMemberContentMessage& a, GroupUpdateDeleteMemberContentMessage& b) {
     a.Swap(&b);
@@ -6492,7 +6342,7 @@ class ProProof final :
                &_ProProof_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    26;
 
   friend void swap(ProProof& a, ProProof& b) {
     a.Swap(&b);
@@ -6709,7 +6559,7 @@ class ProMessage final :
                &_ProMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    27;
 
   friend void swap(ProMessage& a, ProMessage& b) {
     a.Swap(&b);
@@ -8840,146 +8690,6 @@ inline void CallMessage::set_allocated_uuid(std::string* uuid) {
 
 // -------------------------------------------------------------------
 
-// KeyPair
-
-// required bytes publicKey = 1;
-inline bool KeyPair::_internal_has_publickey() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
-  return value;
-}
-inline bool KeyPair::has_publickey() const {
-  return _internal_has_publickey();
-}
-inline void KeyPair::clear_publickey() {
-  _impl_.publickey_.ClearToEmpty();
-  _impl_._has_bits_[0] &= ~0x00000001u;
-}
-inline const std::string& KeyPair::publickey() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.KeyPair.publicKey)
-  return _internal_publickey();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void KeyPair::set_publickey(ArgT0&& arg0, ArgT... args) {
- _impl_._has_bits_[0] |= 0x00000001u;
- _impl_.publickey_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:SessionProtos.KeyPair.publicKey)
-}
-inline std::string* KeyPair::mutable_publickey() {
-  std::string* _s = _internal_mutable_publickey();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.KeyPair.publicKey)
-  return _s;
-}
-inline const std::string& KeyPair::_internal_publickey() const {
-  return _impl_.publickey_.Get();
-}
-inline void KeyPair::_internal_set_publickey(const std::string& value) {
-  _impl_._has_bits_[0] |= 0x00000001u;
-  _impl_.publickey_.Set(value, GetArenaForAllocation());
-}
-inline std::string* KeyPair::_internal_mutable_publickey() {
-  _impl_._has_bits_[0] |= 0x00000001u;
-  return _impl_.publickey_.Mutable(GetArenaForAllocation());
-}
-inline std::string* KeyPair::release_publickey() {
-  // @@protoc_insertion_point(field_release:SessionProtos.KeyPair.publicKey)
-  if (!_internal_has_publickey()) {
-    return nullptr;
-  }
-  _impl_._has_bits_[0] &= ~0x00000001u;
-  auto* p = _impl_.publickey_.Release();
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.publickey_.IsDefault()) {
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  return p;
-}
-inline void KeyPair::set_allocated_publickey(std::string* publickey) {
-  if (publickey != nullptr) {
-    _impl_._has_bits_[0] |= 0x00000001u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000001u;
-  }
-  _impl_.publickey_.SetAllocated(publickey, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.publickey_.IsDefault()) {
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.KeyPair.publicKey)
-}
-
-// required bytes privateKey = 2;
-inline bool KeyPair::_internal_has_privatekey() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
-  return value;
-}
-inline bool KeyPair::has_privatekey() const {
-  return _internal_has_privatekey();
-}
-inline void KeyPair::clear_privatekey() {
-  _impl_.privatekey_.ClearToEmpty();
-  _impl_._has_bits_[0] &= ~0x00000002u;
-}
-inline const std::string& KeyPair::privatekey() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.KeyPair.privateKey)
-  return _internal_privatekey();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void KeyPair::set_privatekey(ArgT0&& arg0, ArgT... args) {
- _impl_._has_bits_[0] |= 0x00000002u;
- _impl_.privatekey_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:SessionProtos.KeyPair.privateKey)
-}
-inline std::string* KeyPair::mutable_privatekey() {
-  std::string* _s = _internal_mutable_privatekey();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.KeyPair.privateKey)
-  return _s;
-}
-inline const std::string& KeyPair::_internal_privatekey() const {
-  return _impl_.privatekey_.Get();
-}
-inline void KeyPair::_internal_set_privatekey(const std::string& value) {
-  _impl_._has_bits_[0] |= 0x00000002u;
-  _impl_.privatekey_.Set(value, GetArenaForAllocation());
-}
-inline std::string* KeyPair::_internal_mutable_privatekey() {
-  _impl_._has_bits_[0] |= 0x00000002u;
-  return _impl_.privatekey_.Mutable(GetArenaForAllocation());
-}
-inline std::string* KeyPair::release_privatekey() {
-  // @@protoc_insertion_point(field_release:SessionProtos.KeyPair.privateKey)
-  if (!_internal_has_privatekey()) {
-    return nullptr;
-  }
-  _impl_._has_bits_[0] &= ~0x00000002u;
-  auto* p = _impl_.privatekey_.Release();
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.privatekey_.IsDefault()) {
-    _impl_.privatekey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  return p;
-}
-inline void KeyPair::set_allocated_privatekey(std::string* privatekey) {
-  if (privatekey != nullptr) {
-    _impl_._has_bits_[0] |= 0x00000002u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000002u;
-  }
-  _impl_.privatekey_.SetAllocated(privatekey, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.privatekey_.IsDefault()) {
-    _impl_.privatekey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.KeyPair.privateKey)
-}
-
-// -------------------------------------------------------------------
-
 // DataExtractionNotification
 
 // required .SessionProtos.DataExtractionNotification.Type type = 1;
@@ -9095,7 +8805,7 @@ inline void DataExtractionNotification::set_msgid(int64_t value) {
   // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.msgId)
 }
 
-// optional uint32 attIndex = 5;
+// optional sint32 attIndex = 5;
 inline bool DataExtractionNotification::_internal_has_attindex() const {
   bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
   return value;
@@ -9104,21 +8814,21 @@ inline bool DataExtractionNotification::has_attindex() const {
   return _internal_has_attindex();
 }
 inline void DataExtractionNotification::clear_attindex() {
-  _impl_.attindex_ = 0u;
+  _impl_.attindex_ = 0;
   _impl_._has_bits_[0] &= ~0x00000008u;
 }
-inline uint32_t DataExtractionNotification::_internal_attindex() const {
+inline int32_t DataExtractionNotification::_internal_attindex() const {
   return _impl_.attindex_;
 }
-inline uint32_t DataExtractionNotification::attindex() const {
+inline int32_t DataExtractionNotification::attindex() const {
   // @@protoc_insertion_point(field_get:SessionProtos.DataExtractionNotification.attIndex)
   return _internal_attindex();
 }
-inline void DataExtractionNotification::_internal_set_attindex(uint32_t value) {
+inline void DataExtractionNotification::_internal_set_attindex(int32_t value) {
   _impl_._has_bits_[0] |= 0x00000008u;
   _impl_.attindex_ = value;
 }
-inline void DataExtractionNotification::set_attindex(uint32_t value) {
+inline void DataExtractionNotification::set_attindex(int32_t value) {
   _internal_set_attindex(value);
   // @@protoc_insertion_point(field_set:SessionProtos.DataExtractionNotification.attIndex)
 }
@@ -11280,6 +10990,53 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint64_t >*
 ReceiptMessage::mutable_timestamp() {
   // @@protoc_insertion_point(field_mutable_list:SessionProtos.ReceiptMessage.timestamp)
   return _internal_mutable_timestamp();
+}
+
+// repeated sfixed64 msgId = 3 [packed = true];
+inline int ReceiptMessage::_internal_msgid_size() const {
+  return _impl_.msgid_.size();
+}
+inline int ReceiptMessage::msgid_size() const {
+  return _internal_msgid_size();
+}
+inline void ReceiptMessage::clear_msgid() {
+  _impl_.msgid_.Clear();
+}
+inline int64_t ReceiptMessage::_internal_msgid(int index) const {
+  return _impl_.msgid_.Get(index);
+}
+inline int64_t ReceiptMessage::msgid(int index) const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ReceiptMessage.msgId)
+  return _internal_msgid(index);
+}
+inline void ReceiptMessage::set_msgid(int index, int64_t value) {
+  _impl_.msgid_.Set(index, value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ReceiptMessage.msgId)
+}
+inline void ReceiptMessage::_internal_add_msgid(int64_t value) {
+  _impl_.msgid_.Add(value);
+}
+inline void ReceiptMessage::add_msgid(int64_t value) {
+  _internal_add_msgid(value);
+  // @@protoc_insertion_point(field_add:SessionProtos.ReceiptMessage.msgId)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >&
+ReceiptMessage::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >&
+ReceiptMessage::msgid() const {
+  // @@protoc_insertion_point(field_list:SessionProtos.ReceiptMessage.msgId)
+  return _internal_msgid();
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
+ReceiptMessage::_internal_mutable_msgid() {
+  return &_impl_.msgid_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< int64_t >*
+ReceiptMessage::mutable_msgid() {
+  // @@protoc_insertion_point(field_mutable_list:SessionProtos.ReceiptMessage.msgId)
+  return _internal_mutable_msgid();
 }
 
 // -------------------------------------------------------------------
@@ -14251,8 +14008,6 @@ inline void ProMessage::set_msgbitset(uint64_t value) {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
