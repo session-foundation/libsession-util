@@ -11,6 +11,7 @@
 #include <session/client.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
+#include <session/random.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/session_network.hpp>
 #include <session/sqlite.hpp>
@@ -24,22 +25,28 @@ static auto cat = log::Cat("client");
 
 using namespace std::literals;
 
-// Domain separation for the message content hash.  The sender is hashed alongside the content
-// because the sender is not inside the Content protobuf -- it rides in the envelope (v1) or is
-// recovered from the signature (v2) -- so without it two participants sending byte-identical
-// content in the same millisecond would collide.
-static constexpr auto CONTENT_HASH_PERS = "SessionMsgIdHash"_b2b_pers;
-
 static int64_t to_ms(sys_ms t) {
     return t.time_since_epoch().count();
 }
 
-/// The message's stable cross-client identity: BLAKE2b over the sender and the unpadded serialised
-/// Content.  Both sides of a conversation compute the same value from bytes they already hold at
-/// libsession's public API boundary, with no protocol change and no round trip.
-static std::array<std::byte, 32> content_hash(
-        std::span<const std::byte, 33> sender, std::span<const std::byte> content) {
-    return hash::blake2b_pers<32>(CONTENT_HASH_PERS, sender, content);
+/// A message identifier: an opaque 64-bit pattern, compared for equality and never ordered or
+/// counted.  Signed all the way through -- the protobuf declares it sfixed64 for exactly that
+/// reason -- so no conversion is needed anywhere between the wire and the database.
+using MsgId = int64_t;
+
+/// A new message's Content.msgId.  Must be generated before the message is copied for its recipient
+/// and for our own swarm, so that both copies carry it: it is the only identifier every party
+/// agrees on, the two copies differing in syncTarget and so not hashing alike.
+static MsgId new_msgid() {
+    return static_cast<MsgId>(csrng());
+}
+
+/// Reads a message's identifier out of arriving content.  Absent from anything sent by a client
+/// that predates the field, which then has no identity beyond its timestamp.
+static std::optional<MsgId> msgid_of(const SessionProtos::Content& content) {
+    if (!content.has_msgid())
+        return std::nullopt;
+    return content.msgid();
 }
 
 // AttachmentPointer.Flags.VOICE_MESSAGE.  Mirrored rather than taken from the generated header so
@@ -894,6 +901,10 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     SessionProtos::Content content;
     content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    // Set before the copies below, so both carry it: that is what makes it the identifier every
+    // party agrees on, unlike a hash of copies that differ.
+    auto msgid = new_msgid();
+    content.set_msgid(msgid);
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
     data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
@@ -910,7 +921,6 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     auto serialised = synced.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
-    auto cid = content_hash(self, raw);
 
     // Note to self is one swarm, not two: sending both copies there would deposit the same message
     // twice, and both would come back.  So there is no separate sync send to have a state for.
@@ -928,12 +938,12 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
         c.prepared_exec(
                 R"(
             INSERT INTO messages
-                (conversation, content_hash, sender, outgoing, timestamp, body, send_state,
+                (conversation, msgid, sender, outgoing, timestamp, body, send_state,
                  sync_send_state)
             VALUES (?, ?, ?, 1, ?, ?, ?, ?)
         )",
                 convo.id,
-                cid,
+                msgid,
                 account_id(c, self),
                 to_ms(now),
                 body,
@@ -1060,17 +1070,20 @@ int64_t Client::_send_message(
     bool to_self = std::ranges::equal(id.session_id(), self);
 
     // Stored with the body alone for now.  What finally goes to the swarms also names the uploaded
-    // files, which nothing knows yet -- that is what the uploads are for -- so the content and its
-    // hash are rewritten in _finish_attachment_send once they do.
+    // files, which nothing knows yet -- that is what the uploads are for -- so the content is
+    // rewritten in _finish_attachment_send once they do.  The identifier is not: it belongs to the
+    // message rather than to any particular rendering of it, so it is generated here and reused.
+    auto msgid = new_msgid();
+
     SessionProtos::Content content;
     content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    content.set_msgid(msgid);
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
     data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
 
     auto serialised = content.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
-    auto cid = content_hash(self, raw);
 
     bool created;
     int64_t client_id;
@@ -1084,12 +1097,12 @@ int64_t Client::_send_message(
         c.prepared_exec(
                 R"(
             INSERT INTO messages
-                (conversation, content_hash, sender, outgoing, timestamp, body, send_state,
+                (conversation, msgid, sender, outgoing, timestamp, body, send_state,
                  sync_send_state)
             VALUES (?, ?, ?, 1, ?, ?, ?, ?)
         )",
                 convo.id,
-                cid,
+                msgid,
                 account_id(c, self),
                 to_ms(now),
                 body,
@@ -1576,18 +1589,24 @@ void Client::_finish_attachment_send(int64_t client_id) {
     {
         auto c = core.database().conn();
 
-        auto row = c.prepared_maybe_get<int64_t, std::string, int64_t>(
-                "SELECT conversation, body, timestamp FROM messages WHERE id = ?", client_id);
+        auto row = c.prepared_maybe_get<int64_t, std::string, int64_t, std::optional<MsgId>>(
+                "SELECT conversation, body, timestamp, msgid FROM messages WHERE id = ?",
+                client_id);
         if (!row) {
             log::warning(cat, "Cannot finish message {}: it is gone", client_id);
             return;
         }
-        auto [convo_row, msg_body, msg_ts] = *row;
+        auto [convo_row, msg_body, msg_ts, msg_id] = *row;
         convo_id = conversation_id_at(c, convo_row);
         body = std::move(msg_body);
         timestamp = msg_ts;
 
         content.set_sigtimestamp(static_cast<uint64_t>(timestamp));
+        // The one the row was stored with, not a fresh one: rebuilding the content does not make
+        // this a different message, and a new identifier here would leave the copy we already
+        // showed the user and the copy we send disagreeing about which message they are.
+        if (msg_id)
+            content.set_msgid(*msg_id);
         auto* data = content.mutable_datamessage();
         data->set_body(body);
         data->set_timestamp(static_cast<uint64_t>(timestamp));
@@ -1650,20 +1669,17 @@ void Client::_finish_attachment_send(int64_t client_id) {
     SessionProtos::Content synced = content;
     synced.mutable_datamessage()->set_synctarget(oxenc::to_hex(convo_id->session_id()));
 
-    // What we store is the sync copy, as the plain send does, and its hash has to be the hash of
-    // what we store: it is what the copy coming back off our own swarm dedupes against, and the
-    // provisional one written before the uploads describes content nobody will ever send.
+    // What we store is the sync copy, as the plain send does: it is what the copy coming back off
+    // our own swarm is recognised as, and the provisional content written before the uploads
+    // describes something nobody will ever send.
     auto serialised = synced.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
-    auto cid = content_hash(self, raw);
 
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
         c.prepared_exec(
-                "UPDATE messages SET content_hash = ?, send_state = ?, sync_send_state = ?"
-                " WHERE id = ?",
-                cid,
+                "UPDATE messages SET send_state = ?, sync_send_state = ? WHERE id = ?",
                 static_cast<int>(SendState::pending),
                 to_self ? std::optional<int>{}
                         : std::optional{static_cast<int>(SendState::pending)},
@@ -1812,7 +1828,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     if (data.has_profile() && data.profile().has_displayname())
         name = data.profile().displayname();
 
-    auto cid = content_hash(msg.sender_session_id, msg.content);
+    auto msgid = msgid_of(content);
 
     bool created = false, inserted = false, renamed = false;
     int64_t client_id = 0;
@@ -1836,15 +1852,20 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
 
         // Delivery is at-least-once -- the swarm cursor advances per batch, so a crash mid-batch
         // re-delivers it -- and either unique index is enough to recognise the redelivery.
+        //
+        // The msgid index is what also catches our own message coming back off our own swarm, which
+        // the swarm hash cannot: that copy is stored before it has one.  A sender that set no msgid
+        // leaves NULL there, and SQLite treats NULLs as distinct, so those fall back to the swarm
+        // hash alone -- enough for a redelivery, not enough for a sender who stored twice.
         inserted = c.prepared_exec(
                            R"(
             INSERT OR IGNORE INTO messages
-                (conversation, content_hash, swarm_hash, sender, outgoing, timestamp, body,
+                (conversation, msgid, swarm_hash, sender, outgoing, timestamp, body,
                  send_state)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         )",
                            convo.id,
-                           cid,
+                           msgid,
                            msg.hash,
                            sender,
                            outgoing ? 1 : 0,

@@ -66,12 +66,20 @@ CREATE INDEX conversations_order ON conversations(priority DESC, last_activity D
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY,
     conversation INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    -- BLAKE2b over the sender and the unpadded serialised Content protobuf.  This is identical for
-    -- every copy of a message because it is computed above the encryption layer: re-encrypting the
-    -- same content for another recipient, or for our own other devices, changes the ciphertext and
-    -- therefore the swarm hash, but not this.  It is also computable for existing rows, since the
-    -- raw content is retained.
-    content_hash BLOB NOT NULL,
+    -- The sender's Content.msgId: 8 random bytes separating this message from another they sent in
+    -- the same millisecond.  Every copy of a message carries the same value -- it is set before the
+    -- copy for the recipient and the copy for our own swarm diverge -- which is what makes it the
+    -- one identifier both parties agree on.
+    --
+    -- Only ever meaningful together with `timestamp`; it is far too small to identify a message on
+    -- its own.  See the field's comment in SessionProtos.proto.
+    --
+    -- NULL for a message whose sender predates the field, which cannot then be told apart from
+    -- another they sent in the same millisecond.
+    --
+    -- An opaque 64-bit pattern rather than a number: SQLite integers are signed, so a value above
+    -- INT64_MAX is stored negative.  Compared for equality and nothing else.
+    msgid INTEGER,
     -- Swarm-assigned hash; NULL for an outgoing message not yet stored on the swarm.  SQLite
     -- treats NULLs as distinct in a unique index, so those never collide with each other.
     swarm_hash TEXT UNIQUE,
@@ -97,16 +105,17 @@ CREATE TABLE messages (
     sync_send_state INTEGER
 ) STRICT;
 
--- Delivery is at-least-once, so a redelivered message must not duplicate.  Deduping on the content
--- hash rather than only the swarm hash also catches the case the swarm hash cannot: our own
--- message arriving back from our swarm, which the outgoing row was stored without a hash for.
-CREATE UNIQUE INDEX messages_content ON messages(conversation, content_hash);
+-- Delivery is at-least-once, so a redelivered message must not duplicate.  This also catches what
+-- the swarm hash cannot: our own message arriving back from our swarm, which carries the same msgid
+-- as the copy we sent.  Both columns are needed -- see the protobuf comment for why msgid is not an
+-- identifier on its own.
+CREATE UNIQUE INDEX messages_msgid ON messages(conversation, timestamp, msgid);
 
 CREATE INDEX messages_history ON messages(conversation, timestamp DESC, id DESC);
 CREATE INDEX messages_unread ON messages(conversation, timestamp) WHERE outgoing = 0;
 
--- Quotes and reactions arriving from other clients address their target by author and timestamp;
--- there is no message id on the wire.  Needed until a real identifier ships.
+-- Quotes and reactions from clients that set no msgId address their target by author and timestamp
+-- alone.  Needed for as long as such clients exist.
 CREATE INDEX messages_wire_key ON messages(conversation, sender, timestamp);
 
 -- `count` is a structural fact about the messages table, so triggers can own it outright: there is

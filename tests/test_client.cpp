@@ -96,9 +96,12 @@ void deliver(
         std::string hash,
         std::string_view display_name = "",
         std::optional<b33> sync_target = std::nullopt,
-        const std::function<void(SessionProtos::DataMessage&)>& decorate = nullptr) {
+        const std::function<void(SessionProtos::DataMessage&)>& decorate = nullptr,
+        std::optional<int64_t> msgid = std::nullopt) {
     SessionProtos::Content content;
     content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()));
+    if (msgid)
+        content.set_msgid(*msgid);
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
     if (!display_name.empty())
@@ -413,23 +416,31 @@ TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][rece
 }
 
 TEST_CASE(
-        "Client: identical content under a different swarm hash is deduped", "[client][receive]") {
+        "Client: the same message under a different swarm hash is deduped", "[client][receive]") {
     TempClient c;
     SenderKeys sender;
     auto convo = ConversationId::dm(sender.session_id);
 
-    // The same message re-encrypted for a different recipient -- our own other device, say --
-    // lands in a different swarm with a different hash.  The swarm hash cannot recognise that;
-    // the content hash can, because it is computed above the encryption layer.
-    deliver(*c, sender, "said once", from_epoch_ms(5000), "hash_from_their_swarm");
-    deliver(*c, sender, "said once", from_epoch_ms(5000), "hash_from_our_swarm");
+    // One message stored twice -- a sender who retried a store that had actually succeeded, say --
+    // lands under two swarm hashes.  The swarm hash cannot recognise that; the msgid can, being the
+    // one identifier every copy of a message carries.
+    deliver(*c, sender, "said once", from_epoch_ms(5000), "first_hash", "", std::nullopt, nullptr, 7);
+    deliver(*c, sender, "said once", from_epoch_ms(5000), "second_hash", "", std::nullopt, nullptr, 7);
 
     CHECK(c->messages(convo).size() == 1);
     CHECK(c->conversation(convo)->unread == 1);
 
-    // Same body a millisecond later is a different message, not a redelivery.
-    deliver(*c, sender, "said once", from_epoch_ms(5001), "third_hash");
+    // Same millisecond, different message: the case the timestamp alone cannot tell apart, and the
+    // whole reason the id exists.  Identical body, so nothing but the id distinguishes them.
+    deliver(*c, sender, "said once", from_epoch_ms(5000), "third_hash", "", std::nullopt, nullptr, 8);
     CHECK(c->messages(convo).size() == 2);
+
+    // A sender too old to set one has no identity beyond its timestamp, so two arrivals under
+    // different swarm hashes cannot be told from one message stored twice.  Both land: a visible
+    // duplicate is the failure we chose over silently dropping a real message.
+    deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_a");
+    deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_b");
+    CHECK(c->messages(convo).size() == 4);
 }
 
 TEST_CASE("Client: display name is unset rather than empty until known", "[client][convos]") {
@@ -1244,11 +1255,17 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     CHECK(c->messages(ConversationId::dm(me)).size() == 1);
 
     // ...and when our own swarm hands it straight back on the next poll, which is what note to self
-    // does, it must recognise its own message rather than storing a second copy.
-    // Rebuild exactly what _send_message serialised, so the content hash matches.
+    // does, it must recognise its own message rather than storing a second copy.  What makes that
+    // work is the msgid: the copy coming back carries the one we generated when sending, which is
+    // exactly what a hash of the two copies could not do.
     auto ts = c->message(id)->timestamp;
+    auto msgid = c->core.loop().call_get([&] {
+        return c->core.database().conn().prepared_get<int64_t>(
+                "SELECT msgid FROM messages WHERE id = ?", id);
+    });
     SessionProtos::Content sent;
     sent.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(ts)));
+    sent.set_msgid(msgid);
     sent.mutable_datamessage()->set_body("note to self");
     sent.mutable_datamessage()->set_timestamp(static_cast<uint64_t>(epoch_ms(ts)));
     sent.mutable_datamessage()->set_synctarget(oxenc::to_hex(me));

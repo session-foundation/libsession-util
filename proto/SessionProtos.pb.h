@@ -1379,6 +1379,7 @@ class Content final :
     kExpirationTypeFieldNumber = 12,
     kExpirationTimerFieldNumber = 13,
     kSigTimestampFieldNumber = 15,
+    kMsgIdFieldNumber = 18,
   };
   // optional bytes proSigForCommunityMessageOnly = 17;
   bool has_prosigforcommunitymessageonly() const;
@@ -1599,6 +1600,19 @@ class Content final :
   void _internal_set_sigtimestamp(uint64_t value);
   public:
 
+  // optional sfixed64 msgId = 18;
+  bool has_msgid() const;
+  private:
+  bool _internal_has_msgid() const;
+  public:
+  void clear_msgid();
+  int64_t msgid() const;
+  void set_msgid(int64_t value);
+  private:
+  int64_t _internal_msgid() const;
+  void _internal_set_msgid(int64_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:SessionProtos.Content)
  private:
   class _Internal;
@@ -1622,6 +1636,7 @@ class Content final :
     int expirationtype_;
     uint32_t expirationtimer_;
     uint64_t sigtimestamp_;
+    int64_t msgid_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -8377,6 +8392,34 @@ inline void Content::set_allocated_prosigforcommunitymessageonly(std::string* pr
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.proSigForCommunityMessageOnly)
+}
+
+// optional sfixed64 msgId = 18;
+inline bool Content::_internal_has_msgid() const {
+  bool value = (_impl_._has_bits_[0] & 0x00002000u) != 0;
+  return value;
+}
+inline bool Content::has_msgid() const {
+  return _internal_has_msgid();
+}
+inline void Content::clear_msgid() {
+  _impl_.msgid_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00002000u;
+}
+inline int64_t Content::_internal_msgid() const {
+  return _impl_.msgid_;
+}
+inline int64_t Content::msgid() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.Content.msgId)
+  return _internal_msgid();
+}
+inline void Content::_internal_set_msgid(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00002000u;
+  _impl_.msgid_ = value;
+}
+inline void Content::set_msgid(int64_t value) {
+  _internal_set_msgid(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.Content.msgId)
 }
 
 // -------------------------------------------------------------------

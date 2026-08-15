@@ -17,11 +17,6 @@ using namespace std::literals;
 
 namespace {
 
-// Same derivation as Client's, repeated here on purpose: this test exists to catch the stored hash
-// disagreeing with the stored content, and asking Client for both would only prove it agrees with
-// itself.
-constexpr auto CONTENT_HASH_PERS = "SessionMsgIdHash"_b2b_pers;
-
 struct LiveClient {
     std::filesystem::path dir;
     std::unique_ptr<SyncClient> client;
@@ -100,17 +95,17 @@ TEST_CASE(
     // view from a statement kept alive around it, rather than through a one-shot call that would
     // finalize the statement and invalidate the view.
     std::vector<std::byte> raw;
-    std::array<std::byte, 32> stored_hash{};
+    int64_t stored_msgid = 0;
     {
         auto conn = c->core.database().conn();
         auto st = conn.prepared_bind(
-                "SELECT r.content, m.content_hash FROM message_raw_content r"
+                "SELECT r.content, m.msgid FROM message_raw_content r"
                 " JOIN messages m ON m.id = r.message WHERE r.message = ?",
                 id);
         REQUIRE(st->executeStep());
-        auto [content, hash] = sqlite::get<sqlite::blob, sqlite::blobn<32>>(*st);
+        auto [content, msgid] = sqlite::get<sqlite::blob, int64_t>(*st);
         raw.assign(content.begin(), content.end());
-        std::ranges::copy(hash, stored_hash.begin());
+        stored_msgid = msgid;
     }
 
     SessionProtos::Content parsed;
@@ -148,12 +143,13 @@ TEST_CASE(
     if (std::ranges::all_of(info->file_id, [](char ch) { return ch >= '0' && ch <= '9'; }))
         CHECK(std::to_string(ptr.id()) == info->file_id);
 
-    // The one that would corrupt a conversation rather than merely break a download: content_hash
-    // is what the copy returning from our own swarm dedupes against, so it has to describe what is
-    // stored now, not the placeholder written before the upload existed.
-    auto expected = hash::blake2b_pers<32>(
-            CONTENT_HASH_PERS, std::span<const std::byte, 33>{me.data(), 33}, raw);
-    CHECK(stored_hash == expected);
+    // The one that would corrupt a conversation rather than merely break a download.  Sending with
+    // attachments stores the message twice: once with the body alone, and again once the uploads
+    // have given it something to point at.  The identifier has to survive that rewrite, because it
+    // is what the copy returning from our own swarm is recognised by -- so the content finally sent
+    // must carry the same one the row was stored with, rather than a fresh one.
+    REQUIRE(parsed.has_msgid());
+    CHECK(parsed.msgid() == stored_msgid);
 
     std::filesystem::remove(file);
 }

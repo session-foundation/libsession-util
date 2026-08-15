@@ -133,6 +133,33 @@ message Content {
   // | v3      | Envelope       | No          | No               | Yes         | Yes         |
   // +---------+----------------+-------------+------------------+-------------+-------------+
   optional bytes                      proSigForCommunityMessageOnly          = 17;
+
+  // 8 random bytes distinguishing this message from another sent by the same account in the same
+  // millisecond, which `sigTimestamp` alone does not: a client sending several messages at once
+  // stamps them identically, and clients keying on the timestamp then treat them as one message and
+  // silently drop all but the first.
+  //
+  // Set once, before the message is copied for its recipient and for our own swarm, so every copy
+  // of a message carries the same value.  That makes it the only identifier all parties agree on:
+  // the two copies differ in `syncTarget`, so they do not hash alike, and no party can derive one
+  // copy's hash from the other's.
+  //
+  // ALWAYS use this together with `sigTimestamp`, never alone.  8 bytes is sized to separate
+  // messages *within one sender-millisecond*, where a handful is a lot; as a standalone identifier
+  // over a whole conversation it would start colliding around a few billion messages.  Anything
+  // referring to a message -- a reaction, a quote, a notification about an attachment -- must carry
+  // both, and match on both.
+  //
+  // Absent from messages sent by clients that predate it.  A reference to one of those can only be
+  // matched by timestamp, and is therefore ambiguous exactly when several messages share it.
+  //
+  // sfixed64 rather than bytes or a varint type: it is 8 bytes on the wire with no length prefix
+  // and no varint expansion, which for uniformly random values is the smallest of the three.
+  // Signed rather than fixed64 only because a signed 64-bit integer is what every implementation
+  // can hold losslessly -- SQLite, for one, has no unsigned form -- and the two encode identically.
+  // Treat it as an opaque bit pattern, not a number: nothing about it is ordered or comparable
+  // beyond equality, and half of all valid values are negative.
+  optional sfixed64                   msgId                                  = 18;
 }
 
 message CallMessage {

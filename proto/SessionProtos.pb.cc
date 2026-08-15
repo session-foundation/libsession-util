@@ -100,7 +100,8 @@ PROTOBUF_CONSTEXPR Content::Content(
   , /*decltype(_impl_.promessage_)*/nullptr
   , /*decltype(_impl_.expirationtype_)*/0
   , /*decltype(_impl_.expirationtimer_)*/0u
-  , /*decltype(_impl_.sigtimestamp_)*/uint64_t{0u}} {}
+  , /*decltype(_impl_.sigtimestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgid_)*/int64_t{0}} {}
 struct ContentDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ContentDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -2673,6 +2674,9 @@ class Content::_Internal {
   static void set_has_prosigforcommunitymessageonly(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
+  static void set_has_msgid(HasBits* has_bits) {
+    (*has_bits)[0] |= 8192u;
+  }
 };
 
 const ::SessionProtos::DataMessage&
@@ -2735,7 +2739,8 @@ Content::Content(const Content& from)
     , decltype(_impl_.promessage_){nullptr}
     , decltype(_impl_.expirationtype_){}
     , decltype(_impl_.expirationtimer_){}
-    , decltype(_impl_.sigtimestamp_){}};
+    , decltype(_impl_.sigtimestamp_){}
+    , decltype(_impl_.msgid_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   _impl_.prosigforcommunitymessageonly_.InitDefault();
@@ -2774,8 +2779,8 @@ Content::Content(const Content& from)
     _this->_impl_.promessage_ = new ::SessionProtos::ProMessage(*from._impl_.promessage_);
   }
   ::memcpy(&_impl_.expirationtype_, &from._impl_.expirationtype_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
-    reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msgid_) -
+    reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.msgid_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.Content)
 }
 
@@ -2799,6 +2804,7 @@ inline void Content::SharedCtor(
     , decltype(_impl_.expirationtype_){0}
     , decltype(_impl_.expirationtimer_){0u}
     , decltype(_impl_.sigtimestamp_){uint64_t{0u}}
+    , decltype(_impl_.msgid_){int64_t{0}}
   };
   _impl_.prosigforcommunitymessageonly_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -2883,10 +2889,10 @@ void Content::Clear() {
       _impl_.promessage_->Clear();
     }
   }
-  if (cached_has_bits & 0x00001c00u) {
+  if (cached_has_bits & 0x00003c00u) {
     ::memset(&_impl_.expirationtype_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
-        reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
+        reinterpret_cast<char*>(&_impl_.msgid_) -
+        reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.msgid_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -3011,6 +3017,15 @@ const char* Content::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) 
         } else
           goto handle_unusual;
         continue;
+      // optional sfixed64 msgId = 18;
+      case 18:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 145)) {
+          _Internal::set_has_msgid(&has_bits);
+          _impl_.msgid_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<int64_t>(ptr);
+          ptr += sizeof(int64_t);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -3130,6 +3145,12 @@ uint8_t* Content::_InternalSerialize(
         17, this->_internal_prosigforcommunitymessageonly(), target);
   }
 
+  // optional sfixed64 msgId = 18;
+  if (cached_has_bits & 0x00002000u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteSFixed64ToArray(18, this->_internal_msgid(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -3205,7 +3226,7 @@ size_t Content::ByteSizeLong() const {
     }
 
   }
-  if (cached_has_bits & 0x00001f00u) {
+  if (cached_has_bits & 0x00003f00u) {
     // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
     if (cached_has_bits & 0x00000100u) {
       total_size += 1 +
@@ -3234,6 +3255,11 @@ size_t Content::ByteSizeLong() const {
     // optional uint64 sigTimestamp = 15;
     if (cached_has_bits & 0x00001000u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_sigtimestamp());
+    }
+
+    // optional sfixed64 msgId = 18;
+    if (cached_has_bits & 0x00002000u) {
+      total_size += 2 + 8;
     }
 
   }
@@ -3292,7 +3318,7 @@ void Content::MergeFrom(const Content& from) {
           from._internal_messagerequestresponse());
     }
   }
-  if (cached_has_bits & 0x00001f00u) {
+  if (cached_has_bits & 0x00003f00u) {
     if (cached_has_bits & 0x00000100u) {
       _this->_internal_mutable_sharedconfigmessage()->::SessionProtos::SharedConfigMessage::MergeFrom(
           from._internal_sharedconfigmessage());
@@ -3309,6 +3335,9 @@ void Content::MergeFrom(const Content& from) {
     }
     if (cached_has_bits & 0x00001000u) {
       _this->_impl_.sigtimestamp_ = from._impl_.sigtimestamp_;
+    }
+    if (cached_has_bits & 0x00002000u) {
+      _this->_impl_.msgid_ = from._impl_.msgid_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
@@ -3361,8 +3390,8 @@ void Content::InternalSwap(Content* other) {
       &other->_impl_.prosigforcommunitymessageonly_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(Content, _impl_.sigtimestamp_)
-      + sizeof(Content::_impl_.sigtimestamp_)
+      PROTOBUF_FIELD_OFFSET(Content, _impl_.msgid_)
+      + sizeof(Content::_impl_.msgid_)
       - PROTOBUF_FIELD_OFFSET(Content, _impl_.datamessage_)>(
           reinterpret_cast<char*>(&_impl_.datamessage_),
           reinterpret_cast<char*>(&other->_impl_.datamessage_));
