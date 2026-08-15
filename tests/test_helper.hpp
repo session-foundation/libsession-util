@@ -53,7 +53,37 @@ class MockNetwork : public network::Network {
                     callback) override {
         callback(0, {current_node});
     }
+
+    std::vector<network::DownloadRequest> downloads;
+
+    void download(network::DownloadRequest request) override {
+        downloads.push_back(std::move(request));
+    }
 };
+
+/// Answers every captured download with `data`, delivered in chunks as a transport would rather
+/// than in one piece -- a decryptor that only works when handed the whole file at once is a bug
+/// this is meant to catch.  Returns how many there were.
+inline size_t serve_downloads(
+        MockNetwork& net, std::span<const std::byte> data, size_t chunk = 4096) {
+    auto pending = std::exchange(net.downloads, {});
+    for (auto& r : pending) {
+        network::file_metadata meta{
+                "served", static_cast<int64_t>(data.size()), {}, {}};
+        for (size_t at = 0; at < data.size(); at += chunk)
+            r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
+        r.on_complete(meta, false);
+    }
+    return pending.size();
+}
+
+/// Fails every captured download, as a file server that no longer holds the file would.
+inline size_t fail_downloads(MockNetwork& net, int16_t status = 404) {
+    auto pending = std::exchange(net.downloads, {});
+    for (auto& r : pending)
+        r.on_complete(status, false);
+    return pending.size();
+}
 
 /// The store requests a MockNetwork has captured, in the order they were sent.  Filtered rather
 /// than taken wholesale because a Core with a network attached also fetches PFS keys, so a test

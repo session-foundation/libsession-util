@@ -5,6 +5,7 @@
 #include <fstream>
 #include <future>
 #include <oxen/quic/loop.hpp>
+#include <session/attachments.hpp>
 #include <session/client/sync_client.hpp>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
@@ -1222,6 +1223,157 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     REQUIRE(page.size() == 1);
     CHECK(page[0].attachments.size() == 3);
     CHECK(page[0].attachments[0].content_type == "image/png");
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    // So the notification below goes out as a v1 send rather than queueing behind a key fetch.
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+
+    // A real attachment: encrypted exactly as a sender would, so what the download serves is what
+    // the decryptor has to cope with, chunk boundaries and padding included.
+    std::vector<std::byte> plaintext(9000);
+    for (size_t i = 0; i < plaintext.size(); i++)
+        plaintext[i] = static_cast<std::byte>(i * 31 % 256);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/1#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_filename("payload.bin");
+            },
+            42);
+    sync(*c);
+
+    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    REQUIRE(msgs.size() == 1);
+    auto msg_id = msgs[0].id;
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_save", 7);
+    std::filesystem::create_directories(dir);
+    auto dest = dir / "saved.bin";
+
+    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg_id, 0, dest,
+            [&](size_t i, int64_t d, int64_t tot, std::optional<int> r) {
+                reports.emplace_back(i, d, tot, r);
+            },
+            [&](std::optional<std::string> err) { done.set_value(std::move(err)); });
+
+    // Nothing is fetched until asked, and asking produces exactly one download.
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+    CHECK(net->downloads[0].download_url == "http://fs.example/file/1#d");
+
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+
+    // The file is the file, byte for byte, with the padding that hid its length gone.
+    REQUIRE(std::filesystem::exists(dest));
+    CHECK(std::filesystem::file_size(dest) == plaintext.size());
+    {
+        std::ifstream in{dest, std::ios::binary};
+        std::vector<std::byte> got(plaintext.size());
+        in.read(reinterpret_cast<char*>(got.data()), got.size());
+        CHECK(!!(got == plaintext));
+    }
+    // ...and nothing is left behind that could be mistaken for it.
+    CHECK_FALSE(std::filesystem::exists(dest.string() + ".part"));
+
+    // Progress reported as a send does: an opening 0/0, then exactly one terminal result.
+    REQUIRE(reports.size() >= 2);
+    CHECK(std::get<3>(reports.front()) == std::nullopt);
+    CHECK(std::get<1>(reports.front()) == 0);
+    CHECK(std::get<3>(reports.back()) == 0);
+
+    // And the sender is told, since nothing said otherwise.
+    sync(*c);
+    CHECK(stores(*net).size() == 1);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing",
+          "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+
+    std::vector<std::byte> plaintext(500, std::byte{7});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    auto add = [&](SessionProtos::DataMessage& data) {
+        auto* a = data.add_attachments();
+        a->set_id(1);
+        a->set_url("http://fs.example/file/2#d");
+        a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+        a->set_size(plaintext.size());
+    };
+    deliver(*c, peer, "", from_epoch_ms(2000), "h2", "", std::nullopt, add, 43);
+    sync(*c);
+    auto msg_id = c->messages(ConversationId::dm(peer.session_id))[0].id;
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_save", 7);
+    std::filesystem::create_directories(dir);
+
+    // The promise is shared rather than captured by reference: save_attachment's callback outlives
+    // this scope, and a reference to a local here would dangle by the time the download is served.
+    auto save = [&](const std::filesystem::path& dest, bool notify) {
+        auto done = std::make_shared<std::promise<std::optional<std::string>>>();
+        auto waiter = done->get_future();
+        c->Client::save_attachment(
+                msg_id, 0, dest, nullptr,
+                [done](std::optional<std::string> err) { done->set_value(std::move(err)); },
+                notify);
+        sync(*c);
+        return waiter;
+    };
+
+    // Asked not to tell them, we do not -- the file still lands.
+    {
+        auto quiet = dir / "quiet.bin";
+        auto waiter = save(quiet, false);
+        REQUIRE(serve_downloads(*net, ciphertext) == 1);
+        REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+        CHECK_FALSE(waiter.get().has_value());
+        CHECK(std::filesystem::exists(quiet));
+        sync(*c);
+        CHECK(stores(*net).empty());
+    }
+
+    // A file that fails to authenticate is a failure, not a corrupt file on disk: the ciphertext is
+    // written to a temporary name and only renamed once it has been decrypted whole.
+    {
+        auto bad = dir / "bad.bin";
+        auto corrupt = ciphertext;
+        corrupt[corrupt.size() / 2] ^= std::byte{0xff};
+        auto waiter = save(bad, true);
+        REQUIRE(serve_downloads(*net, corrupt) == 1);
+        REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+        CHECK(waiter.get().has_value());
+        CHECK_FALSE(std::filesystem::exists(bad));
+        CHECK_FALSE(std::filesystem::exists(bad.string() + ".part"));
+        // Nothing was saved, so nobody is told one was.
+        sync(*c);
+        CHECK(stores(*net).empty());
+    }
 
     std::filesystem::remove_all(dir);
 }

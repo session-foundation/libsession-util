@@ -110,7 +110,7 @@ class Network : public std::enable_shared_from_this<Network> {
     [[deprecated("use upload_file() instead")]]
     void upload(UploadRequest request);
     void upload_file(FileUploadRequest request, std::span<const std::byte> seed);
-    void download(DownloadRequest request);
+    virtual void download(DownloadRequest request);
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
