@@ -542,3 +542,113 @@ TEST_CASE("Streaming Encryptor", "[attachments][encryptor]") {
         CHECK(!!(decrypted == data));
     }
 }
+
+// -- Legacy (AES-CBC + HMAC) attachments ---------------------------------------------------------
+//
+// The scheme every Session client still *sends*, inherited from libsignal: 32-byte AES key followed
+// by a 32-byte HMAC key, and a file laid out as IV || AES-256-CBC(PKCS#7) || HMAC-SHA256(IV||ct),
+// with the AttachmentPointer's `digest` being SHA-256 over all three.
+//
+// The vectors below were produced by an independent implementation (python-cryptography) written
+// from session-android's AttachmentCipherInputStream, so this is a known-answer test rather than a
+// round trip against ourselves -- which would prove nothing, since libsession deliberately has no
+// legacy *encryptor*.
+
+using namespace oxenc::literals;
+
+namespace {
+
+constexpr auto LEGACY_KEY =
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"_hex_b;
+
+// "the quick brown fox jumps over the lazy dog, repeatedly and at length." -- 70 bytes, with no
+// Session-level zero padding, so the pointer's size is the plaintext length.
+constexpr auto LEGACY_BLOB =
+        "6465666768696a6b6c6d6e6f7071727339c6cadce50e036612224f681bbbe3f3"
+        "1acc5779dfe5367b18c6272231f4eb139a9b56725e81236c469883304bc53999"
+        "311ae9c035bf6ed5d2fbd6fb24777de2d1368b650f24d5c454208af7610238a9"
+        "ff4892a7b4b5e54a9b99e78d73d65f335fc5c5559dd3d4c894401d0c7f7ce95b"_hex_b;
+constexpr auto LEGACY_DIGEST =
+        "68af9ac56f2c7d90a984f9edccdd538765b0e3ba2c1958ce7c0071212c0beccb"_hex_b;
+constexpr auto LEGACY_PLAINTEXT =
+        "the quick brown fox jumps over the lazy dog, repeatedly and at length."sv;
+
+// 20 real bytes zero-padded out to 200, which is what the pointer's size is actually for.
+constexpr auto PADDED_BLOB =
+        "6465666768696a6b6c6d6e6f70717273e85b4762c96dc9f8ec01d8cce057ce81"
+        "f52ba3a6d5b7b61214a1000d827532b1c36cc1beb5454eb154e159508cd627f5"
+        "349d55e9a583df1ad46401d07805608c89ba1ca437e93067b91a18efc3af88e7"
+        "8247d47fb3562ee73b5e9de5c538caebeeb6e36787f98745414735371311d90a"
+        "6a169349eb0ecc93b5b45076f95daef493d7663ef1e538e7b28c60aff8e5528c"
+        "c221d7c1e1ce092184b140a68a9adfe1738ae283e50701d83e370d75f57e6f3f"
+        "7fcb2a0f410ac34187e414c3bb6d5cf38399b89cafa402e061c675ab409b9eb0"
+        "849ead65dbccc86863b3b1817d37cd6eb8b50dc259e90fbb4971620dd09eabb9"_hex_b;
+constexpr auto PADDED_DIGEST =
+        "da2680f942213633344c39c0690c652beed7e1c50f6ceef45e113dc0f007fd33"_hex_b;
+
+auto legacy_key() {
+    return std::span<const std::byte, attachment::LEGACY_KEY_SIZE>{LEGACY_KEY};
+}
+auto legacy_digest() {
+    return std::span<const std::byte, attachment::LEGACY_DIGEST_SIZE>{LEGACY_DIGEST};
+}
+auto padded_digest() {
+    return std::span<const std::byte, attachment::LEGACY_DIGEST_SIZE>{PADDED_DIGEST};
+}
+
+}  // namespace
+
+TEST_CASE("legacy attachment decryption", "[attachments][legacy]") {
+    auto out = attachment::legacy_decrypt(
+            LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size());
+    CHECK(session::to_string_view(out) == LEGACY_PLAINTEXT);
+
+    // A sender too old to set the field leaves the zero padding in place rather than having it
+    // guessed at, so what comes back is the whole PKCS#7-stripped plaintext.
+    auto untrimmed = attachment::legacy_decrypt(PADDED_BLOB, legacy_key(), padded_digest(), 0);
+    CHECK(untrimmed.size() == 200);
+
+    // ...and with the field set, only the real bytes.
+    auto trimmed = attachment::legacy_decrypt(PADDED_BLOB, legacy_key(), padded_digest(), 20);
+    REQUIRE(trimmed.size() == 20);
+    CHECK(session::to_string_view(trimmed) == "twenty bytes exactly"sv);
+}
+
+TEST_CASE("legacy attachment decryption rejects bad input", "[attachments][legacy]") {
+    auto tampered = [](std::span<const std::byte> blob, size_t at) {
+        std::vector<std::byte> v{blob.begin(), blob.end()};
+        v[at] ^= std::byte{0x01};
+        return v;
+    };
+
+    // A flipped bit anywhere in the file fails the HMAC, whether it lands in the IV, the ciphertext
+    // or the MAC itself.  Nothing is decrypted before that check.
+    for (size_t at : {size_t{0}, size_t{20}, LEGACY_BLOB.size() - 1})
+        CHECK_THROWS(attachment::legacy_decrypt(
+                tampered(LEGACY_BLOB, at), legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size()));
+
+    // A correct file with the wrong digest is refused too: the digest is the message's own claim
+    // about which bytes it meant, so a mismatch means this is not the file that was pointed at.
+    auto wrong_digest = tampered(LEGACY_DIGEST, 5);
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB,
+            legacy_key(),
+            std::span<const std::byte, attachment::LEGACY_DIGEST_SIZE>{wrong_digest},
+            LEGACY_PLAINTEXT.size()));
+
+    // The one a hostile sender controls directly: a size larger than what was decrypted. Refused
+    // rather than clamped, since the pointer is then lying about its own file.
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() + 1));
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB, legacy_key(), legacy_digest(), std::numeric_limits<size_t>::max()));
+
+    // Too short to hold an IV, a block and a MAC.
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB.subspan(0, 40), legacy_key(), legacy_digest(), 1));
+
+    // Not a whole number of cipher blocks, so it cannot be what a CBC encryptor produced.
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB.subspan(0, LEGACY_BLOB.size() - 1), legacy_key(), legacy_digest(), 1));
+}

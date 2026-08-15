@@ -1,5 +1,10 @@
 #include "session/attachments.hpp"
 
+#include <nettle/aes.h>
+#include <nettle/cbc.h>
+#include <nettle/hmac.h>
+#include <nettle/memops.h>
+#include <nettle/sha2.h>
 #include <session/attachments.h>
 #include <sodium/crypto_core_hchacha20.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
@@ -401,6 +406,98 @@ std::vector<std::byte> decrypt(
     result.resize(actual);
 
     return result;
+}
+
+std::vector<std::byte> legacy_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_KEY_SIZE> key,
+        std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
+        size_t unpadded_size) {
+
+    // Bounded by what the file server will actually store, so a caller cannot be talked into
+    // holding an arbitrary amount by anything a sender claims.  This has to be all in memory: the
+    // authenticators below cover the whole ciphertext, and nothing may be decrypted until they pass.
+    if (encrypted.size() > LEGACY_MAX_ENCRYPTED_SIZE)
+        throw std::runtime_error{
+                "Legacy attachment decryption failed: {}B exceeds the {}B maximum"_format(
+                        encrypted.size(), LEGACY_MAX_ENCRYPTED_SIZE)};
+
+    if (encrypted.size() < LEGACY_IV_SIZE + AES_BLOCK_SIZE + LEGACY_MAC_SIZE)
+        throw std::runtime_error{"Legacy attachment decryption failed: encrypted data too short"};
+
+    auto body_size = encrypted.size() - LEGACY_IV_SIZE - LEGACY_MAC_SIZE;
+    if (body_size % AES_BLOCK_SIZE != 0)
+        throw std::runtime_error{
+                "Legacy attachment decryption failed: ciphertext is not a whole number of blocks"};
+
+    auto iv = encrypted.first<LEGACY_IV_SIZE>();
+    auto body = encrypted.subspan(LEGACY_IV_SIZE, body_size);
+    auto mac = encrypted.last<LEGACY_MAC_SIZE>();
+    // What both authenticators are computed over: everything but the trailing MAC itself.
+    auto authenticated = encrypted.first(LEGACY_IV_SIZE + body_size);
+
+    std::array<std::byte, LEGACY_MAC_SIZE> expected_mac;
+    {
+        hmac_sha256_ctx ctx;
+        hmac_sha256_set_key(&ctx, 32, to_unsigned(key.data()) + 32);
+        hmac_sha256_update(&ctx, authenticated.size(), to_unsigned(authenticated.data()));
+        hmac_sha256_digest(&ctx, expected_mac.size(), to_unsigned(expected_mac.data()));
+    }
+    if (!memeql_sec(expected_mac.data(), mac.data(), LEGACY_MAC_SIZE))
+        throw std::runtime_error{"Legacy attachment decryption failed: HMAC mismatch"};
+
+    // The digest covers the MAC as well, and is the sender's own claim carried outside the file, so
+    // it is what ties these bytes to the message that pointed at them.
+    std::array<std::byte, LEGACY_DIGEST_SIZE> expected_digest;
+    {
+        sha256_ctx ctx;
+        sha256_init(&ctx);
+        sha256_update(&ctx, encrypted.size(), to_unsigned(encrypted.data()));
+        sha256_digest(&ctx, expected_digest.size(), to_unsigned(expected_digest.data()));
+    }
+    if (!memeql_sec(expected_digest.data(), digest.data(), LEGACY_DIGEST_SIZE))
+        throw std::runtime_error{"Legacy attachment decryption failed: digest mismatch"};
+
+    std::vector<std::byte> plaintext;
+    plaintext.resize(body_size);
+    {
+        aes256_ctx ctx;
+        aes256_set_decrypt_key(&ctx, to_unsigned(key.data()));
+        // cbc_decrypt consumes the IV in place, so it gets a copy rather than the input span.
+        std::array<uint8_t, LEGACY_IV_SIZE> iv_copy;
+        std::memcpy(iv_copy.data(), iv.data(), iv_copy.size());
+        cbc_decrypt(
+                &ctx,
+                reinterpret_cast<nettle_cipher_func*>(aes256_decrypt),
+                AES_BLOCK_SIZE,
+                iv_copy.data(),
+                body_size,
+                to_unsigned(plaintext.data()),
+                to_unsigned(body.data()));
+    }
+
+    // PKCS#7: the last byte is how many padding bytes there are, and every one of them must say so.
+    // Nettle leaves this to us, unlike the platform APIs the other clients decrypt with.
+    auto pad = static_cast<size_t>(plaintext.back());
+    if (pad == 0 || pad > AES_BLOCK_SIZE || pad > plaintext.size())
+        throw std::runtime_error{"Legacy attachment decryption failed: bad PKCS#7 padding"};
+    for (auto it = plaintext.end() - pad; it != plaintext.end(); ++it)
+        if (static_cast<size_t>(*it) != pad)
+            throw std::runtime_error{"Legacy attachment decryption failed: bad PKCS#7 padding"};
+    plaintext.resize(plaintext.size() - pad);
+
+    // Session's own zero padding, on top of the block padding, is what `unpadded_size` describes.
+    // Zero means the sender never said -- only clients older than the field do that -- and the
+    // padding stays rather than being guessed at.
+    if (unpadded_size > 0) {
+        if (unpadded_size > plaintext.size())
+            throw std::runtime_error{
+                    "Legacy attachment decryption failed: claimed size {}B exceeds the {}B decrypted"_format(
+                            unpadded_size, plaintext.size())};
+        plaintext.resize(unpadded_size);
+    }
+
+    return plaintext;
 }
 
 Decryptor::Decryptor(

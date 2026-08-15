@@ -264,6 +264,49 @@ size_t decrypt(
         std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
         std::span<std::byte> out);
 
+/// Sizes of the legacy attachment encryption scheme's pieces: a 32-byte AES-256 key followed by a
+/// 32-byte HMAC-SHA256 key, a 16-byte CBC IV, and a full-length (untruncated) HMAC.
+constexpr size_t LEGACY_KEY_SIZE = 64;
+constexpr size_t LEGACY_IV_SIZE = 16;
+constexpr size_t LEGACY_MAC_SIZE = 32;
+constexpr size_t LEGACY_DIGEST_SIZE = 32;
+
+/// The largest encrypted attachment the file server will store, and so the most any legacy
+/// attachment can be: unlike the stream scheme, legacy decryption has to hold the whole ciphertext
+/// at once, because the MAC and digest cover all of it and must be checked before any of it is
+/// decrypted.  Anything larger has to use the stream scheme, which decrypts incrementally.
+constexpr size_t LEGACY_MAX_ENCRYPTED_SIZE = 10223616;
+
+/// API: crypto/attachment::legacy_decrypt
+///
+/// Decrypts an attachment encrypted with the scheme Session used before the stream one: AES-256-CBC
+/// under a random key, authenticated by an HMAC over the IV and ciphertext, and again by a SHA-256
+/// digest carried separately in the AttachmentPointer.  Every Session client still sends these, so
+/// this is the path most received attachments take.
+///
+/// The layout is `IV || AES-256-CBC(PKCS#7) || HMAC-SHA256(IV || ciphertext)`, with `digest` the
+/// SHA-256 of all three.  Both are checked, in constant time, before anything is decrypted.
+///
+/// Inputs:
+/// - `encrypted` -- the downloaded file, entire.  At most LEGACY_MAX_ENCRYPTED_SIZE.
+/// - `key` -- the 64-byte key from the pointer: AES key then HMAC key.
+/// - `digest` -- the 32-byte digest from the pointer.
+/// - `unpadded_size` -- the pointer's `size`, i.e. the sender's claim about how long the file is
+///   before the zero padding that hides its true length.  Zero means the sender did not say, which
+///   only clients predating the field do, and leaves the padding in place; any other value must be
+///   no larger than what was decrypted, or the pointer is lying and this throws.
+///
+/// Outputs:
+/// - std::vector<std::byte> of decrypted, de-padded data.
+///
+/// Throws std::runtime_error if the input is too large or malformed, if either authenticator fails,
+/// or if `unpadded_size` does not describe the decrypted data.
+std::vector<std::byte> legacy_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_KEY_SIZE> key,
+        std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
+        size_t unpadded_size);
+
 /// API: crypto/attachment::Decryptor
 ///
 /// Object-based interfaced to streaming decryption.  The basic usage is to construct the object
