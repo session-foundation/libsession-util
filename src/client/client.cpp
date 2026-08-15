@@ -705,6 +705,64 @@ static constexpr auto MESSAGE_COLUMNS = R"(
     JOIN accounts a ON a.id = m.sender
 )"sv;
 
+// Fills in the attachments of every message in `msgs`.
+//
+// One query for the whole page rather than one per message: a conversation view re-reads its page
+// on every render, so the per-message alternative pays its cost there.  The placeholder list makes
+// this a distinct query string per page size, and so one prepared-statement cache entry per limit
+// an application actually asks for -- few, since a page size is normally fixed.
+static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) {
+    if (msgs.empty())
+        return;
+
+    std::unordered_map<int64_t, Message*> by_id;
+    for (auto& m : msgs)
+        by_id.emplace(m.id, &m);
+
+    std::string placeholders;
+    for (size_t i = 0; i < msgs.size(); i++)
+        placeholders += i ? ",?" : "?";
+
+    auto st = c.prepared_st(
+            R"(
+        SELECT message, idx, content_type, filename, caption, flags, width, height,
+               size, url IS NOT NULL
+        FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
+    )"_format(placeholders));
+
+    int n = 1;
+    for (const auto& m : msgs)
+        st->bind(n++, m.id);
+
+    for (auto&& [message, idx, ctype, fname, caption, flags, width, height, size, uploaded] :
+         sqlite::IterableStatementWrapper<
+                 int64_t,
+                 int64_t,
+                 std::optional<std::string>,
+                 std::optional<std::string>,
+                 std::optional<std::string>,
+                 int,
+                 std::optional<int>,
+                 std::optional<int>,
+                 std::optional<int64_t>,
+                 int>{std::move(st)}) {
+        auto found = by_id.find(message);
+        if (found == by_id.end())
+            continue;
+
+        found->second->attachments.push_back(Attachment{
+                .index = static_cast<size_t>(idx),
+                .content_type = std::move(ctype),
+                .filename = std::move(fname),
+                .caption = std::move(caption),
+                .voice_message = (flags & ATTACHMENT_FLAG_VOICE_MESSAGE) != 0,
+                .width = width ? std::optional{static_cast<uint32_t>(*width)} : std::nullopt,
+                .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
+                .size = size,
+                .uploaded = uploaded != 0});
+    }
+}
+
 template <typename... Bind>
 static std::vector<Message> query_messages(
         sqlite::Connection& c,
@@ -1013,7 +1071,8 @@ void Client::_upload_next(
     // however long the message sat waiting: a file present when it was attached can be gone by the
     // time its turn comes, and a message resumed in a later run may have been waiting for days.
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+    auto plaintext_size = static_cast<int64_t>(std::filesystem::file_size(path, ec));
+    if (ec || !std::filesystem::is_regular_file(path, ec) || ec) {
         log::warning(
                 cat,
                 "Attachment {} of message {} is gone ({}); the message cannot be sent",
@@ -1058,14 +1117,19 @@ void Client::_upload_next(
     }
 
     req.on_complete =
-            [this, client_id, index, on_upload](
+            [this, client_id, index, on_upload, plaintext_size](
                     std::variant<std::pair<network::file_metadata, cleared_b32>, int16_t> result,
                     bool /*timeout*/) {
                 // Delivered on the network's loop; everything below touches the database, which is
                 // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
                 // own continuation -- so a failure has to be turned into the message failing, which
                 // is what the application is watching.
-                loop.call([this, client_id, index, on_upload, result = std::move(result)] {
+                loop.call([this,
+                           client_id,
+                           index,
+                           on_upload,
+                           plaintext_size,
+                           result = std::move(result)] {
                     try {
                         if (auto* err = std::get_if<int16_t>(&result)) {
                             log::warning(
@@ -1085,12 +1149,17 @@ void Client::_upload_next(
 
                         {
                             auto c = core.database().conn();
+                            // The file's own size, not the encrypted one the server reports back:
+                            // `size` on the pointer means the plaintext length everywhere else in
+                            // Session, and for a legacy-encrypted attachment it is what a recipient
+                            // trims the padding by, so an encrypted size there would be wrong in a
+                            // way that breaks decryption rather than merely misreporting.
                             c.prepared_exec(
                                     "UPDATE message_attachments SET url = ?, key = ?, size = ?"
                                     " WHERE message = ? AND idx = ?",
                                     url,
                                     std::span<const std::byte>{key},
-                                    meta.size,
+                                    plaintext_size,
                                     client_id,
                                     static_cast<int64_t>(index));
                         }

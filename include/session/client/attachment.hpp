@@ -42,4 +42,44 @@ struct OutgoingAttachment {
     std::optional<uint32_t> height;
 };
 
+/// An attachment on a stored message, in either direction, as reported on `Message::attachments`.
+///
+/// The descriptive fields are the same ones `OutgoingAttachment` supplies, and on an incoming
+/// attachment they are the sender's claims: nothing here has been checked against the file, which
+/// has usually not been fetched at all.  In particular `content_type` and `filename` are chosen by
+/// whoever sent it, so treat them as display hints rather than as facts about the bytes.
+struct Attachment {
+    /// Position within the message's attachment list.  This is the index `send_message`'s upload
+    /// handler reports progress against, and what `save_attachment` takes.
+    size_t index;
+
+    std::optional<std::string> content_type;
+    std::optional<std::string> filename;
+    std::optional<std::string> caption;
+
+    /// A recorded voice message rather than an ordinary audio file, which clients present
+    /// differently.
+    bool voice_message = false;
+
+    std::optional<uint32_t> width;
+    std::optional<uint32_t> height;
+
+    /// The file's size in bytes, before encryption -- what the file server holds is larger, since
+    /// it carries the stream's per-chunk overhead and the padding that hides the true length.
+    ///
+    /// Unset on an outgoing attachment that has not been uploaded yet.  On an incoming one this is
+    /// the sender's claim: for a legacy-encrypted attachment it is load-bearing, being what the
+    /// padding is trimmed by, and a wrong value there shows up as a corrupt file.
+    std::optional<int64_t> size;
+
+    /// Whether the file is on the file server: for an outgoing attachment, that its upload
+    /// finished, which is how a partly-uploaded message reports which of its files got through.
+    /// Always true for an incoming attachment, which is where it came from.
+    ///
+    /// Where the file is *locally* is deliberately not here.  A local path is an argument to
+    /// sending or saving, not a property of the attachment: the application chose it and knows it,
+    /// and anything recorded here would go stale as soon as the file was moved.
+    bool uploaded = false;
+};
+
 }  // namespace session::client

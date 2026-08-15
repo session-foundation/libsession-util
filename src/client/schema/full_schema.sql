@@ -142,21 +142,29 @@ CREATE TABLE message_raw_content (
     content BLOB NOT NULL
 ) STRICT;
 
--- Files attached to an outgoing message, held only while the message is getting sent.
+-- Files attached to a message, in either direction.
 --
--- Sending a message with attachments is two stages: each file is encrypted and uploaded, and only
--- then can the message be built, since it has to name where those files ended up.  A failure
--- between the two leaves a message that cannot be finished from the message alone -- what it needs
--- is the local files and whatever their uploads already achieved, neither of which the protobuf
--- carries.  Retrying without that would mean re-uploading files that already arrived.
+-- The two directions are the same set of columns and differ only in which end is known first, so
+-- they share the table; `messages.outgoing` says which reading applies.  `path` is the local copy
+-- and `url` the remote one, and exactly one of them exists from the start:
 --
--- There is no state column: `url IS NULL` *is* "not uploaded yet".  Retrying is then "upload every
--- row for this message that has no url, then build the message and send it", which cannot disagree
--- with itself the way a separate state could, and is safe to run twice.
+--   outgoing -- `path` is the file we uploaded, and is required; `url IS NULL` means not uploaded
+--   incoming -- `url` is where the file is, and is required; `path IS NULL` means not saved
 --
--- The local `path` outlives the upload deliberately.  It is what makes an attachment we sent
--- displayable without fetching our own upload back, and it is the only record of it: what persists
--- of a sent attachment otherwise is the pointer inside message_raw_content.
+-- Sending with attachments is two stages: each file is encrypted and uploaded, and only then can
+-- the message be built, since it has to name where those files ended up.  A failure between the two
+-- leaves a message that cannot be finished from the message alone -- what it needs is the local
+-- files and whatever their uploads already achieved, neither of which the protobuf carries.
+-- Retrying without that would mean re-uploading files that already arrived.
+--
+-- There is no state column: for an outgoing attachment `url IS NULL` *is* "not uploaded yet".
+-- Retrying is then "upload every row for this message that has no url, then build the message and
+-- send it", which cannot disagree with itself the way a separate state could, and is safe to run
+-- twice.
+--
+-- An outgoing row's `path` outlives the upload deliberately.  It is what makes an attachment we
+-- sent displayable without fetching our own upload back, and it is the only record of it: what
+-- persists of a sent attachment otherwise is the pointer inside message_raw_content.
 CREATE TABLE message_attachments (
     message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
 
@@ -164,12 +172,14 @@ CREATE TABLE message_attachments (
     -- protobuf and how a progress report names one of them.
     idx INTEGER NOT NULL,
 
-    -- The local file.  May since have been moved or deleted, which is only fatal if this row still
-    -- needs uploading.
-    path TEXT NOT NULL,
+    -- The local file: for an outgoing attachment the one we uploaded, which may since have been
+    -- moved or deleted (only fatal if this row still needs uploading); for an incoming one where
+    -- we saved the download, NULL until it is asked for.
+    path TEXT,
 
-    -- Descriptive fields, carried through to the protobuf pointer as-is.  content_type is what a
-    -- recipient displays by; the rest are optional and simply omitted when null.
+    -- Descriptive fields, carried straight through the protobuf pointer in both directions.
+    -- content_type is what a recipient displays by; the rest are optional and simply omitted when
+    -- null.  On an incoming attachment these are the sender's claims and nothing more.
     content_type TEXT,
     filename TEXT,
     caption TEXT,
@@ -177,11 +187,16 @@ CREATE TABLE message_attachments (
     width INTEGER,
     height INTEGER,
 
-    -- Set together, once the upload succeeds: where the file landed, the key it was encrypted
-    -- with, and its encrypted size.
+    -- Where the file is on the file server, the key it is encrypted with, and its encrypted size.
+    -- Set together when an upload succeeds, or read together out of an arriving pointer.
     url TEXT,
     key BLOB,
     size INTEGER,
+
+    -- Legacy attachments authenticate with a separate SHA-256 digest over the ciphertext, and
+    -- carry a 64-byte `key` (AES key then HMAC key) rather than the 32-byte stream key.  Null for
+    -- anything encrypted with the stream scheme, which authenticates each chunk as it goes.
+    digest BLOB,
 
     PRIMARY KEY (message, idx)
 ) STRICT;

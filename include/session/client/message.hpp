@@ -3,10 +3,12 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <session/client/attachment.hpp>
 #include <session/client/conversation_id.hpp>
 #include <session/clock.hpp>
 #include <session/util.hpp>
 #include <string>
+#include <vector>
 
 namespace session::client {
 
@@ -72,6 +74,11 @@ struct Message {
 
     /// The message body.  Empty for a message that carries no text (e.g. attachments only).
     std::string body;
+
+    /// Files attached to the message, in the order they appear in it.  Populated for every message
+    /// a query returns, so a caller never has to ask a second time to find out whether there are
+    /// any -- an attachments-only message is one with an empty `body` and a non-empty list here.
+    std::vector<Attachment> attachments;
 
     /// Delivery of the copy sent to the recipient — what "did it arrive" ordinarily means, and
     /// what a message list normally shows.  Unset on an incoming message.
