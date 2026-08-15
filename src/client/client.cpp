@@ -541,7 +541,8 @@ void Client::save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void()> cb) {
+        failable_function<void()> cb,
+        bool notify_sender) {
 
     // Checked on the calling thread so a caller's own mistake surfaces at the call site, where they
     // still have a stack to make sense of it.
@@ -560,9 +561,11 @@ void Client::save_attachment(
                index,
                dest = std::move(dest),
                on_progress = std::move(on_progress),
-               cb]() mutable {
+               cb,
+               notify_sender]() mutable {
         try {
-            _save_attachment(message_id, index, std::move(dest), std::move(on_progress), cb);
+            _save_attachment(
+                    message_id, index, std::move(dest), std::move(on_progress), cb, notify_sender);
         } catch (const std::exception& e) {
             log_operation_failure(e);
             _report(cb, std::optional{std::string{e.what()}});
@@ -1385,7 +1388,8 @@ void Client::_save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void()> cb) {
+        failable_function<void()> cb,
+        bool notify_sender) {
 
     std::optional<std::string> url;
     std::vector<std::byte> key, digest;
@@ -1520,6 +1524,9 @@ void Client::_save_attachment(
                        state,
                        stream,
                        report,
+                       message_id,
+                       index,
+                       notify_sender,
                        cb = std::move(cb),
                        key = std::move(key),
                        digest = std::move(digest),
@@ -1571,9 +1578,62 @@ void Client::_save_attachment(
 
         report(state->received, state->received, 0);
         _report(cb, std::optional<std::string>{});
+
+        // After the file is down and verified, never before: what this tells the sender is that we
+        // have their file, which is not true until we do.
+        if (notify_sender)
+            loop.call([this, message_id, index] { _notify_media_saved(message_id, index); });
     };
 
     net->download(std::move(req));
+}
+
+void Client::_notify_media_saved(int64_t message_id, size_t index) {
+    std::optional<ConversationId> convo_id;
+    int64_t timestamp = 0;
+    std::optional<MsgId> msgid;
+    {
+        auto c = core.database().conn();
+        auto row = c.prepared_maybe_get<int64_t, int, int64_t, std::optional<MsgId>>(
+                "SELECT conversation, outgoing, timestamp, msgid FROM messages WHERE id = ?",
+                message_id);
+        if (!row)
+            return;
+        auto [convo_row, outgoing, ts, id] = *row;
+
+        // Saving from a message we sent notifies nobody: the person who would be told is us.  That
+        // covers a note to self as well, which is outgoing.
+        if (outgoing)
+            return;
+
+        convo_id = conversation_id_at(c, convo_row);
+        timestamp = ts;
+        msgid = id;
+    }
+
+    if (convo_id->type() != ConversationId::Type::dm)
+        return;
+
+    SessionProtos::Content content;
+    auto now = clock_now_ms();
+    content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    content.set_msgid(new_msgid());
+
+    auto* note = content.mutable_dataextractionnotification();
+    note->set_type(SessionProtos::DataExtractionNotification::MEDIA_SAVED);
+    note->set_msgtimestamp(static_cast<uint64_t>(timestamp));
+    // Deliberately not set when the message we saved from carries none: the pair is what identifies
+    // a message, and half of it is not a weaker match but an ambiguous one.
+    if (msgid)
+        note->set_msgid(*msgid);
+    note->set_attindex(static_cast<int32_t>(index));
+
+    log::debug(
+            cat, "Telling the sender we saved attachment {} of message {}", index, message_id);
+
+    // Registered rather than fired blind: Core reports on every send, and a status for an id nobody
+    // claims would sit in _early_status for the life of the process.
+    _quiet_sends.insert(core.send_dm(convo_id->session_id(), content, now));
 }
 
 void Client::_finish_attachment_send(int64_t client_id) {
@@ -1926,6 +1986,18 @@ void Client::_on_send_status(
         int64_t core_id,
         core::MessageSendStatus status,
         std::optional<std::string_view> swarm_hash) {
+    if (auto quiet = _quiet_sends.find(core_id); quiet != _quiet_sends.end()) {
+        if (is_terminal(status)) {
+            _quiet_sends.erase(quiet);
+            if (status != core::MessageSendStatus::success)
+                log::debug(
+                        cat,
+                        "A send nobody is waiting on failed with status {}",
+                        static_cast<int>(status));
+        }
+        return;
+    }
+
     if (auto sync = _sync_sends.find(core_id); sync != _sync_sends.end()) {
         log::debug(
                 cat, "sync copy of send {} reached status {}", core_id, static_cast<int>(status));

@@ -102,7 +102,8 @@ class SyncClient : public Client {
             std::filesystem::path dest,
             std::function<
                     void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
-                    on_progress = nullptr) {
+                    on_progress = nullptr,
+            bool notify_sender = true) {
         std::promise<std::optional<std::string>> done;
         auto waiter = done.get_future();
         Client::save_attachment(
@@ -110,7 +111,8 @@ class SyncClient : public Client {
                 index,
                 std::move(dest),
                 std::move(on_progress),
-                [&done](std::optional<std::string> error) { done.set_value(std::move(error)); });
+                [&done](std::optional<std::string> error) { done.set_value(std::move(error)); },
+                notify_sender);
         if (auto error = waiter.get())
             throw std::runtime_error{*error};
     }

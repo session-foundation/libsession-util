@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "client/schema/schema_registry.hpp"
@@ -301,6 +302,13 @@ class Client {
     /// under way with `done`/`total` in encrypted bytes, `result == 0` means written and verified,
     /// and anything else is the failure's status code.
     ///
+    /// `notify_sender` tells the person who sent it that we saved their file, which is what
+    /// Session's other clients do and so what a recipient expects.  Passing false keeps the save to
+    /// ourselves -- worth offering as a setting, since whether fetching someone's photo should be
+    /// reported back to them is a privacy decision rather than a technical one.  Only ever sent for
+    /// a message we received: saving from our own message notifies nobody, and neither does a
+    /// failed save.
+    ///
     /// Which of Session's two attachment encryptions applies is read from the url, so a caller
     /// neither chooses nor needs to know: current clients still send the legacy scheme, and files we
     /// send use the stream one.
@@ -318,7 +326,8 @@ class Client {
             std::function<
                     void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
                     on_progress,
-            failable_function<void()> cb);
+            failable_function<void()> cb,
+            bool notify_sender = true);
 
     /// Sets, replaces or removes the dispatcher every handler is delivered through, which a caller
     /// whose loop does not exist yet when the Client is built needs: an application typically opens
@@ -400,6 +409,11 @@ class Client {
     // accumulate in _early_status forever.
     std::unordered_map<int64_t, int64_t> _sync_sends;  // core send id -> client message id
 
+    // Sends whose outcome nobody is waiting for -- the media-saved notification is the only one so
+    // far.  Tracked rather than left unregistered so that their statuses are dropped as they
+    // arrive, instead of accumulating in _early_status against ids that will never be claimed.
+    std::unordered_set<int64_t> _quiet_sends;
+
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
@@ -449,7 +463,13 @@ class Client {
             size_t index,
             std::filesystem::path dest,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-            failable_function<void()> cb);
+            failable_function<void()> cb,
+            bool notify_sender);
+
+    // Tells a message's sender that we saved one of its attachments.  Fire and forget: nothing
+    // waits on it and a failure is logged rather than reported, since it is a courtesy to them
+    // rather than part of what the caller asked for.
+    void _notify_media_saved(int64_t message_id, size_t index);
 
     // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
     // copy for our own swarm.  Shared by the plain and attachment-carrying sends.
