@@ -185,7 +185,23 @@ struct Request {
     /// `overall_timeout` has been exceeded.
     std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
 
-    int retry_count = 0;
+    /// How many times this request has been redirected after a 421, bounded by
+    /// `config.redirect_retry_count`.  Counts redirects only -- a 421 means our swarm information
+    /// was wrong, so recovery is to re-resolve the swarm from scratch.  It has nothing to do with
+    /// `failed_nodes` below, which is the opposite situation.
+    int retry_421_count = 0;
+
+    /// Swarm members that could not be reached for this request, in the order they were tried.
+    ///
+    /// A node that cannot be reached says nothing about the swarm -- unlike a 421, which says the
+    /// swarm itself is wrong -- so recovery is to keep the swarm and move to the next-best member,
+    /// excluding these.  Running out of members is what ends it, so this is a set rather than a
+    /// count: "once per node" cannot be expressed as a number, since choosing the next one has to
+    /// know which have already been spent.
+    ///
+    /// Empty for anything not addressed to a swarm; a request with no `swarm_pubkey` has no other
+    /// member to move to.
+    std::vector<service_node> failed_nodes;
 
     Request(std::string request_id,
             network_destination destination,

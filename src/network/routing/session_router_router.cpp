@@ -324,12 +324,45 @@ void SessionRouter::_start_file_upload(
                     if (!self)
                         return nullptr;
 
-                    // Establish tunnel synchronously (we're on the loop thread here).  The claim
-                    // is kept alongside the other tunnels rather than in a local: the file client
-                    // goes on using this port long after this function has returned.
+                    // The claim is kept alongside the other tunnels rather than in a local: the
+                    // file client goes on using this port long after this function has returned.
+                    //
+                    // establish_udp does not block -- the port mapping is local, so local_port is
+                    // usable on return -- but the session behind it may not be up yet.  Sending
+                    // into a mapping with nothing behind it means the QUIC handshake's packets are
+                    // dropped and retried on QUIC's own timer, which is where a cold upload spends
+                    // seconds doing nothing.  So the callbacks are taken: `established` is what
+                    // says the mapping now carries traffic, and a failure is reported rather than
+                    // waited out -- an unreachable relay is known immediately and there is no
+                    // point spending the request timeout discovering it again.
                     auto& held = _tunnel(target.address);
-                    if (!held.tunnel)
-                        held.tunnel = srouter->establish_udp(target.address, target.port);
+                    if (!held.tunnel) {
+                        auto address = target.address;
+                        held.tunnel = srouter->establish_udp(
+                                target.address,
+                                target.port,
+                                [weak_self, this, address](router::tunnel_info) {
+                                    if (auto self = weak_self.lock())
+                                        _tunnel(address).established = true;
+                                },
+                                [weak_self, this, address](router::tunnel_failure failure) {
+                                    auto self = weak_self.lock();
+                                    if (!self)
+                                        return;
+                                    log::error(
+                                            cat,
+                                            "File server {} is {}.",
+                                            address,
+                                            failure == router::tunnel_failure::unreachable
+                                                    ? "unreachable"
+                                                    : "not responding");
+                                    // Drops the claim, so the next attempt builds a fresh mapping
+                                    // rather than reusing one known to carry nothing.
+                                    _fail_tunnel(
+                                            address,
+                                            failure == router::tunnel_failure::unreachable);
+                                });
+                    }
                     if (!held.tunnel) {
                         log::error(cat, "File server {} is unreachable.", target.address);
                         return nullptr;

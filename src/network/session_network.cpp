@@ -510,9 +510,26 @@ void Network::send_request(Request request, network_response_callback_t callback
                         return;
                     }
 
+                    // The node itself could not be reached -- no relay contact for it, so session
+                    // router cannot carry anything there.  The swarm is not in question, so the
+                    // request moves to the next member rather than being failed.  Without this the
+                    // first send to a node that does not participate dies, and the node is only
+                    // struck out *afterwards*, so the cost is one dead request per such node.
+                    if (final_status_code == ERROR_INVALID_DESTINATION && dest_is_snode &&
+                        original_req.swarm_pubkey) {
+                        _retry_next_swarm_node(
+                                std::move(original_req),
+                                timeout,
+                                status_code,
+                                std::move(headers),
+                                std::move(body),
+                                std::move(cb));
+                        return;
+                    }
+
                     // For debugging purposes we want to add a log if this was a successful request
                     // after we did an automatic retry
-                    if (original_req.retry_count > 0)
+                    if (original_req.retry_421_count > 0)
                         log::info(
                                 cat,
                                 "[Request {}] Received valid response after 421 retry.",
@@ -826,9 +843,111 @@ void Network::_update_network_state(const std::string& body) {
 
 // MARK: Specific Error Handling
 
+// The least time worth starting another attempt with.  A request given a second or two cannot
+// realistically resolve a node, connect and get an answer, so spending the remainder of the budget
+// on it only delays telling the caller what we already know.
+static constexpr auto MIN_RETRY_BUDGET = 2s;
+
+void Network::_retry_next_swarm_node(
+        Request original_request,
+        bool timeout,
+        int16_t status_code,
+        std::vector<std::pair<std::string, std::string>> headers,
+        std::optional<std::string> body,
+        network_response_callback_t final_callback) {
+
+    auto* failed_node = std::get_if<service_node>(&original_request.destination);
+    if (!failed_node || !original_request.swarm_pubkey)
+        return final_callback(false, timeout, status_code, std::move(headers), std::move(body));
+
+    original_request.failed_nodes.push_back(*failed_node);
+    auto swarm_pubkey = *original_request.swarm_pubkey;
+
+    // Deliberately not refreshing the snode cache first, which is what the 421 path does: nothing
+    // here suggests our swarm information is stale, only that one member of it is unreachable.  The
+    // swarm comes back from the cache, so this costs nothing and returns the same members in the
+    // same order.
+    //
+    // The failure that got us here is carried into the callback rather than referenced from out
+    // here: this returns before get_swarm answers, so anything left behind would be gone by then.
+    _snode_pool->get_swarm(
+            swarm_pubkey,
+            false,
+            [this,
+             req = std::move(original_request),
+             cb = std::move(final_callback),
+             timeout,
+             status_code,
+             headers = std::move(headers),
+             body = std::move(body)](
+                    swarm::swarm_id_t, std::vector<service_node> swarm_nodes) mutable {
+                // Reports the failure that got us here rather than one of our own invention: the
+                // caller wants to know why the request did not go through, and "no members left"
+                // says less than the reason each of them was unusable.
+                auto give_up = [&] {
+                    cb(false, timeout, status_code, std::move(headers), std::move(body));
+                };
+
+                // The next-best member rather than a random one: the swarm comes back in a
+                // deterministic order, so walking it means every member is tried exactly once and
+                // in the same order every time, which a random pick cannot promise.
+                auto next = std::ranges::find_if(swarm_nodes, [&](const service_node& node) {
+                    return std::ranges::find(req.failed_nodes, node) == req.failed_nodes.end();
+                });
+
+                if (next == swarm_nodes.end()) {
+                    log::warning(
+                            cat,
+                            "[Request {}] No swarm member left to try: all {} were unreachable.",
+                            req.request_id,
+                            req.failed_nodes.size());
+                    return give_up();
+                }
+
+                auto chosen = next->to_string();
+                auto retry = std::move(req);
+                retry.destination = std::move(*next);
+
+                // Each attempt gets the per-request timeout or whatever is left of the operation's
+                // overall budget, whichever is shorter -- so walking the swarm cannot outlive what
+                // the caller asked for, however many members turn out to be unusable.  The budget
+                // runs from the *original* request's creation, which a re-send carries with it, so
+                // time spent on earlier members counts against later ones.
+                if (retry.overall_timeout) {
+                    auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - retry.creation_time);
+                    auto left = *retry.overall_timeout - spent;
+
+                    if (left < MIN_RETRY_BUDGET) {
+                        log::warning(
+                                cat,
+                                "[Request {}] Out of time to try another swarm member ({}ms left "
+                                "of {}ms).",
+                                retry.request_id,
+                                left.count(),
+                                retry.overall_timeout->count());
+                        return give_up();
+                    }
+
+                    retry.request_timeout = std::min(retry.request_timeout, left);
+                }
+
+                log::info(
+                        cat,
+                        "[Request {}] Node unreachable, retrying on {} with {}ms ({} already "
+                        "tried).",
+                        retry.request_id,
+                        chosen,
+                        retry.request_timeout.count(),
+                        retry.failed_nodes.size());
+
+                send_request(std::move(retry), std::move(cb));
+            });
+}
+
 void Network::_handle_421_retry(
         Request original_request, network_response_callback_t final_callback) {
-    if (original_request.retry_count >= config.redirect_retry_count) {
+    if (original_request.retry_421_count >= config.redirect_retry_count) {
         log::error(
                 cat,
                 "Request {} received 421 but exceeded max retry count.",
@@ -920,7 +1039,7 @@ void Network::_handle_421_retry(
                                     req_to_retry.request_id,
                                     swarm_nodes[new_target].to_string());
                             auto final_request = req_to_retry;
-                            final_request.retry_count++;
+                            final_request.retry_421_count++;
                             final_request.destination = std::move(swarm_nodes[new_target]);
                             this->send_request(std::move(final_request), std::move(cb));
                         });

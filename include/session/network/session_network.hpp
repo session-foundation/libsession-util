@@ -124,6 +124,19 @@ class Network : public std::enable_shared_from_this<Network> {
     void _update_network_state(const std::string& body);
     void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
 
+    // Re-sends a request to the next member of the same swarm, after the one it was sent to could
+    // not be reached.  Distinct from the 421 path: there the swarm information was wrong and is
+    // thrown away, here it is right and only one member of it is unusable.  Gives up when
+    // selection has no member left that has not already failed, reporting the original failure
+    // rather than one of its own invention.
+    void _retry_next_swarm_node(
+            Request original_request,
+            bool timeout,
+            int16_t status_code,
+            std::vector<std::pair<std::string, std::string>> headers,
+            std::optional<std::string> body,
+            network_response_callback_t final_callback);
+
     void _resync_clock(
             std::optional<Request> original_request, network_response_callback_t request_callback);
     void _launch_next_clock_out_of_sync_request(

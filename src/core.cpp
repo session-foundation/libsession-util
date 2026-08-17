@@ -84,9 +84,24 @@ static_assert(store_requires_auth(21) && retrieve_requires_auth(21));
 static_assert(store_requires_auth(-21) && !retrieve_requires_auth(-21));
 static_assert(!retrieve_requires_auth(LEGACY_CLOSED_NAMESPACE));
 
+// How long one attempt at a swarm request gets, and how long the whole operation gets across every
+// swarm member it tries.
+//
+// A node that has not answered in ten seconds is better abandoned than waited on: the swarm has
+// several other members, and moving to one of them costs less than the rest of a long timeout.
+// session-ios reaches the same conclusion from the other direction, spending its budget on many
+// short attempts rather than one patient one.
+//
+// The overall figure is what actually bounds the operation.  Without it, a swarm whose members are
+// all unreachable would cost the per-request timeout once per member, which is the sort of arithmetic
+// that only shows up in front of a user on a bad network.
+constexpr auto SWARM_REQUEST_TIMEOUT = 10s;
+constexpr auto SWARM_OVERALL_TIMEOUT = 60s;
+
 // Builds a request sent to `node` *about* the account identified by `swarm_pubkey`.  Recording the
 // swarm pubkey is what allows a 421 (the node is no longer in that account's swarm) to be recovered
-// by re-resolving the swarm, so it is bundled in here rather than left to each call site to
+// by re-resolving the swarm, and it is also what lets an unreachable node be replaced by the next
+// member of the same swarm -- so it is bundled in here rather than left to each call site to
 // remember.
 static network::Request swarm_request(
         const network::service_node& node,
@@ -98,8 +113,9 @@ static network::Request swarm_request(
             std::move(endpoint),
             std::move(body),
             network::RequestCategory::standard_small,
-            20s};
+            SWARM_REQUEST_TIMEOUT};
     req.swarm_pubkey = swarm_pubkey;
+    req.overall_timeout = SWARM_OVERALL_TIMEOUT;
     return req;
 }
 
