@@ -64,6 +64,7 @@ class JobQueue;
 // public.  Only referenced by private members below.
 namespace SessionProtos {
 class Content;
+class DataExtractionNotification;
 }
 
 namespace session::client {
@@ -470,6 +471,19 @@ class Client {
     // waits on it and a failure is logged rather than reported, since it is a courtesy to them
     // rather than part of what the caller asked for.
     void _notify_media_saved(int64_t message_id, size_t index);
+
+    // Records that the recipient of a message saved one of its attachments: us, for one we
+    // received, and them for one we sent.  An unset `index` means all of the message's
+    // attachments, which is what a peer saving several at once reports.
+    void _record_saved(int64_t message_id, std::optional<size_t> index, sys_ms when);
+
+    // A peer telling us they saved a file we sent them.  `when` is the notification's own
+    // timestamp -- when they saved it -- rather than the timestamp identifying which message it is
+    // about, which is generally older.
+    void _on_media_saved(
+            std::span<const std::byte, 33> sender,
+            const SessionProtos::DataExtractionNotification& note,
+            sys_ms when);
 
     // Hands a stored message to Core: the recipient's copy and, unless it is a note to self, the
     // copy for our own swarm.  Shared by the plain and attachment-carrying sends.

@@ -771,7 +771,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     auto st = c.prepared_st(
             R"(
         SELECT message, idx, content_type, filename, caption, flags, width, height,
-               size, url IS NOT NULL
+               size, url IS NOT NULL, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(placeholders));
 
@@ -779,7 +779,8 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     for (const auto& m : msgs)
         st->bind(n++, m.id);
 
-    for (auto&& [message, idx, ctype, fname, caption, flags, width, height, size, uploaded] :
+    for (auto&& [message, idx, ctype, fname, caption, flags, width, height, size, uploaded,
+                 saved_at] :
          sqlite::IterableStatementWrapper<
                  int64_t,
                  int64_t,
@@ -790,7 +791,8 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                  std::optional<int>,
                  std::optional<int>,
                  std::optional<int64_t>,
-                 int>{std::move(st)}) {
+                 int,
+                 std::optional<int64_t>>{std::move(st)}) {
         auto found = by_id.find(message);
         if (found == by_id.end())
             continue;
@@ -804,7 +806,8 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                 .width = width ? std::optional{static_cast<uint32_t>(*width)} : std::nullopt,
                 .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
                 .size = size,
-                .uploaded = uploaded != 0});
+                .uploaded = uploaded != 0,
+                .saved_at = saved_at ? std::optional{from_epoch_ms(*saved_at)} : std::nullopt});
     }
 }
 
@@ -1579,13 +1582,110 @@ void Client::_save_attachment(
         report(state->received, state->received, 0);
         _report(cb, std::optional<std::string>{});
 
-        // After the file is down and verified, never before: what this tells the sender is that we
-        // have their file, which is not true until we do.
-        if (notify_sender)
-            loop.call([this, message_id, index] { _notify_media_saved(message_id, index); });
+        // Both of these say the same thing -- that the recipient now has the file -- one to
+        // ourselves and one to the sender, and neither is true until it is on disk under its final
+        // name, which is why they are here rather than anywhere earlier.  Recording it does not
+        // depend on telling them: a caller who saved privately still gets to see that they did.
+        loop.call([this, message_id, index, notify_sender] {
+            _record_saved(message_id, index, clock_now_ms());
+            if (notify_sender)
+                _notify_media_saved(message_id, index);
+        });
     };
 
     net->download(std::move(req));
+}
+
+void Client::_on_media_saved(
+        std::span<const std::byte, 33> sender,
+        const SessionProtos::DataExtractionNotification& note,
+        sys_ms when) {
+
+    // Both halves of the reference are required.  The timestamp alone cannot identify a message --
+    // several sent in the same millisecond share one, which is what msgId exists to fix -- and
+    // msgId alone is far too small to be an identifier.  A notification carrying only the
+    // deprecated `timestamp` field says nothing usable: the three other clients disagree about
+    // what they put in it, so it is not read at all.
+    if (!note.has_msgtimestamp() || !note.has_msgid()) {
+        log::debug(cat, "Ignoring a media-saved notification that names no message");
+        return;
+    }
+
+    // Ours to have been saved: they can only have saved something we sent them, so the message
+    // must be one of ours, in the conversation with them.  Matching on sender as well as
+    // conversation stops a peer claiming anything about a message they were not sent.
+    auto convo_id = ConversationId::dm(sender);
+    std::optional<int64_t> message_id;
+    {
+        auto c = core.database().conn();
+        auto convo = find_conversation(c, convo_id);
+        if (!convo)
+            return;
+
+        message_id = c.prepared_maybe_get<int64_t>(
+                R"(
+            SELECT id FROM messages
+            WHERE conversation = ? AND timestamp = ? AND msgid = ? AND outgoing = 1
+        )",
+                *convo,
+                static_cast<int64_t>(note.msgtimestamp()),
+                static_cast<MsgId>(note.msgid()));
+    }
+
+    if (!message_id) {
+        log::debug(cat, "A media-saved notification named a message we do not have");
+        return;
+    }
+
+    // -1 means they saved all of the message's attachments together, which is what saving from a
+    // gallery view does; anything else names one by position.  An absent index is neither, and is
+    // not read as "the first one".
+    std::optional<size_t> index;
+    if (note.has_attindex()) {
+        if (note.attindex() >= 0)
+            index = static_cast<size_t>(note.attindex());
+        else if (note.attindex() != -1)
+            return;
+    } else
+        return;
+
+    // When they sent the notification, which is when they saved it -- *not* msgTimestamp, which
+    // identifies the message being talked about and may be days older.  Their clock rather than
+    // ours, and unauthenticated, but the alternative is our receive time, which is wrong by however
+    // long the notification sat in the swarm.
+    _record_saved(*message_id, index, when);
+}
+
+void Client::_record_saved(int64_t message_id, std::optional<size_t> index, sys_ms when) {
+    std::optional<ConversationId> convo_id;
+    {
+        auto c = core.database().conn();
+
+        // An unset index means every attachment of the message, which is what a peer saving from a
+        // gallery view reports.  Later saves overwrite earlier ones: what an application asks of
+        // this is "is there any point offering save again", not a history.
+        auto changed = index ? c.prepared_exec(
+                                       "UPDATE message_attachments SET saved_at = ?"
+                                       " WHERE message = ? AND idx = ?",
+                                       to_ms(when),
+                                       message_id,
+                                       static_cast<int64_t>(*index))
+                             : c.prepared_exec(
+                                       "UPDATE message_attachments SET saved_at = ?"
+                                       " WHERE message = ?",
+                                       to_ms(when),
+                                       message_id);
+        if (changed == 0)
+            return;
+
+        auto convo = c.prepared_maybe_get<int64_t>(
+                "SELECT conversation FROM messages WHERE id = ?", message_id);
+        if (!convo)
+            return;
+        convo_id = conversation_id_at(c, *convo);
+    }
+
+    _emit_message(false, *convo_id, message_id);
 }
 
 void Client::_notify_media_saved(int64_t message_id, size_t index) {
@@ -1835,6 +1935,20 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     SessionProtos::Content content;
     if (!content.ParseFromArray(msg.content.data(), static_cast<int>(msg.content.size()))) {
         log::warning(cat, "Dropping message {}: Content protobuf did not parse", msg.hash);
+        return;
+    }
+
+    // Someone telling us they saved a file we sent them.  Not history -- it changes an attachment
+    // we already have rather than adding anything -- so it is handled here and goes no further.
+    if (content.has_dataextractionnotification()) {
+        const auto& note = content.dataextractionnotification();
+        if (note.type() == SessionProtos::DataExtractionNotification::MEDIA_SAVED)
+            _on_media_saved(
+                    msg.sender_session_id,
+                    note,
+                    content.has_sigtimestamp()
+                            ? from_epoch_ms(static_cast<int64_t>(content.sigtimestamp()))
+                            : msg.timestamp);
         return;
     }
 

@@ -207,5 +207,17 @@ CREATE TABLE message_attachments (
     -- anything encrypted with the stream scheme, which authenticates each chunk as it goes.
     digest BLOB,
 
+    -- ms since epoch: when the *recipient* of this message last saved this attachment.  On an
+    -- incoming attachment that is us, writing it to disk; on an outgoing one it is the other party,
+    -- telling us they saved it.  One meaning in both directions -- "the recipient saved this, then".
+    --
+    -- Not a path: where a file went is the application's business, and one recorded here would be
+    -- wrong as soon as it moved the file.  This answers the question an application actually has,
+    -- which is whether offering "save" again is pointless.
+    --
+    -- NULL means "not known to have been saved", never "not saved": the outgoing case depends on
+    -- the other end volunteering a DataExtractionNotification, which many clients do not.
+    saved_at INTEGER,
+
     PRIMARY KEY (message, idx)
 ) STRICT;

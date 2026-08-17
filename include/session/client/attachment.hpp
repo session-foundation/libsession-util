@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <session/clock.hpp>
 #include <string>
 
 namespace session::client {
@@ -91,6 +92,20 @@ struct Attachment {
     /// sending or saving, not a property of the attachment: the application chose it and knows it,
     /// and anything recorded here would go stale as soon as the file was moved.
     bool uploaded = false;
+
+    /// When the *recipient* of this message last saved this attachment -- us, on an incoming one,
+    /// and the other party on one we sent.  The same fact from either end, so it does not have to
+    /// be read differently depending on `Message::outgoing`.
+    ///
+    /// What it is for is knowing whether offering "save" again is pointless, and — on a message we
+    /// sent — whether the file reached a person rather than merely a file server.
+    ///
+    /// Unset means **not known to have been saved**, which is not the same as not saved, and must
+    /// not be shown as though it were.  On an outgoing attachment it depends entirely on the other
+    /// end volunteering a notification: a client that sends none, or one too old to say which
+    /// message it means, leaves this unset no matter how many times its user saved the file.  A
+    /// sender reading an absent value as "they never got it" would be wrong.
+    std::optional<sys_ms> saved_at;
 };
 
 }  // namespace session::client

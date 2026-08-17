@@ -1307,6 +1307,14 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     sync(*c);
     CHECK(stores(*net).size() == 1);
 
+    // We also remember that we saved it, which is what stops a client offering "save" forever and
+    // writing a second copy.  Recorded whether or not the sender was told.
+    auto saved = c->message(msg_id);
+    REQUIRE(saved.has_value());
+    REQUIRE(saved->attachments.size() == 1);
+    REQUIRE(saved->attachments[0].saved_at.has_value());
+    CHECK(*saved->attachments[0].saved_at > from_epoch_ms(0));
+
     std::filesystem::remove_all(dir);
 }
 
@@ -1359,6 +1367,9 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
         CHECK(std::filesystem::exists(quiet));
         sync(*c);
         CHECK(stores(*net).empty());
+
+        // Telling them and remembering it ourselves are separate: a private save is still a save.
+        CHECK(c->message(msg_id)->attachments[0].saved_at.has_value());
     }
 
     // A file that fails to authenticate is a failure, not a corrupt file on disk: the ciphertext is
@@ -1438,6 +1449,106 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     std::vector<std::byte> got(contents.size());
     in.read(reinterpret_cast<char*>(got.data()), got.size());
     CHECK(!!(got == contents));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    TestHelper::seed_pfs_nak(c->core, own_sid(*c));
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_notified", 7);
+    std::filesystem::create_directories(dir);
+    auto one = dir / "one.bin";
+    auto two = dir / "two.bin";
+    std::ofstream{one, std::ios::binary} << "first file";
+    std::ofstream{two, std::ios::binary} << "second file";
+
+    auto id = c->send_message(
+            ConversationId::dm(peer.session_id),
+            "two of them",
+            {OutgoingAttachment{.path = one}, OutgoingAttachment{.path = two}});
+    sync(*c);
+    REQUIRE(accept_stores(*net) == 2);
+
+    auto sent = c->message(id);
+    REQUIRE(sent.has_value());
+    REQUIRE(sent->attachments.size() == 2);
+    // Nobody has said anything yet, and an upload reaching the file server is not someone saving it.
+    CHECK_FALSE(sent->attachments[0].saved_at.has_value());
+    CHECK_FALSE(sent->attachments[1].saved_at.has_value());
+
+    // What the peer's client sends when its user saves one file out of the message.
+    auto msgid = c->core.loop().call_get([&] {
+        return c->core.database().conn().prepared_get<int64_t>(
+                "SELECT msgid FROM messages WHERE id = ?", id);
+    });
+    auto notify = [&](auto&& fill, sys_ms at) {
+        SessionProtos::Content content;
+        content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(at)));
+        auto* note = content.mutable_dataextractionnotification();
+        note->set_type(SessionProtos::DataExtractionNotification::MEDIA_SAVED);
+        fill(note);
+
+        auto plaintext = content.SerializeAsString();
+        auto encoded = encode_dm_v1(
+                std::as_bytes(std::span{plaintext}), peer.ed_sk, at, own_sid(*c), std::nullopt);
+        core::SwarmMessage sm{
+                encoded, random::unique_id("h", 8), at, from_epoch_ms(1'000'000'000'000)};
+        c->core.loop().call_get([&] {
+            c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+            return 0;
+        });
+        sync(*c);
+    };
+
+    auto saved_at = from_epoch_ms(9'000'000);
+    notify([&](auto* note) {
+        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+        note->set_msgid(msgid);
+        note->set_attindex(1);
+    }, saved_at);
+
+    auto after = c->message(id);
+    REQUIRE(after.has_value());
+    // Only the one they named, and stamped with when *they* saved it -- not the message's own
+    // timestamp, which is what identifies it and is generally older.
+    CHECK_FALSE(after->attachments[0].saved_at.has_value());
+    REQUIRE(after->attachments[1].saved_at.has_value());
+    CHECK(*after->attachments[1].saved_at == saved_at);
+
+    // -1 is "all of them, together", which is what saving from a gallery view reports.
+    auto all_at = from_epoch_ms(9'500'000);
+    notify([&](auto* note) {
+        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+        note->set_msgid(msgid);
+        note->set_attindex(-1);
+    }, all_at);
+
+    auto all = c->message(id);
+    REQUIRE(all->attachments[0].saved_at == all_at);
+    // The later save overwrites the earlier one: what this answers is "is there any point offering
+    // save again", not a history of every time they did.
+    CHECK(all->attachments[1].saved_at == all_at);
+
+    // A notification naming a message we do not have changes nothing, and neither does one that
+    // names no message at all -- which is every notification the other clients send today, since
+    // their `timestamp` field means something different in each of them.
+    notify([&](auto* note) {
+        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+        note->set_msgid(msgid + 1);
+        note->set_attindex(0);
+    }, from_epoch_ms(9'900'000));
+    notify([&](auto* note) { note->set_timestamp(12345); }, from_epoch_ms(9'900'000));
+
+    auto unchanged = c->message(id);
+    CHECK(unchanged->attachments[0].saved_at == all_at);
+    CHECK(unchanged->attachments[1].saved_at == all_at);
 
     std::filesystem::remove_all(dir);
 }
