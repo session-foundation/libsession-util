@@ -34,6 +34,26 @@ struct ActiveTunnel {
 
 static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address);
 
+// The inner QUIC connection's UDP payload size, fixed rather than derived from the tunnel's
+// suggestion.
+//
+// The suggestion cannot be made to mean what it needs to.  It is computed from the outer
+// *endpoint's* configured max_udp_payload, which is a policy knob and not a measurement -- it is
+// unset in the default configuration, so the calculation does not even run there.  The two values
+// that are real are no better suited: a connection's max_datagram_size is deliberately the size
+// reachable *by splitting a packet in two*, so sizing the inner from it guarantees every inner
+// packet splits, and the per-piece size that would actually avoid splitting belongs to a connection
+// this layer does not hold.  Nor would knowing it once be enough: it moves when the first hop
+// changes, and nothing here would hear about that.
+//
+// So the inner is pinned to the one size QUIC guarantees every path carries.  libquic splits
+// datagrams that do not fit, so a larger value would buy throughput when the outer path is roomy
+// and cost a split packet per datagram when it is not -- and we cannot tell which we have.  The
+// outer connection still discovers its own path MTU; that is where the gain is, and an application
+// that needs to pin it (iOS, where discovery has misbehaved) still can, through
+// opt::quic_max_udp_payload.
+static constexpr size_t TUNNELED_QUIC_MAX_UDP_PAYLOAD = 1200;
+
 namespace {
     auto cat = oxen::log::Cat("session-router");
 
@@ -323,7 +343,7 @@ void SessionRouter::_start_file_upload(
                             *pubkey,
                             "::1",
                             held.tunnel->local_port,
-                            held.tunnel->suggested_mtu);
+                            TUNNELED_QUIC_MAX_UDP_PAYLOAD);
                 });
 
         _loop->call([weak_self = weak_from_this(), this, upload_id] {
@@ -726,7 +746,7 @@ void SessionRouter::_quic_upload_via_tunnel(
         return;
     }
 
-    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
+    _get_file_client(*pubkey, "::1", info.local_port, TUNNELED_QUIC_MAX_UDP_PAYLOAD)
             .upload(std::move(data),
                     upload_request.ttl,
                     [weak_self = weak_from_this(), this, upload_request, upload_id](
@@ -767,7 +787,7 @@ void SessionRouter::_quic_download_via_tunnel(
         return;
     }
 
-    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
+    _get_file_client(*pubkey, "::1", info.local_port, TUNNELED_QUIC_MAX_UDP_PAYLOAD)
             .download(
                     std::move(file_id),
                     request.on_data,
