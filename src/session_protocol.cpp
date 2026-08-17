@@ -89,7 +89,6 @@ static session_protocol_envelope envelope_from_cpp(const session::Envelope& cpp)
 static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedPro& cpp) {
     session_protocol_decoded_pro result = {};
     result.status = static_cast<SESSION_PROTOCOL_PRO_STATUS>(cpp.status);
-    result.proof.version = cpp.proof.version;
     std::memcpy(
             result.proof.revocation_tag.data,
             cpp.proof.revocation_tag.data(),
@@ -109,7 +108,6 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
 // decoded_pro_from_cpp).
 static session::ProProof proof_from_c(const session_protocol_pro_proof& c) {
     session::ProProof proof = {};
-    proof.version = c.version;
     std::memcpy(
             proof.revocation_tag.data(), c.revocation_tag.data, proof.revocation_tag.max_size());
     std::memcpy(
@@ -456,7 +454,7 @@ static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
     const SessionProtos::ProProof& proto_proof = pro_msg.proof();
     ProProof& proof = pro.proof;
     bool valid = proto_proof.has_version() &&
-                 proto_proof.version() == static_cast<std::uint32_t>(ProProofVersion_v0) &&
+                 proto_proof.version() == static_cast<std::uint32_t>(ProProofVersion::v0) &&
                  proto_proof.has_revocationtag() &&
                  proto_proof.revocationtag().size() == proof.revocation_tag.max_size() &&
                  proto_proof.has_rotatingpublickey() &&

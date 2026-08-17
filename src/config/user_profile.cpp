@@ -519,7 +519,6 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
         static_assert(sizeof pro->proof.revocation_tag == sizeof(val->proof.revocation_tag));
         static_assert(sizeof pro->proof.rotating_pubkey == sizeof(val->proof.rotating_pubkey));
         static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
-        pro->proof.version = val->proof.version;
         std::memcpy(
                 pro->proof.revocation_tag.data,
                 val->proof.revocation_tag.data(),
@@ -541,7 +540,6 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
 
 LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro_pro_config* pro) {
     ProConfig val = {};
-    val.proof.version = pro->proof.version;
     std::memcpy(
             val.proof.revocation_tag.data(),
             pro->proof.revocation_tag.data,

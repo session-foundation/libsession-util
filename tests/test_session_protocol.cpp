@@ -56,7 +56,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.proMessage.proof`
     SessionProtos::ProProof* proto_proof = pro->mutable_proof();
-    proto_proof->set_version(result.proof.version);
+    proto_proof->set_version(static_cast<std::uint32_t>(session::ProProofVersion::v0));
     proto_proof->set_revocationtag(
             result.proof.revocation_tag.data(), result.proof.revocation_tag.size());
     proto_proof->set_rotatingpublickey(
