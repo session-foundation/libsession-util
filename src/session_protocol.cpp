@@ -111,7 +111,6 @@ static session_protocol_envelope envelope_from_cpp(const session::Envelope& cpp)
 static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedPro& cpp) {
     session_protocol_decoded_pro result = {};
     result.status = static_cast<SESSION_PROTOCOL_PRO_STATUS>(cpp.status);
-    result.proof.version = cpp.proof.version;
     std::memcpy(
             result.proof.revocation_tag.data,
             cpp.proof.revocation_tag.data(),
@@ -856,7 +855,7 @@ DecodedEnvelope decode_envelope(
             session::ProProof& proof = pro.proof;
             // clang-format off
             size_t proof_errors = 0;
-            proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
+            proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion::v0);
             proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
             proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
             proof_errors += !proto_proof.has_expiryunixts();
@@ -1016,7 +1015,7 @@ DecodedCommunityMessage decode_for_community(
         session::ProProof& proof = pro.proof;
         // clang-format off
         size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
+        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion::v0);
         proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();

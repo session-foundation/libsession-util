@@ -81,7 +81,10 @@ static_assert(BUILD_PROOF_DOMAIN.size() == 16);
 static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
 static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
 
-enum ProProofVersion { ProProofVersion_v0 };
+/// The Session Pro proof wire-format version. This is a *selector*: it says which ProProof_vN
+/// layout a serialized proof uses; it is deliberately NOT stored as a member of the proof struct
+/// (see ProProof_v0 / the ProProof alias below). Only v0 exists today.
+enum class ProProofVersion : std::uint8_t { v0 = 0 };
 
 /// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
 /// for all timestamps within one such period and a fresh one at each boundary.
@@ -118,11 +121,8 @@ enum class ProStatus {
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
 };
 
-class ProProof {
+class ProProof_v0 {
   public:
-    /// Version of the proof set by the Session Pro Backend
-    std::uint8_t version;
-
     /// Opaque revocation tag identifying this proof (from the Session Pro backend)
     array_uc32 revocation_tag;
 
@@ -243,12 +243,20 @@ class ProProof {
     static cleared_uc32 rotating_seed(
             std::span<const unsigned char> master_seed, std::chrono::sys_seconds now);
 
-    bool operator==(const ProProof& other) const {
-        return version == other.version && revocation_tag == other.revocation_tag &&
-               rotating_pubkey == other.rotating_pubkey && expiry_at == other.expiry_at &&
-               sig == other.sig;
+    bool operator==(const ProProof_v0& other) const {
+        return revocation_tag == other.revocation_tag && rotating_pubkey == other.rotating_pubkey &&
+               expiry_at == other.expiry_at && sig == other.sig;
     }
 };
+
+/// The Session Pro proof layout this codebase currently speaks. The wire `version`
+/// (ProProofVersion) selects *which* ProProof_vN a serialized proof is, rather than being a field
+/// of the proof: today only v0 exists, so this alias points at it. A future format adds its own
+/// struct -- `struct ProProof_v1 : ProProof_v0 { ... }` to extend, or a fresh `struct ProProof_v2 {
+/// ... }` to replace
+/// -- at which point this alias becomes a std::variant (or a virtual base) over the supported
+/// versions, chosen from the wire version at parse time.
+using ProProof = ProProof_v0;
 
 enum class ProFeaturesForMsgStatus {
     Success = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
