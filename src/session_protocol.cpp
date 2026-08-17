@@ -443,19 +443,32 @@ static void parse_envelope_fields(
     parse_common_envelope_fields(result.envelope, envelope);
 }
 
-// Parses and validates the proof and feature flags embedded in a protobuf ProMessage into a
-// DecodedPro. Throws if the proof is missing or malformed. The caller is responsible for evaluating
-// the resulting proof's `.status`.
+// Parses the proof and feature flags embedded in a protobuf ProMessage into a DecodedPro. A proof
+// whose wire `version` we don't recognize is NOT fatal: it degrades to a non-pro message flagged
+// ProStatus::UnsupportedVersion (the caller then skips signature evaluation), so a future proof
+// format cannot make an older client silently drop the whole message. Throws only when the proof is
+// absent, or when a v0 proof is structurally malformed (i.e. corruption, not forward-compat). The
+// caller evaluates `.status` for a proof that parsed.
 static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
     DecodedPro pro = {};
     if (!pro_msg.has_proof())
         throw std::runtime_error{"Parse failed, pro config missing proof"};
 
     const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+    pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
+    pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
+
+    // The wire `version` selects which proof layout this is; we only understand v0. Any other (or a
+    // missing) version is a proof we can't verify -- degrade to non-pro rather than throw.
+    if (!proto_proof.has_version() ||
+        static_cast<ProProofVersion>(proto_proof.version()) != ProProofVersion::v0) {
+        pro.status = ProStatus::UnsupportedVersion;
+        return pro;
+    }
+
+    // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
     ProProof& proof = pro.proof;
-    bool valid = proto_proof.has_version() &&
-                 proto_proof.version() == static_cast<std::uint32_t>(ProProofVersion::v0) &&
-                 proto_proof.has_revocationtag() &&
+    bool valid = proto_proof.has_revocationtag() &&
                  proto_proof.revocationtag().size() == proof.revocation_tag.max_size() &&
                  proto_proof.has_rotatingpublickey() &&
                  proto_proof.rotatingpublickey().size() == proof.rotating_pubkey.max_size() &&
@@ -464,8 +477,6 @@ static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
     if (!valid)
         throw std::runtime_error{"Parse failed, pro metadata was malformed"};
 
-    pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
-    pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
     std::memcpy(
             proof.revocation_tag.data(),
             proto_proof.revocationtag().data(),
@@ -527,19 +538,23 @@ static void parse_content_and_pro(
             result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
             DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
-            // Evaluate the pro status given the extracted components (was it signed, is it expired,
-            // was the message signed validly?)
-            // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
-            // bytes, this means that we expected the user to have signed the padding as well.
-            auto unix_ts = std::chrono::floor<std::chrono::seconds>(
-                    std::chrono::sys_time<std::chrono::milliseconds>(
-                            std::chrono::milliseconds(content.sigtimestamp())));
-            // pro_sig.size() validated == 64 above
-            pro.status = pro.proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    to_byte_span<64>(pro_sig.data()),
-                    to_span(envelope.content()));
+            // A proof we couldn't parse (unknown version) is already flagged
+            // ProStatus::UnsupportedVersion, with no v0 proof to check -- leave it as non-pro.
+            if (pro.status != ProStatus::UnsupportedVersion) {
+                // Evaluate the pro status given the extracted components (was it signed, is it
+                // expired, was the message signed validly?)
+                // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
+                // bytes, this means that we expected the user to have signed the padding as well.
+                auto unix_ts = std::chrono::floor<std::chrono::seconds>(
+                        std::chrono::sys_time<std::chrono::milliseconds>(
+                                std::chrono::milliseconds(content.sigtimestamp())));
+                // pro_sig.size() validated == 64 above
+                pro.status = pro.proof.status(
+                        pro_backend_pubkey,
+                        unix_ts,
+                        to_byte_span<64>(pro_sig.data()),
+                        to_span(envelope.content()));
+            }
         }
     }
 }
@@ -723,36 +738,40 @@ DecodedCommunityMessage decode_for_community(
     if (result.pro_sig && content.has_promessage()) {
         DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
-        // Evaluate the pro status given the extracted components (was it signed, is it expired,
-        // was the message signed validly?)
-        //
-        // IMPORTANT: We have to bit-manipulate the content because we're including the signature
-        // inside the payload itself that we had to sign. But we originally signed the payload
-        // without a signature set in it. This is only the case if we're dealing with a `Content`
-        // message that had the signature inside the content instead of the envelope.
-        if (result.envelope) {
-            // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
-            // a pro signature.
-            assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
-            pro.status = pro.proof.status(
-                    pro_backend_pubkey, unix_ts, *result.pro_sig, result.content_plaintext);
-        } else {
-            SessionProtos::Content content_copy_without_sig = content;
-            assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
+        // A proof we couldn't parse (unknown version) is already flagged
+        // ProStatus::UnsupportedVersion, with no v0 proof to check -- leave it as non-pro.
+        if (pro.status != ProStatus::UnsupportedVersion) {
+            // Evaluate the pro status given the extracted components (was it signed, is it expired,
+            // was the message signed validly?)
+            //
+            // IMPORTANT: We have to bit-manipulate the content because we're including the
+            // signature inside the payload itself that we had to sign. But we originally signed the
+            // payload without a signature set in it. This is only the case if we're dealing with a
+            // `Content` message that had the signature inside the content instead of the envelope.
+            if (result.envelope) {
+                // Entering the `pro_sig` and `result.envelope` branch means that the envelope must
+                // have a pro signature.
+                assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
+                pro.status = pro.proof.status(
+                        pro_backend_pubkey, unix_ts, *result.pro_sig, result.content_plaintext);
+            } else {
+                SessionProtos::Content content_copy_without_sig = content;
+                assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
 
-            // Remove signature from the payload
-            content_copy_without_sig.clear_prosigforcommunitymessageonly();
-            assert(!content_copy_without_sig.has_prosigforcommunitymessageonly());
+                // Remove signature from the payload
+                content_copy_without_sig.clear_prosigforcommunitymessageonly();
+                assert(!content_copy_without_sig.has_prosigforcommunitymessageonly());
 
-            // Reserialise the payload without the signature, repad it then verify the signature
-            std::vector<std::byte> content_copy_without_sig_payload =
-                    pad_message(to_span(content_copy_without_sig.SerializeAsString()));
+                // Reserialise the payload without the signature, repad it then verify the signature
+                std::vector<std::byte> content_copy_without_sig_payload =
+                        pad_message(to_span(content_copy_without_sig.SerializeAsString()));
 
-            pro.status = pro.proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    *result.pro_sig,
-                    to_span(content_copy_without_sig_payload));
+                pro.status = pro.proof.status(
+                        pro_backend_pubkey,
+                        unix_ts,
+                        *result.pro_sig,
+                        to_span(content_copy_without_sig_payload));
+            }
         }
     }
 
