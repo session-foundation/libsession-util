@@ -1211,11 +1211,14 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     CHECK(msg->attachments[2].filename == ".hidden");
     CHECK(msg->attachments[2].voice_message);
 
-    // Nothing is uploaded until the message is sent, and no size is known before that: what goes in
-    // the pointer is the file's own length, which is read at upload time.
+    // Each file reached the server, and the size recorded is the file's own -- read at upload time,
+    // not the padded ciphertext's length that the server reports back.
+    sync(*c);
+    msg = c->message(id);
+    REQUIRE(msg.has_value());
     for (const auto& a : msg->attachments) {
-        CHECK_FALSE(a.uploaded);
-        CHECK_FALSE(a.size.has_value());
+        CHECK(a.uploaded);
+        CHECK(a.size == static_cast<int64_t>(std::string_view{"not really a file"}.size()));
     }
 
     // The same list reaches a paged read, not only the single-message one.
@@ -1374,6 +1377,143 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
         sync(*c);
         CHECK(stores(*net).empty());
     }
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachments]") {
+    // The whole path in one go: a file is encrypted and uploaded by sending it, and then fetched,
+    // decrypted and written by saving it.  Nothing here knows what the other half did except
+    // through what was stored -- the url, its `d` fragment, the key and the size -- so a
+    // disagreement between the two shows up as bytes that do not match.
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_roundtrip", 7);
+    std::filesystem::create_directories(dir);
+    auto source = dir / "original.bin";
+
+    // Larger than one encryption chunk, so the streaming path is what runs rather than a single
+    // block that would hide a chunk-boundary bug.
+    std::vector<std::byte> contents(70 * 1024);
+    for (size_t i = 0; i < contents.size(); i++)
+        contents[i] = static_cast<std::byte>((i * 7 + i / 251) % 256);
+    {
+        std::ofstream out{source, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    }
+
+    auto id = c->send_message(
+            ConversationId::dm(me), "here it is", {OutgoingAttachment{.path = source}});
+    sync(*c);
+    REQUIRE(accept_stores(*net) == 1);
+
+    auto msg = c->message(id);
+    REQUIRE(msg.has_value());
+    REQUIRE(msg->attachments.size() == 1);
+    CHECK(msg->attachments[0].uploaded);
+    // What the pointer advertises is the file's own length, not the padded ciphertext's.
+    CHECK(msg->attachments[0].size == static_cast<int64_t>(contents.size()));
+
+    auto dest = dir / "saved.bin";
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg->id, 0, dest, nullptr,
+            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+    sync(*c);
+
+    // Served from what the upload left behind, found by the id in the url the send generated.
+    REQUIRE(serve_downloads(*net) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+
+    REQUIRE(std::filesystem::exists(dest));
+    REQUIRE(std::filesystem::file_size(dest) == contents.size());
+    std::ifstream in{dest, std::ios::binary};
+    std::vector<std::byte> got(contents.size());
+    in.read(reinterpret_cast<char*>(got.data()), got.size());
+    CHECK(!!(got == contents));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]") {
+    // Every Session client still sends attachments encrypted the old way, so this is the path most
+    // received attachments actually take.  The blob is fixed rather than generated: libsession has
+    // no legacy encryptor -- deliberately, since we never send these -- so producing one here would
+    // mean writing the very thing we chose not to have, and testing it against itself.  It came
+    // from an independent implementation written against session-android's
+    // AttachmentCipherInputStream.
+    //
+    // 56 bytes of text, zero-padded to 128, then AES-256-CBC with an HMAC and a digest over it.
+    constexpr auto LEGACY_KEY =
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+            "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f"_hex_b;
+    constexpr auto LEGACY_BLOB =
+            "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf22bf91f23b4781cc75fcba799b05fa6d"
+            "f93931dc76588ba849c27514c2e21560130db54a94a65303ea60adc0166ff90c"
+            "e07d033f2107b1ed38ddc006b1c71c3bb796d591ebbb2f9877027962dcb6ab13"
+            "b10b97cb736fddd7e2edd7b0908cd2b0ba84be5def8e67316556917af6faf793"
+            "56695fbd811fad5de80b9f70b15eb6987e18eab948150964e6309b24c3367b59"
+            "7a75cd3520a42061ce5ef6a0d647b1eb310fc355214c1f3eab964a9e7df62c65"_hex_b;
+    constexpr auto LEGACY_DIGEST =
+            "f75f0a8286252a371f131c711ddc5b04cc69092c8b8397b0460f1bc6946907c4"_hex_b;
+    constexpr auto LEGACY_TEXT = "a legacy attachment, from a client that has not moved on"sv;
+
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+
+    // No `d` fragment on the url, a 64-byte key and a digest: that combination is what tells the
+    // save which of the two schemes to use, and nothing else does.
+    deliver(*c, peer, "", from_epoch_ms(3000), "legacy_hash", "", std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(9);
+                a->set_url("http://fs.example/file/legacy1");
+                a->set_key(std::string{
+                        reinterpret_cast<const char*>(LEGACY_KEY.data()), LEGACY_KEY.size()});
+                a->set_digest(std::string{
+                        reinterpret_cast<const char*>(LEGACY_DIGEST.data()),
+                        LEGACY_DIGEST.size()});
+                a->set_size(LEGACY_TEXT.size());
+                a->set_filename("legacy.txt");
+            },
+            44);
+    sync(*c);
+
+    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    REQUIRE(msgs.size() == 1);
+    REQUIRE(msgs[0].attachments.size() == 1);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_legacy", 7);
+    std::filesystem::create_directories(dir);
+    auto dest = dir / "legacy.txt";
+
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msgs[0].id, 0, dest, nullptr,
+            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+    sync(*c);
+
+    REQUIRE(serve_downloads(*net, LEGACY_BLOB) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+
+    // Trimmed to the length the pointer claimed, with the zero padding that hid it gone.
+    REQUIRE(std::filesystem::exists(dest));
+    REQUIRE(std::filesystem::file_size(dest) == LEGACY_TEXT.size());
+    std::ifstream in{dest, std::ios::binary};
+    std::string got{std::istreambuf_iterator<char>{in}, {}};
+    CHECK(got == LEGACY_TEXT);
 
     std::filesystem::remove_all(dir);
 }

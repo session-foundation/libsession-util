@@ -3,6 +3,11 @@
 #include <fmt/format.h>
 #include <oxenc/base64.h>
 
+#include <fstream>
+#include <map>
+#include <session/attachments.hpp>
+#include <session/network/backends/session_file_server.hpp>
+
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <session/core.hpp>
@@ -59,6 +64,40 @@ class MockNetwork : public network::Network {
     void download(network::DownloadRequest request) override {
         downloads.push_back(std::move(request));
     }
+
+    // A file server, in as much as anything needs one: uploads are encrypted and kept here, and a
+    // download of one serves it back.  Enough to round-trip an attachment through the code that
+    // sends and saves it without a network, which is the only part of a file server that is
+    // interesting to test against.
+    //
+    // `served` is keyed by the id in the download url, so a url built by generate_download_url from
+    // what upload_file returned finds its way back to the right bytes.
+    std::map<std::string, std::vector<std::byte>> served;
+    int next_file_id = 1000;
+
+    void upload_file(
+            network::FileUploadRequest request, std::span<const std::byte> seed) override {
+        // Encrypted the same way the routers do it, so what a save reads back is what a real
+        // upload would have left on the server: same scheme, same padding, same key derivation.
+        std::vector<std::byte> plain;
+        {
+            std::ifstream in{request.file, std::ios::binary};
+            std::string bytes{std::istreambuf_iterator<char>{in}, {}};
+            plain = to_vector<std::byte>(bytes);
+        }
+        auto [ciphertext, key] =
+                attachment::encrypt(seed, plain, request.domain, request.allow_large);
+
+        auto id = std::to_string(next_file_id++);
+        served.emplace(id, std::move(ciphertext));
+
+        network::file_metadata meta{
+                id, static_cast<int64_t>(served.at(id).size()), {}, {}};
+        if (request.on_progress)
+            request.on_progress(meta.size, meta.size);
+        if (request.on_complete)
+            request.on_complete(std::pair{meta, key}, false);
+    }
 };
 
 /// Answers every captured download with `data`, delivered in chunks as a transport would rather
@@ -70,6 +109,29 @@ inline size_t serve_downloads(
     for (auto& r : pending) {
         network::file_metadata meta{
                 "served", static_cast<int64_t>(data.size()), {}, {}};
+        for (size_t at = 0; at < data.size(); at += chunk)
+            r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
+        r.on_complete(meta, false);
+    }
+    return pending.size();
+}
+
+/// Answers every captured download from what was uploaded, looked up by the file id in its url --
+/// so a message whose attachment this Client uploaded can be saved back through the same object.
+/// A url naming something never uploaded is answered as the file server answers a missing file.
+inline size_t serve_downloads(MockNetwork& net, size_t chunk = 4096) {
+    auto pending = std::exchange(net.downloads, {});
+    for (auto& r : pending) {
+        auto info = network::file_server::parse_download_url(r.download_url);
+        auto found = info ? net.served.find(info->file_id) : net.served.end();
+        if (found == net.served.end()) {
+            r.on_complete(static_cast<int16_t>(404), false);
+            continue;
+        }
+
+        std::span<const std::byte> data{found->second};
+        network::file_metadata meta{
+                info->file_id, static_cast<int64_t>(data.size()), {}, {}};
         for (size_t at = 0; at < data.size(); at += chunk)
             r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
         r.on_complete(meta, false);
