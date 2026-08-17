@@ -14,6 +14,10 @@
 #include "session/platform.hpp"
 #include "session/types.hpp"
 
+namespace session {
+class TestHelper;
+}
+
 namespace session::network {
 
 namespace detail {
@@ -23,6 +27,8 @@ namespace detail {
 namespace fs = std::filesystem;  // NOLINT(misc-unused-alias-decls)
 
 class Network : public std::enable_shared_from_this<Network> {
+    friend class session::TestHelper;  // for unit tests: see _set_router
+
   private:
     const config::Config config;
     std::shared_ptr<oxen::quic::Loop> _loop;  // Main loop for network events and syncronization

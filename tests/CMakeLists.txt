@@ -38,6 +38,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_pro_backend.cpp
     test_random.cpp
     test_session_encrypt.cpp
+    test_swarm_retry.cpp
     test_utils.cpp
     test_session_protocol.cpp
     test_xed25519.cpp

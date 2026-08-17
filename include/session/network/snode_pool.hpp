@@ -12,6 +12,10 @@
 #include "session/network/service_node.hpp"
 #include "swarm.hpp"
 
+namespace session {
+class TestHelper;
+}
+
 namespace session::network {
 
 namespace config {
@@ -40,6 +44,8 @@ class empty_file_exception : public std::runtime_error {
 };
 
 class SnodePool : public std::enable_shared_from_this<SnodePool> {
+    friend class session::TestHelper;  // for unit tests
+
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
     using fetcher_connectivity_check_t = std::function<bool()>;

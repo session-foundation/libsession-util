@@ -14,7 +14,9 @@
 #include <session/format.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/key_types.hpp>
+#include <session/network/routing/network_router.hpp>
 #include <session/network/session_network.hpp>
+#include <session/network/snode_pool.hpp>
 #include <session/random.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
@@ -262,9 +264,79 @@ struct TempCore {
     core::Core& operator*() { return *core; }
 };
 
+/// Stands in for a real router so that Network's own logic -- which sits *above* routing, and which
+/// MockNetwork's send_request override skips entirely -- can be driven without a network.
+///
+/// Every request is recorded and answered from `replies`, keyed by the destination node's pubkey,
+/// so a test says "this node is unreachable, that one answers" and then asserts on which were tried
+/// and in what order.  Everything else IRouter requires is a no-op: routing strategy is not what is
+/// under test here.
+class FakeRouter : public network::IRouter {
+  public:
+    struct Reply {
+        bool success = true;
+        bool timeout = false;
+        int16_t status = 200;
+        std::optional<std::string> body = "{}";
+    };
+
+    // Destination pubkey -> how that node answers.  Anything not named here answers as unreachable,
+    // which makes "only this node works" the short thing to write.
+    std::map<network::ed25519_pubkey, Reply> replies;
+    Reply default_reply{
+            false, false, network::ERROR_INVALID_DESTINATION, "Node is not reachable"};
+
+    // Every destination tried, in order.  The point of most assertions.
+    std::vector<network::ed25519_pubkey> tried;
+    std::vector<std::chrono::milliseconds> timeouts;
+
+    void send_request(
+            network::Request request, network::network_response_callback_t callback) override {
+        auto* node = std::get_if<network::service_node>(&request.destination);
+        if (!node)
+            return callback(false, false, network::ERROR_INVALID_DESTINATION, {}, "not a node");
+
+        tried.push_back(node->remote_pubkey);
+        timeouts.push_back(request.request_timeout);
+
+        auto found = replies.find(node->remote_pubkey);
+        const auto& reply = found != replies.end() ? found->second : default_reply;
+        callback(reply.success, reply.timeout, reply.status, {}, reply.body);
+    }
+
+    void suspend() override {}
+    void resume(bool) override {}
+    void close_connections() override {}
+    void clear_cache() override {}
+    network::ConnectionStatus get_status() const override {
+        return network::ConnectionStatus::connected;
+    }
+    void upload(network::UploadRequest) override {}
+    void upload_file(network::FileUploadRequest, std::span<const std::byte>) override {}
+    void download(network::DownloadRequest) override {}
+};
+
 class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
+
+    /// Puts a swarm straight into the pool's cache.  get_swarm consults it first and answers from
+    /// it without touching the network, which is what lets swarm-level behaviour be tested at all:
+    /// a test pool has no seed nodes, so nothing would ever resolve otherwise.
+    static void seed_swarm(
+            network::SnodePool& pool,
+            const network::x25519_pubkey& swarm_pubkey,
+            std::vector<network::service_node> nodes) {
+        pool._swarm_cache[swarm_pubkey] = {0, std::move(nodes)};
+    }
+
+    /// Substitutes the router beneath a Network, so its own logic can be exercised against
+    /// scripted answers.  Also hands back the pool, which a test has to seed for anything
+    /// swarm-addressed to resolve.
+    static void set_router(network::Network& net, std::shared_ptr<network::IRouter> router) {
+        net._router = std::move(router);
+    }
+    static network::SnodePool& snode_pool(network::Network& net) { return *net._snode_pool; }
 
     static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
 

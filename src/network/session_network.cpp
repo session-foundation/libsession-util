@@ -888,9 +888,11 @@ void Network::_retry_next_swarm_node(
                     cb(false, timeout, status_code, std::move(headers), std::move(body));
                 };
 
-                // The next-best member rather than a random one: the swarm comes back in a
-                // deterministic order, so walking it means every member is tried exactly once and
-                // in the same order every time, which a random pick cannot promise.
+                // The first member that has not already failed.  get_swarm shuffles and then
+                // partitions by strike count, so this is not a fixed order -- what it gives is the
+                // least-struck members first, in a random order among equals.  That is the right
+                // preference anyway; what matters here is only that a member already spent is
+                // never chosen again, which is what ends the walk.
                 auto next = std::ranges::find_if(swarm_nodes, [&](const service_node& node) {
                     return std::ranges::find(req.failed_nodes, node) == req.failed_nodes.end();
                 });
