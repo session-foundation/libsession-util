@@ -3,21 +3,53 @@
 -- run.  Keep this in step with the migrations: test_client.cpp compares the two.
 
 -- Every account we have seen, whether or not it is a contact: a message sender needs a row, so
--- this is "accounts we know of", with contact-ness being state on the row rather than the reason
--- the row exists.
+-- this is "accounts we know of".  Being a contact is a row in `contacts`, not a property here.
 --
--- display_name is currently only what we have observed from the LokiProfile on incoming messages.
--- Once Core carries the Contacts config, that config is reconciled *into* this table rather than
--- replacing it: the config is the synced representation, this is the queryable one, and it also
--- holds local-only fields the config knows nothing about.
+-- The profile fields are what an account says about itself, learned either from the LokiProfile on
+-- an incoming message or from the Contacts config.  `profile_updated` decides between them: it is
+-- the account's *own* stamp of when it last changed its profile, not ours of when we saw it, so a
+-- message arriving out of order cannot replace a newer profile with an older one.  Out of order is
+-- the normal case rather than the exception, since a profile is observed from group messages as
+-- readily as from a DM.  A message carrying no stamp counts as 0, so it applies only when we have
+-- never had one.
 --
--- Approval state arrives with it -- whether we have accepted messages from this account and whether
--- they have accepted ours -- and belongs here rather than on conversations, because it is a
--- property of the account.  It is what separates a conversation from a message request.
+-- The same stamp is what keeps this from churning: every message from someone repeats the value
+-- they last set, so the common case compares equal, changes nothing, and dirties no config.
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
-    session_id BLOB NOT NULL UNIQUE,    -- 33 bytes, 0x05-prefixed
-    display_name TEXT                   -- NULL when no name is known; never an empty string
+    -- 33 bytes.  The prefix says which kind of identity it is: 0x05 for an account, 0x15 or 0x25
+    -- for a community-blinded one, which carries a profile of its own and so gets its own row.
+    session_id BLOB NOT NULL UNIQUE,
+    name TEXT,                          -- NULL when no name is known; never an empty string
+    -- Set together, or both NULL: a URL without its key cannot be decrypted, so either one missing
+    -- is no picture at all.
+    profile_pic_url TEXT,
+    profile_pic_key BLOB,               -- 32 bytes
+    profile_updated INTEGER NOT NULL DEFAULT 0,  -- unix seconds
+    -- Session Pro.  `pro_flags` is what the profile claims -- a badge, an animated avatar -- and
+    -- the proof is what lets the claim be checked.  A NULL tag means we have never seen a proof,
+    -- which is not the same as holding one that has expired.
+    pro_flags INTEGER NOT NULL DEFAULT 0,
+    -- Set together or both NULL, like the picture above: an expiry with no tag beside it cannot be
+    -- checked against the revocation list, so neither half says anything on its own.
+    pro_revocation_tag BLOB,            -- 32 bytes
+    pro_expiry INTEGER                  -- unix seconds
+) STRICT;
+
+-- One row per entry in the Contacts config.  Existence here *is* being a contact, so there is no
+-- flag that could disagree with itself, and a contact removed on another device becomes a row that
+-- goes away -- while the `accounts` row stays, because we have still seen that person.
+--
+-- Only what needs a relationship to mean anything lives here.  A name and a picture belong to the
+-- account, since we learn those for people who are not contacts at all.
+CREATE TABLE contacts (
+    account INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    nickname TEXT,                      -- our own name for them, synced to our other devices
+    -- Approval in each direction: whether we have accepted messages from this account, and whether
+    -- it has accepted ours.  This is what separates a conversation from a message request.
+    approved INTEGER NOT NULL DEFAULT 0,
+    approved_me INTEGER NOT NULL DEFAULT 0,
+    blocked INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE TABLE groups (
@@ -42,11 +74,17 @@ CREATE TABLE conversations (
     dm INTEGER UNIQUE REFERENCES accounts(id),
     closed_group INTEGER UNIQUE REFERENCES groups(id),
     community INTEGER UNIQUE REFERENCES communities(id),
-    created INTEGER NOT NULL,           -- ms since epoch
+    -- Time units differ by column here, deliberately and in step with what the configs carry: a
+    -- value that gets compared against a message timestamp is in milliseconds, and everything else
+    -- is unix seconds.  Nobody needs the sub-second moment a conversation was created.
+    created INTEGER NOT NULL,           -- unix seconds
     last_activity INTEGER NOT NULL,     -- ms since epoch; conversation list ordering
-    -- Read watermark: incoming messages with a strictly greater timestamp are unread.  A
-    -- timestamp rather than a per-message flag because that is what ConvoInfoVolatile syncs, so
-    -- adopting it here costs nothing later.
+    -- Read watermark: incoming messages with a strictly greater timestamp are unread.  A timestamp
+    -- rather than a per-message flag because that is what ConvoInfoVolatile syncs.
+    --
+    -- Milliseconds, for the reason above: the other side of the comparison is `messages.timestamp`.
+    -- At second resolution, reading a message stamped mid-second would force a choice between
+    -- leaving that message unread and marking everything else in the same second read.
     last_read INTEGER NOT NULL DEFAULT 0,
     -- Cached rather than counted per query: a conversation list is redrawn far more often than its
     -- messages change.  `count` is maintained by the triggers below; `unread_count` is maintained
@@ -58,6 +96,21 @@ CREATE TABLE conversations (
     -- Kept numerically identical to the config so that reconciling one into the other is a copy
     -- rather than a translation.
     priority INTEGER NOT NULL DEFAULT 0,
+    -- The settings below are carried per-kind by the configs -- `contact_info` for a DM,
+    -- `base_group_info` for a group or community -- but they mean the same thing in each, so they
+    -- are one set of columns here rather than three.
+    --
+    -- Set by the user to make a conversation unread again after reading it.  Independent of
+    -- unread_count, which counts messages: this survives having read all of them.
+    marked_unread INTEGER NOT NULL DEFAULT 0,
+    -- 0 default, 1 all, 2 disabled, 3 mentions only.  Mentions-only is a group notion; a DM
+    -- carrying it reads as `all`.
+    notifications INTEGER NOT NULL DEFAULT 0,
+    mute_until INTEGER NOT NULL DEFAULT 0,  -- unix seconds; 0 is not muted
+    -- Disappearing messages: 0 none, 1 after send, 2 after read.  The timer is meaningless when the
+    -- mode is none, and is a duration rather than a moment, so seconds either way.
+    exp_mode INTEGER NOT NULL DEFAULT 0,
+    exp_timer INTEGER NOT NULL DEFAULT 0,   -- seconds
     CHECK ((dm IS NOT NULL) + (closed_group IS NOT NULL) + (community IS NOT NULL) = 1)
 ) STRICT;
 

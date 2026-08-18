@@ -225,7 +225,7 @@ static ConvoRow ensure_conversation(
         INSERT OR IGNORE INTO conversations ({}, created, last_activity) VALUES (?, ?, ?)
     )"_format(kind.column),
                            subject,
-                           ms,
+                           epoch_seconds(activity),
                            ms) > 0;
     if (!created)
         c.prepared_exec(
@@ -578,7 +578,7 @@ void Client::save_attachment(
 // Only a DM has a name source so far; groups and communities gain one with the features.
 static const auto CONVO_COLUMNS = R"(
     SELECT c.id, a.session_id, g.group_id, m.base_url, m.room,
-           a.display_name, c.last_activity,
+           a.name, c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
            c.unread_count, c.priority
@@ -2079,8 +2079,8 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         if (!outgoing && !name.empty())
             renamed = c.prepared_exec(
                               R"(
-                UPDATE accounts SET display_name = ?1
-                WHERE id = ?2 AND display_name IS NOT ?1
+                UPDATE accounts SET name = ?1
+                WHERE id = ?2 AND name IS NOT ?1
             )",
                               name,
                               sender) > 0;

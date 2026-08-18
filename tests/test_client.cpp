@@ -453,7 +453,7 @@ TEST_CASE("Client: display name is unset rather than empty until known", "[clien
 
     // No profile has been seen, so the column holds NULL rather than an empty string.
     auto stored = c->core.database().conn().prepared_get<std::optional<std::string>>(
-            "SELECT display_name FROM accounts WHERE session_id = ?", sender.session_id);
+            "SELECT name FROM accounts WHERE session_id = ?", sender.session_id);
     CHECK_FALSE(stored.has_value());
     CHECK(c->conversation(convo)->display_name.empty());
 }

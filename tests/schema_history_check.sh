@@ -9,9 +9,10 @@
 # exist solely in git history.  That is what this walks.
 #
 # Starting points are every tag, plus every commit since the most recent tag (so unreleased work in
-# progress is covered too, not just published versions).  Revisions whose schemas are byte-identical
-# to one already checked are skipped: a version that changed no schema tells us nothing new, and
-# without this every tag in a quiet period would re-run the same check.
+# progress is covered too, not just published versions), and every revision after SCHEMA_FLOOR.
+# Revisions whose schemas are byte-identical to one already checked are skipped: a version that
+# changed no schema tells us nothing new, and without this every tag in a quiet period would re-run
+# the same check.
 #
 # Usage: tests/schema_history_check.sh <path-to-schema-upgrade-check>
 
@@ -33,6 +34,20 @@ CLIENT_DIR=src/client/schema
 # a reviewable change rather than a silent edit to the walk.
 SKIPLIST=tests/schema_history_skip.txt
 
+# The oldest revision that is *not* a usable starting point, and by extension neither is anything
+# behind it.
+#
+# A schema is described by full_schema.sql alone, so a change to one that ships without a migration
+# leaves no way to carry an existing database across it: the database has to be recreated.  Every
+# revision before such a change therefore describes a database that cannot reach today's schema, and
+# checking that it does is checking something we deliberately gave up.
+#
+# Bump this to the then-current HEAD each time that happens.  It is a single revision rather than a
+# list because the property is a cutoff: once one database has to be recreated, so does every older
+# one.  Everything after it is still walked, which is what keeps a development branch honest between
+# cutoffs -- consecutive commits do have to upgrade cleanly.
+SCHEMA_FLOOR=33812a80035dbfd500f7c7d030699697bfc10cd0
+
 revs=$(
     git tag
     last_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
@@ -52,6 +67,11 @@ skipped=0
 
 for rev in $revs; do
     if [[ -f "$SKIPLIST" ]] && grep -q "^$(git rev-parse --short "$rev")" "$SKIPLIST" 2>/dev/null; then
+        continue
+    fi
+
+    # `--is-ancestor` counts a commit as its own ancestor, so this drops the floor itself too.
+    if git merge-base --is-ancestor "$rev" "$SCHEMA_FLOOR" 2>/dev/null; then
         continue
     fi
 
