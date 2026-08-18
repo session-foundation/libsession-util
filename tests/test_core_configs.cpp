@@ -48,6 +48,48 @@ std::vector<SwarmMessage> as_swarm_messages(const std::vector<std::vector<std::b
     return out;
 }
 
+/// A Core with a mock network attached, ready to have a push observed.
+struct PushableCore {
+    TempCore core;
+    std::shared_ptr<MockNetwork> net = std::make_shared<MockNetwork>();
+
+    PushableCore() {
+        net->current_node.remote_pubkey[0] = std::byte{0x01};
+        core->set_network(net);
+        net->sent_requests.clear();
+    }
+
+    core::Core* operator->() { return &*core; }
+
+    const network::Request& only_request() {
+        REQUIRE(net->sent_requests.size() == 1);
+        return net->sent_requests[0].request;
+    }
+
+    /// The subrequests of the one request sent, bound to a local: ranging over
+    /// `parse_json(body)["requests"]` directly would iterate a reference into a dead temporary.
+    nlohmann::json subrequests() { return parse_json(*only_request().body)["requests"]; }
+
+    /// Answers the outstanding request as the storage server would, one result per subrequest.
+    /// `hashes` gives the hash each store returns; a nullopt is a store that failed.
+    void answer(std::vector<std::optional<std::string>> hashes, int delete_code = 200) {
+        auto results = nlohmann::json::array();
+        for (auto& h : hashes) {
+            if (h)
+                results.push_back({{"code", 200}, {"body", {{"hash", *h}}}});
+            else
+                results.push_back({{"code", 503}, {"body", {{"reason", "nope"}}}});
+        }
+        auto subs = subrequests();
+        while (results.size() < subs.size())
+            results.push_back({{"code", delete_code}, {"body", nlohmann::json::object()}});
+
+        auto callback = net->sent_requests[0].callback;
+        net->sent_requests.clear();
+        callback(true, false, 200, {}, nlohmann::json{{"results", results}}.dump());
+    }
+};
+
 }  // namespace
 
 TEST_CASE("Configs: a fresh account has empty configs", "[core][configs]") {
@@ -169,4 +211,151 @@ TEST_CASE("Configs: a batch holds back the dump", "[core][configs]") {
     }
 
     CHECK(stored_dumps(c) == 1);
+}
+
+TEST_CASE("Configs: a change goes out as one signed sequence", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    // Local changes too: it must not appear in what goes out.
+    c->configs.local().set_setting("a_toggle", true);
+    c->configs.push_now();
+
+    CHECK(c.only_request().endpoint == "sequence");
+
+    auto subs = c.subrequests();
+    REQUIRE(subs.size() == 1);
+    CHECK(subs[0]["method"] == "store");
+    CHECK(subs[0]["params"]["namespace"] == 2);
+    CHECK(subs[0]["params"]["ttl"] == std::chrono::milliseconds{30 * 24h}.count());
+    // Config namespaces are owner-write, so the store carries a signature and the key to check it.
+    CHECK(subs[0]["params"].contains("signature"));
+    CHECK(subs[0]["params"].contains("pubkey_ed25519"));
+
+    // Nothing is obsolete on a first push, so there is nothing to delete.
+    CHECK_FALSE(subs[0].contains("delete"));
+}
+
+TEST_CASE("Configs: two dirty configs share one request", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.contacts().set(c->configs.contacts().get_or_construct("05" + std::string(64, 'a')));
+    c->configs.push_now();
+
+    auto subs = c.subrequests();
+    REQUIRE(subs.size() == 2);
+    std::vector<int> namespaces{subs[0]["params"]["namespace"], subs[1]["params"]["namespace"]};
+    std::ranges::sort(namespaces);
+    CHECK(namespaces == std::vector<int>{2, 3});
+}
+
+TEST_CASE("Configs: a stored push stops being owed", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.push_now();
+
+    // Handing it to the swarm is not the same as it having arrived, so it is still owed until the
+    // store is confirmed -- otherwise a failed push would be forgotten.
+    CHECK(c->configs.needs_push());
+
+    c.answer({"hash1"});
+    CHECK_FALSE(c->configs.needs_push());
+}
+
+TEST_CASE("Configs: a rejected store leaves the config dirty", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.push_now();
+    c.answer({std::nullopt});
+
+    // The change is still ours to deliver, and pushing again offers it again.
+    CHECK(c->configs.needs_push());
+    c->configs.push_now();
+    CHECK(c.subrequests().size() == 1);
+}
+
+TEST_CASE("Configs: the next push deletes what it replaces", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.push_now();
+    c.answer({"hash1"});
+
+    c->configs.user_profile().set_name("Padmé");
+    c->configs.push_now();
+
+    auto subs = c.subrequests();
+    REQUIRE(subs.size() == 2);
+    CHECK(subs[0]["method"] == "store");
+
+    // The delete goes last: a sequence stops at its first failure, so nothing is removed before
+    // what replaces it has been stored.
+    CHECK(subs[1]["method"] == "delete");
+    CHECK(subs[1]["params"]["messages"] == nlohmann::json::array({"hash1"}));
+    CHECK(subs[1]["params"].contains("signature"));
+}
+
+TEST_CASE("Configs: a change schedules a push rather than sending one", "[core][configs][push]") {
+    PushableCore c;
+
+    {
+        auto held = c->configs.batch();
+        c->configs.user_profile().set_name("Leia");
+    }
+
+    // Releasing the batch is what notices the change; it schedules rather than sending, so a run of
+    // changes coalesces into one request.
+    CHECK(TestHelper::push_scheduled(c->configs));
+    CHECK(c.net->sent_requests.empty());
+}
+
+TEST_CASE("Configs: the debounce waits for quiet, up to a limit", "[core][configs][push]") {
+    PushableCore c;
+    c->configs.push_debounce = 2s;
+    c->configs.push_max_delay = 10s;
+
+    {
+        auto held = c->configs.batch();
+        c->configs.user_profile().set_name("Leia");
+    }
+    REQUIRE(TestHelper::push_scheduled(c->configs));
+
+    SECTION("changes still arriving hold it back") {
+        TestHelper::backdate_push_state(c->configs, 500ms, 1s);
+        TestHelper::push_if_due(c->configs);
+        CHECK(c.net->sent_requests.empty());
+        CHECK(TestHelper::push_scheduled(c->configs));
+    }
+
+    SECTION("quiet for long enough sends it") {
+        TestHelper::backdate_push_state(c->configs, 3s, 4s);
+        TestHelper::push_if_due(c->configs);
+        CHECK(c.net->sent_requests.size() == 1);
+        CHECK_FALSE(TestHelper::push_scheduled(c->configs));
+    }
+
+    SECTION("a steady trickle cannot defer it past the cap") {
+        // Never quiet -- the last change was a moment ago -- but the burst began long enough ago
+        // that waiting for quiet would mean waiting indefinitely.
+        TestHelper::backdate_push_state(c->configs, 100ms, 11s);
+        TestHelper::push_if_due(c->configs);
+        CHECK(c.net->sent_requests.size() == 1);
+    }
+}
+
+TEST_CASE("Configs: a push already in flight is not duplicated", "[core][configs][push]") {
+    PushableCore c;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.push_now();
+    REQUIRE(c.net->sent_requests.size() == 1);
+
+    // A second change while the first is out must not race it onto the wire; the completion picks
+    // it up instead.
+    c->configs.contacts().set(c->configs.contacts().get_or_construct("05" + std::string(64, 'a')));
+    c->configs.push_now();
+    CHECK(c.net->sent_requests.size() == 1);
 }

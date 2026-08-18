@@ -48,13 +48,28 @@ class Configs : public detail::CoreComponent {
 
     bool _loaded = false;
 
-    // Depth of nested Batch guards, and whether anything asked to be flushed while one was held.
+    // Depth of nested Batch guards.
     int _batch_depth = 0;
-    bool _flush_pending = false;
 
-    // Writes the dumps of everything that changed, unless a Batch is holding them back, in which
-    // case it is left for that Batch to release.
+    // Writes the dumps of everything that changed and schedules a push if one is owed -- unless a
+    // Batch is holding it back, in which case releasing that Batch is what runs it.
     void _flush();
+
+    // Debounce state: when the current run of changes began, and when the last one arrived.
+    std::chrono::steady_clock::time_point _burst_started{};
+    std::chrono::steady_clock::time_point _last_change{};
+    bool _push_scheduled = false;
+    bool _push_in_flight = false;
+
+    // Deferred work is handed to the event loop, which outlives this component and has no way to
+    // cancel a call already scheduled.  Callbacks capture a weak reference to this and do nothing
+    // if it has expired, which is what stops a pending push firing into a destroyed Core.
+    std::shared_ptr<int> _alive = std::make_shared<int>(0);
+
+    void _schedule_push();
+    void _arm_push_timer(std::chrono::milliseconds delay);
+    void _push_if_due();
+    void _send_push();
 
     // Constructs the configs from their stored dumps, or empty if there are none.  Requires an
     // account; throws globals::no_account if there is not one yet.
@@ -137,6 +152,25 @@ class Configs : public detail::CoreComponent {
 
     /// Whether any config holds changes that have not reached the swarm.
     bool needs_push();
+
+    /// How long a push waits for changes to stop arriving before going out, and the longest it will
+    /// wait once they started.  A run of changes coalesces into one request rather than one per
+    /// change; the cap is what stops a steady trickle deferring the push indefinitely.
+    ///
+    /// Settable mostly so a test does not have to spend real seconds proving it.
+    std::chrono::milliseconds push_debounce = std::chrono::seconds{2};
+    std::chrono::milliseconds push_max_delay = std::chrono::seconds{10};
+
+    /// Pushes whatever is owed immediately, rather than waiting out the debounce.
+    ///
+    /// Everything dirty goes in one `sequence` request: a store per config message, then a single
+    /// delete naming every hash those stores obsolete.  Only what this account owns goes in it --
+    /// a group's configs live under a different pubkey and are pushed separately even if their
+    /// swarm turns out to be the same one, because a request that carried both would tell that
+    /// swarm the two belong to the same person.
+    ///
+    /// Does nothing if a push is already in flight; the one in flight re-checks when it completes.
+    void push_now();
 };
 
 }  // namespace session::core

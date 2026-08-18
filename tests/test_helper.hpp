@@ -340,6 +340,20 @@ class TestHelper {
 
     static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
 
+    /// The push debounce, driven by hand.  A test that waited out real intervals would be both slow
+    /// and racy -- the timer fires on the event loop while the test reads from its own thread -- so
+    /// what is exercised here is the decision the timer makes, with the clock supplied.
+    static bool push_scheduled(core::Configs& configs) { return configs._push_scheduled; }
+    static void push_if_due(core::Configs& configs) { configs._push_if_due(); }
+    static void backdate_push_state(
+            core::Configs& configs,
+            std::chrono::milliseconds since_last_change,
+            std::chrono::milliseconds since_first_change) {
+        auto now = std::chrono::steady_clock::now();
+        configs._last_change = now - since_last_change;
+        configs._burst_started = now - since_first_change;
+    }
+
     // Returns whether the given migration name is recorded as applied.
     static bool migration_applied(core::Core& core, std::string_view name) {
         return core.db.conn()

@@ -1,7 +1,11 @@
 #include "session/core/configs.hpp"
 
 #include <oxen/log.hpp>
+#include <oxen/quic/loop.hpp>
 
+#include <algorithm>
+#include <nlohmann/json.hpp>
+#include <session/clock.hpp>
 #include <session/config/base.hpp>
 #include <session/config/contacts.hpp>
 #include <session/config/convo_info_volatile.hpp>
@@ -9,9 +13,15 @@
 #include <session/config/user_groups.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/core.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/network/session_network.hpp>
+#include <session/util.hpp>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+
+#include "swarm_request.hpp"
 
 namespace session::core {
 
@@ -134,17 +144,20 @@ Configs::Batch::Batch(Configs& configs) : _configs{configs} {
 }
 
 Configs::Batch::~Batch() {
-    if (--_configs._batch_depth == 0 && _configs._flush_pending)
+    if (--_configs._batch_depth == 0)
         _configs._flush();
 }
 
 void Configs::_flush() {
-    if (_batch_depth > 0) {
-        _flush_pending = true;
+    if (_batch_depth > 0)
         return;
-    }
-    _flush_pending = false;
+
     store_dumps();
+
+    // Unconditional rather than only after a merge, so that the batch a poll holds doubles as a
+    // sweep: a config changed locally without one gets noticed here rather than sitting unpushed.
+    if (needs_push())
+        _schedule_push();
 }
 
 void Configs::merge(config::Namespace ns, std::span<const SwarmMessage> messages) {
@@ -192,6 +205,248 @@ bool Configs::needs_push() {
         if (conf->needs_push())
             return true;
     return false;
+}
+
+// The longest a storage server will hold a message in a namespace only its owner may write
+// (oxenss TTL_MAXIMUM_PRIVATE; the limit for public namespaces is half of it).  This is the ceiling
+// rather than a chosen figure: a config is what a device that has been away comes back to, so there
+// is nothing to be gained by expiring it sooner.
+static constexpr auto CONFIG_TTL = 30 * 24h;
+
+void Configs::_schedule_push() {
+    auto now = std::chrono::steady_clock::now();
+    _last_change = now;
+    if (_burst_started == std::chrono::steady_clock::time_point{})
+        _burst_started = now;
+
+    if (_push_scheduled)
+        return;
+    _push_scheduled = true;
+    _arm_push_timer(push_debounce);
+}
+
+void Configs::_arm_push_timer(std::chrono::milliseconds delay) {
+    loop().call_later(delay, [this, alive = std::weak_ptr<int>{_alive}] {
+        if (alive.expired())
+            return;
+        _push_if_due();
+    });
+}
+
+void Configs::_push_if_due() {
+    auto now = std::chrono::steady_clock::now();
+    auto quiet = now - _last_change;
+    auto waited = now - _burst_started;
+
+    if (quiet >= push_debounce || waited >= push_max_delay) {
+        _push_scheduled = false;
+        _burst_started = {};
+        push_now();
+        return;
+    }
+
+    // Changes are still arriving, so wait for them -- but no further than the cap allows.  Both
+    // bounds are recomputed rather than tracked, so a re-arm cannot drift past the deadline the
+    // first change set.
+    using std::chrono::duration_cast;
+    using std::chrono::milliseconds;
+    _arm_push_timer(std::min(
+            duration_cast<milliseconds>(push_debounce - quiet),
+            duration_cast<milliseconds>(push_max_delay - waited)));
+}
+
+void Configs::push_now() {
+    if (_push_in_flight)
+        return;
+    _send_push();
+}
+
+void Configs::_send_push() {
+    auto net = core.network();
+    if (!net) {
+        log::debug(cat, "Not pushing configs: no network attached");
+        return;
+    }
+
+    // Which subrequests belong to which config, so that a result can be matched back to the config
+    // whose push produced it.  A sequence answers positionally, so this is the only link.
+    struct Pending {
+        config::ConfigBase* conf;
+        config::seqno_t seqno;
+        size_t first;
+        size_t count;
+    };
+
+    auto now_ms = epoch_ms(clock_now_ms());
+    auto pubkey_hex = core.globals.session_id_hex();
+    auto ed25519_hex = core.globals.pubkey_ed25519().hex();
+
+    auto sign = [this](std::string_view value) {
+        b64 sig;
+        auto seed = core.globals.account_seed();
+        ed25519::sign(sig, seed.ed25519_secret(), std::as_bytes(std::span{value}));
+        return "{:b}"_format(sig);
+    };
+
+    std::vector<Pending> pending;
+    std::vector<std::string> obsolete;
+    auto requests = nlohmann::json::array();
+
+    for (auto* conf : _pushable()) {
+        if (!conf->needs_push())
+            continue;
+
+        auto ns_val = static_cast<int16_t>(conf->storage_namespace());
+        auto [seqno, messages, superseded] = conf->push();
+
+        pending.push_back({conf, seqno, requests.size(), messages.size()});
+
+        for (const auto& msg : messages) {
+            nlohmann::json params = {
+                    {"pubkey", pubkey_hex},
+                    {"namespace", ns_val},
+                    {"data", "{:b}"_format(msg)},
+                    {"timestamp", now_ms},
+                    {"ttl", std::chrono::milliseconds{CONFIG_TTL}.count()},
+                    {"pubkey_ed25519", ed25519_hex},
+                    {"sig_timestamp", now_ms},
+                    {"signature", sign(ns_signature_value("store", ns_val, now_ms))},
+            };
+            requests.push_back({{"method", "store"}, {"params", std::move(params)}});
+        }
+
+        obsolete.insert(obsolete.end(), superseded.begin(), superseded.end());
+    }
+
+    if (pending.empty())
+        return;
+
+    // One delete for every config's obsolete hashes rather than one each: they go to the same
+    // pubkey's swarm, so a single delete is the same information in fewer requests.  It goes last
+    // so that nothing is dropped before its replacement has been stored -- which is why this is a
+    // sequence rather than a batch, since a sequence stops at the first failure.
+    if (!obsolete.empty()) {
+        nlohmann::json params = {
+                {"pubkey", pubkey_hex},
+                {"pubkey_ed25519", ed25519_hex},
+                {"messages", obsolete},
+                // Signed over the hashes in the order they are sent, so the two must not be
+                // reordered independently.
+                {"signature", sign(delete_signature_value(obsolete))},
+        };
+        requests.push_back({{"method", "delete"}, {"params", std::move(params)}});
+    }
+
+    auto body = to_vector<std::byte>(nlohmann::json{{"requests", std::move(requests)}}.dump());
+
+    log::debug(
+            cat,
+            "Pushing {} config(s) in {} subrequest(s), obsoleting {} message(s)",
+            pending.size(),
+            requests.size(),
+            obsolete.size());
+
+    _push_in_flight = true;
+
+    net->get_swarm(
+            core.globals.pubkey_x25519(),
+            false,
+            [this,
+             net,
+             alive = std::weak_ptr<int>{_alive},
+             pending = std::move(pending),
+             body = std::move(body)](auto, auto swarm) mutable {
+                if (alive.expired())
+                    return;
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot push configs: no swarm nodes available");
+                    _push_in_flight = false;
+                    return;
+                }
+
+                net->send_request(
+                        swarm_request(
+                                swarm.front(),
+                                core.globals.pubkey_x25519(),
+                                "sequence",
+                                std::move(body)),
+                        [this, alive, pending = std::move(pending)](
+                                bool success,
+                                bool timeout,
+                                int16_t status,
+                                auto,
+                                std::optional<std::string> resp) {
+                            if (alive.expired())
+                                return;
+                            _push_in_flight = false;
+
+                            if (!success || !resp) {
+                                log::warning(
+                                        cat,
+                                        "Config push failed ({}): {}",
+                                        timeout ? "timed out" : "status {}"_format(status),
+                                        resp.value_or("no response body"));
+                                return;
+                            }
+
+                            // A config is confirmed only if *every* message it split into was
+                            // stored.  Confirming a partial push would drop the parts that did
+                            // land from the obsolete list while leaving the config believing it
+                            // is clean, so the missing part would never be sent again.
+                            try {
+                                auto json = nlohmann::json::parse(*resp);
+                                auto results = json.find("results");
+                                if (results == json.end() || !results->is_array()) {
+                                    log::warning(cat, "Config push response carried no results");
+                                    return;
+                                }
+
+                                for (const auto& p : pending) {
+                                    std::unordered_set<std::string> hashes;
+                                    bool stored = true;
+                                    for (size_t i = p.first; stored && i < p.first + p.count; i++) {
+                                        if (i >= results->size()) {
+                                            stored = false;
+                                            break;
+                                        }
+                                        const auto& r = (*results)[i];
+                                        auto code = r.find("code");
+                                        auto b = r.find("body");
+                                        if (code == r.end() || code->get<int>() != 200 ||
+                                            b == r.end()) {
+                                            stored = false;
+                                            break;
+                                        }
+                                        auto h = b->find("hash");
+                                        if (h == b->end() || !h->is_string()) {
+                                            stored = false;
+                                            break;
+                                        }
+                                        hashes.insert(h->get<std::string>());
+                                    }
+
+                                    if (!stored) {
+                                        log::warning(
+                                                cat,
+                                                "Config push: {} was not stored, leaving it dirty",
+                                                p.conf->encryption_domain());
+                                        continue;
+                                    }
+                                    p.conf->confirm_pushed(p.seqno, std::move(hashes));
+                                }
+                            } catch (const std::exception& e) {
+                                log::warning(
+                                        cat, "Could not read config push response: {}", e.what());
+                                return;
+                            }
+
+                            // Confirming changes the configs' state, and a change that arrived
+                            // while this was in flight has re-dirtied them.
+                            store_dumps();
+                            if (needs_push())
+                                _schedule_push();
+                        });
+            });
 }
 
 }  // namespace session::core
