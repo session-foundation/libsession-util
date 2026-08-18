@@ -119,6 +119,9 @@ enum class ProStatus {
     InvalidUserSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     Valid = SESSION_PROTOCOL_PRO_STATUS_VALID,      // Proof is verified; has not expired
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
+    // Proof's wire version is not one we understand, so it can't be verified; the message is
+    // delivered as non-pro rather than dropped (see ProProofVersion).
+    UnsupportedVersion = SESSION_PROTOCOL_PRO_STATUS_UNSUPPORTED_VERSION,
 };
 
 class ProProof_v0 {

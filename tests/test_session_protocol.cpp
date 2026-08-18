@@ -30,7 +30,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
         std::chrono::sys_seconds content_at,
         std::chrono::sys_seconds pro_expiry_at,
         session_protocol_pro_message_bitset msg_bitset,
-        session_protocol_pro_profile_bitset profile_bitset) {
+        session_protocol_pro_profile_bitset profile_bitset,
+        uint32_t proof_version = static_cast<uint32_t>(session::ProProofVersion::v0)) {
     SerialisedProtobufContentWithProForTesting result = {};
 
     // Create protobuf `Content.dataMessage`
@@ -62,7 +63,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.proMessage.proof`
     SessionProtos::ProProof* proto_proof = pro->mutable_proof();
-    proto_proof->set_version(static_cast<std::uint32_t>(session::ProProofVersion::v0));
+    proto_proof->set_version(proof_version);
     proto_proof->set_revocationtag(
             result.proof.revocation_tag.data(), result.proof.revocation_tag.size());
     proto_proof->set_rotatingpublickey(
@@ -399,6 +400,61 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_content.has_datamessage());
         const SessionProtos::DataMessage& data = decrypt_content.datamessage();
         REQUIRE(data.body() == data_body);
+        session_protocol_decode_envelope_free(&decrypt_result);
+    }
+
+    SECTION("A future/unknown proof version degrades to non-pro, not a dropped message") {
+        // Same message, but the embedded proof claims a version this client doesn't understand.
+        SerialisedProtobufContentWithProForTesting future_content =
+                build_protobuf_content_with_session_pro(
+                        /*data_body*/ data_body,
+                        /*user_rotating_privkey*/ user_pro_ed_sk,
+                        /*pro_backend_privkey*/ pro_backend_ed_sk,
+                        /*content_at=*/timestamp_s,
+                        /*pro_expiry_at*/ timestamp_s,
+                        /*msg_bitset*/ {},
+                        /*profile_bitset*/ {},
+                        /*proof_version*/ 99);
+
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+                future_content.plaintext.data(),
+                future_content.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                base_dest.sent_timestamp_ms,
+                &base_dest.recipient_pubkey,
+                user_pro_ed_sk.data(),
+                user_pro_ed_sk.size(),
+                error,
+                sizeof(error));
+        REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
+
+        span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
+                &decrypt_keys,
+                encrypt_result.ciphertext.data,
+                encrypt_result.ciphertext.size,
+                pro_backend_ed_pk.data(),
+                pro_backend_ed_pk.size(),
+                error,
+                sizeof(error));
+        // The message is delivered rather than silently swallowed by the unknown version...
+        REQUIRE(decrypt_result.success);
+        REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
+        session_protocol_encode_for_destination_free(&encrypt_result);
+
+        // ...but the proof degrades to non-pro with an explicit "unsupported version" status.
+        REQUIRE(decrypt_result.pro.status == SESSION_PROTOCOL_PRO_STATUS_UNSUPPORTED_VERSION);
+
+        // The underlying message content survives intact.
+        SessionProtos::Content decrypt_content = {};
+        REQUIRE(decrypt_content.ParseFromArray(
+                decrypt_result.content_plaintext.data, decrypt_result.content_plaintext.size));
+        REQUIRE(decrypt_content.has_datamessage());
+        REQUIRE(decrypt_content.datamessage().body() == data_body);
         session_protocol_decode_envelope_free(&decrypt_result);
     }
 

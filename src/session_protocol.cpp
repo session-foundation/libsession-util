@@ -853,44 +853,56 @@ DecodedEnvelope decode_envelope(
             // Parse the proof from protobufs
             const SessionProtos::ProProof& proto_proof = pro_msg.proof();
             session::ProProof& proof = pro.proof;
-            // clang-format off
-            size_t proof_errors = 0;
-            proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion::v0);
-            proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
-            proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
-            proof_errors += !proto_proof.has_expiryunixts();
-            proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
-            // clang-format on
-            if (proof_errors)
-                throw std::runtime_error(
-                        "Parse decrypted message failed, pro metadata was malformed");
-
-            // Fill out the resulting proof structure, we have parsed successfully
             pro.msg_bitset.data = pro_msg.msgbitset();
             pro.profile_bitset.data = pro_msg.profilebitset();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
-            std::memcpy(
-                    proof.revocation_tag.data(),
-                    proto_proof.revocationtag().data(),
-                    proto_proof.revocationtag().size());
-            std::memcpy(
-                    proof.rotating_pubkey.data(),
-                    proto_proof.rotatingpublickey().data(),
-                    proto_proof.rotatingpublickey().size());
-            proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
-            std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+            // The wire `version` selects which proof layout this is; we only understand v0. Any
+            // other (or a missing) version is a proof we can't verify -- degrade to a non-pro
+            // message flagged UnsupportedVersion rather than dropping it, so a future proof format
+            // does not shut older clients out of the whole message.
+            if (!proto_proof.has_version() ||
+                static_cast<session::ProProofVersion>(proto_proof.version()) !=
+                        session::ProProofVersion::v0) {
+                pro.status = ProStatus::UnsupportedVersion;
+            } else {
+                // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
+                size_t proof_errors = 0;
+                proof_errors +=
+                        !proto_proof.has_revocationtag() ||
+                        proto_proof.revocationtag().size() != proof.revocation_tag.max_size();
+                proof_errors +=
+                        !proto_proof.has_rotatingpublickey() ||
+                        proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
+                proof_errors += !proto_proof.has_expiryunixts();
+                proof_errors +=
+                        !proto_proof.has_sig() || proto_proof.sig().size() != proof.sig.max_size();
+                if (proof_errors)
+                    throw std::runtime_error(
+                            "Parse decrypted message failed, pro metadata was malformed");
 
-            // Evaluate the pro status given the extracted components (was it signed, is it expired,
-            // was the message signed validly?)
-            //
-            // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
-            // bytes, this means that we expected the user to have signed the padding as well.
-            auto unix_ts = std::chrono::floor<std::chrono::seconds>(
-                    std::chrono::sys_time<std::chrono::milliseconds>(
-                            std::chrono::milliseconds(content.sigtimestamp())));
-            pro.status = proof.status(
-                    pro_backend_pubkey, unix_ts, to_span(pro_sig), to_span(envelope.content()));
+                std::memcpy(
+                        proof.revocation_tag.data(),
+                        proto_proof.revocationtag().data(),
+                        proto_proof.revocationtag().size());
+                std::memcpy(
+                        proof.rotating_pubkey.data(),
+                        proto_proof.rotatingpublickey().data(),
+                        proto_proof.rotatingpublickey().size());
+                proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
+                std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+
+                // Evaluate the pro status given the extracted components (was it signed, is it
+                // expired, was the message signed validly?)
+                //
+                // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
+                // bytes, this means that we expected the user to have signed the padding as well.
+                auto unix_ts = std::chrono::floor<std::chrono::seconds>(
+                        std::chrono::sys_time<std::chrono::milliseconds>(
+                                std::chrono::milliseconds(content.sigtimestamp())));
+                pro.status = proof.status(
+                        pro_backend_pubkey, unix_ts, to_span(pro_sig), to_span(envelope.content()));
+            }
         }
     }
     return result;
@@ -1013,65 +1025,77 @@ DecodedCommunityMessage decode_for_community(
         // Parse the proof from protobufs
         const SessionProtos::ProProof& proto_proof = pro_msg.proof();
         session::ProProof& proof = pro.proof;
-        // clang-format off
-        size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion::v0);
-        proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
-        proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
-        proof_errors += !proto_proof.has_expiryunixts();
-        proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
-        // clang-format on
-        if (proof_errors)
-            throw std::runtime_error(
-                    "Decoding community message failed, pro metadata was malformed");
-
-        // Fill out the resulting proof structure, we have parsed successfully
         pro.msg_bitset.data = pro_msg.msgbitset();
         pro.profile_bitset.data = pro_msg.profilebitset();
-        std::memcpy(
-                proof.revocation_tag.data(),
-                proto_proof.revocationtag().data(),
-                proto_proof.revocationtag().size());
-        std::memcpy(
-                proof.rotating_pubkey.data(),
-                proto_proof.rotatingpublickey().data(),
-                proto_proof.rotatingpublickey().size());
-        proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
-        std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-        // Evaluate the pro status given the extracted components (was it signed, is it expired,
-        // was the message signed validly?)
-        //
-        // IMPORTANT: We have to bit-manipulate the content because we're including the signature
-        // inside the payload itself that we had to sign. But we originally signed the payload
-        // without a signature set in it. This is only the case if we're dealing with a `Content`
-        // message that had the signature inside the content instead of the envelope.
-        if (result.envelope) {
-            // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
-            // a pro signature.
-            assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
-            pro.status = proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    to_span(*result.pro_sig),
-                    result.content_plaintext);
+        // The wire `version` selects which proof layout this is; we only understand v0. Any other
+        // (or a missing) version is a proof we can't verify -- degrade to a non-pro message flagged
+        // UnsupportedVersion rather than dropping it, so a future proof format does not shut older
+        // clients out of the whole message.
+        if (!proto_proof.has_version() ||
+            static_cast<session::ProProofVersion>(proto_proof.version()) !=
+                    session::ProProofVersion::v0) {
+            pro.status = ProStatus::UnsupportedVersion;
         } else {
-            SessionProtos::Content content_copy_without_sig = content;
-            assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
+            // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
+            size_t proof_errors = 0;
+            proof_errors += !proto_proof.has_revocationtag() ||
+                            proto_proof.revocationtag().size() != proof.revocation_tag.max_size();
+            proof_errors +=
+                    !proto_proof.has_rotatingpublickey() ||
+                    proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
+            proof_errors += !proto_proof.has_expiryunixts();
+            proof_errors +=
+                    !proto_proof.has_sig() || proto_proof.sig().size() != proof.sig.max_size();
+            if (proof_errors)
+                throw std::runtime_error(
+                        "Decoding community message failed, pro metadata was malformed");
 
-            // Remove signature from the payload
-            content_copy_without_sig.clear_prosigforcommunitymessageonly();
-            assert(!content_copy_without_sig.has_prosigforcommunitymessageonly());
+            std::memcpy(
+                    proof.revocation_tag.data(),
+                    proto_proof.revocationtag().data(),
+                    proto_proof.revocationtag().size());
+            std::memcpy(
+                    proof.rotating_pubkey.data(),
+                    proto_proof.rotatingpublickey().data(),
+                    proto_proof.rotatingpublickey().size());
+            proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
+            std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-            // Reserialise the payload without the signature, repad it then verify the signature
-            std::vector<uint8_t> content_copy_without_sig_payload =
-                    pad_message(to_span(content_copy_without_sig.SerializeAsString()));
+            // Evaluate the pro status given the extracted components (was it signed, is it expired,
+            // was the message signed validly?)
+            //
+            // IMPORTANT: We have to bit-manipulate the content because we're including the
+            // signature inside the payload itself that we had to sign. But we originally signed the
+            // payload without a signature set in it. This is only the case if we're dealing with a
+            // `Content` message that had the signature inside the content instead of the envelope.
+            if (result.envelope) {
+                // Entering the `pro_sig` and `result.envelope` branch means that the envelope must
+                // have a pro signature.
+                assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
+                pro.status = proof.status(
+                        pro_backend_pubkey,
+                        unix_ts,
+                        to_span(*result.pro_sig),
+                        result.content_plaintext);
+            } else {
+                SessionProtos::Content content_copy_without_sig = content;
+                assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
 
-            pro.status = proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    to_span(*result.pro_sig),
-                    to_span(content_copy_without_sig_payload));
+                // Remove signature from the payload
+                content_copy_without_sig.clear_prosigforcommunitymessageonly();
+                assert(!content_copy_without_sig.has_prosigforcommunitymessageonly());
+
+                // Reserialise the payload without the signature, repad it then verify the signature
+                std::vector<uint8_t> content_copy_without_sig_payload =
+                        pad_message(to_span(content_copy_without_sig.SerializeAsString()));
+
+                pro.status = proof.status(
+                        pro_backend_pubkey,
+                        unix_ts,
+                        to_span(*result.pro_sig),
+                        to_span(content_copy_without_sig_payload));
+            }
         }
     }
 
