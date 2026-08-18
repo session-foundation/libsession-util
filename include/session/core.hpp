@@ -10,6 +10,7 @@
 #include <session/types.hpp>
 
 #include "core/callbacks.hpp"
+#include "core/configs.hpp"
 #include "core/devices.hpp"
 #include "core/globals.hpp"
 #include "core/pro.hpp"
@@ -543,6 +544,9 @@ class Core {
 
     // Device groups for handling shared encryption key among account devices
     Devices devices{*this};
+
+    // The account's synced configuration, shared with its other devices
+    Configs configs{*this};
 
     // Passes a batch of messages retrieved from the swarm to the appropriate handler based on the
     // namespace they were retrieved from.  `is_final` should be true if this batch represents the

@@ -221,7 +221,16 @@ void Core::_poll() {
         return;
     }
 
+    // Order matters: the batch's results are handled in this order, so a namespace whose contents
+    // another one's depend on has to come first.  The configs lead because a message arriving in the
+    // same poll may be from a contact those configs are what tells us about; among themselves,
+    // ConvoInfoVolatile comes last because it refers to conversations that Contacts and UserGroups
+    // are what establish.
     constexpr std::array namespaces = {
+            config::Namespace::UserProfile,
+            config::Namespace::Contacts,
+            config::Namespace::UserGroups,
+            config::Namespace::ConvoInfoVolatile,
             config::Namespace::Default,
             config::Namespace::Devices,
             config::Namespace::AccountPubkeys};
@@ -329,6 +338,11 @@ void Core::_handle_poll_response(
         auto it = json.find("results");
         if (it == json.end() || !it->is_array())
             return;
+
+        // One poll can carry several config namespaces, and each merge would otherwise dump on its
+        // way out.  Nothing reads those intermediate states, so hold them until the whole response
+        // is handled.  (An external caller feeding receive_messages() directly can take its own.)
+        auto configs_held = configs.batch();
 
         auto& results = *it;
         auto conn = db.conn();
@@ -1126,6 +1140,10 @@ void Core::receive_messages(
         case Namespace::Default: _handle_direct_messages(messages); break;
         case Namespace::Devices: devices.parse_device_messages(messages, is_final); break;
         case Namespace::AccountPubkeys: devices.parse_account_pubkeys(messages, is_final); break;
+        case Namespace::UserProfile:
+        case Namespace::Contacts:
+        case Namespace::ConvoInfoVolatile:
+        case Namespace::UserGroups: configs.merge(ns, messages); break;
         default:
             log::warning(
                     cat,

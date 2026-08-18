@@ -127,6 +127,7 @@ target_link_libraries(crypto
 add_libsession_util_library(core
     core.cpp
     core/component.cpp
+    core/configs.cpp
     core/devices.cpp
     core/globals.cpp
     core/link_sas.cpp
@@ -158,8 +159,10 @@ target_link_libraries(
     # core.hpp holds a sqlite::Database by value and takes DatabaseOptions in its constructor, so
     # consumers need the SQLiteCpp headers.
     session::SQLite
-    PRIVATE
+    # Core owns the account's config objects and hands them out by reference, so a consumer that
+    # reads one calls into config itself.
     config
+    PRIVATE
     libsession::protos
     sessiondep::libsodium
     nlohmann_json::nlohmann_json

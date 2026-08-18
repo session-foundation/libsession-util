@@ -6,6 +6,7 @@ endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
     test_client.cpp
+    test_core_configs.cpp
     test_core_devices.cpp
     test_core_globals.cpp
     test_core_schema.cpp
