@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <session/config/contacts.hpp>
 #include <session/config/convo_info_volatile.hpp>
 #include <session/config/local.hpp>
@@ -279,6 +280,67 @@ TEST_CASE("Configs: one batch reports everything it changed, once", "[core][conf
     std::ranges::sort(changed);
     CHECK(changed ==
           std::vector{config::Namespace::UserProfile, config::Namespace::Contacts});
+}
+
+TEST_CASE("Configs: a conflicting merge at our own seqno is reported", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    // A local change of our own, at some seqno.
+    c->configs.contacts().set(c->configs.contacts().get_or_construct("05" + std::string(64, 'a')));
+    auto our_seqno = c->configs.contacts().seqno();
+
+    // Our config can be in either of two states here, and _merge takes a different path for each:
+    // Dirty means the change has not been serialised into a message at all, so nothing else can
+    // have built on it; Waiting means a message exists and has gone to the swarm, so another device
+    // may well have seen it.  A generator rather than sections, so that this composes with the
+    // sections below into all four combinations rather than replacing them.
+    const bool already_a_message = GENERATE(false, true);
+    CAPTURE(already_a_message);
+    if (already_a_message)
+        c->configs.contacts().push();
+    REQUIRE(c->configs.contacts().is_dirty() == !already_a_message);
+    REQUIRE(c->configs.contacts().seqno() == our_seqno);
+
+    // Another device changed things from the same starting point, so its push carries the *same*
+    // seqno as ours with different contents.  Both shapes of disagreement are worth covering: one
+    // where neither side's data contains the other, and one where theirs contains ours outright --
+    // the second being the case where "adopt the superset" would leave the seqno alone if the
+    // superset were chosen on data rather than on the diff chain.
+    std::vector<std::string> theirs_has;
+    size_t expected_contacts = 0;
+
+    SECTION("neither side's changes contain the other's") {
+        theirs_has = {"05" + std::string(64, 'b')};
+        expected_contacts = 2;
+    }
+    SECTION("theirs contains ours and more") {
+        theirs_has = {"05" + std::string(64, 'a'), "05" + std::string(64, 'b')};
+        expected_contacts = 2;
+    }
+
+    std::vector<std::vector<std::byte>> pushed;
+    {
+        auto seed = c->globals.account_seed();
+        config::Contacts theirs{seed.ed25519_secret(), std::nullopt};
+        for (const auto& id : theirs_has)
+            theirs.set(theirs.get_or_construct(id));
+        REQUIRE(theirs.seqno() == our_seqno);
+        auto [seqno, messages, obsolete] = theirs.push();
+        pushed = std::move(messages);
+    }
+    auto incoming = as_swarm_messages(pushed);
+
+    c->receive_messages(incoming, config::Namespace::Contacts, true);
+
+    // The data changed, so the application has to be told.  The risk being checked is that
+    // resolving two same-numbered configs might leave the seqno where it was, which a seqno
+    // comparison would then miss.  It does not: two distinct messages at one seqno are a conflict
+    // whatever their contents, and a conflict resolves to one past the highest.
+    CHECK(c->configs.contacts().size() == expected_contacts);
+    CHECK(c->configs.contacts().seqno() > our_seqno);
+    REQUIRE(w.reported.size() == 1);
+    CHECK(w.reported[0] == std::vector{config::Namespace::Contacts});
 }
 
 TEST_CASE("Configs: a local change is not reported back", "[core][configs][notify]") {
