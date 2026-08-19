@@ -7,7 +7,6 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 
-#include <fstream>
 #include <mutex>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -508,8 +507,8 @@ void streaming_file_upload(
                     state->cv.notify_one();
                 });
 
-        constexpr size_t WATERMARK_ALARM = 512 * 1024;
-        constexpr size_t WATERMARK_CLEAR = 128 * 1024;
+        constexpr size_t WATERMARK_ALARM = 1024 * 1024;
+        constexpr size_t WATERMARK_CLEAR = 512 * 1024;
         str->enable_watermarks(
                 WATERMARK_ALARM,
                 [state](quic::Stream&) {
@@ -615,6 +614,7 @@ void streaming_file_upload(
         return true;
     };
 
+    // The `next()` call here involves file I/O and so can block:
     for (auto chunk = enc_ptr->next(); !chunk.empty(); chunk = enc_ptr->next()) {
         if (check_cancelled())
             return;
