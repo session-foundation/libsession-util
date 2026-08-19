@@ -182,6 +182,30 @@ struct callbacks {
     std::function<void(
             int64_t message_id, MessageSendStatus status, std::optional<std::string_view> swarm_hash)>
             message_send_status;
+
+    /// Callback fired when merging config messages from the swarm changed one or more of the
+    /// account's configs, so that the layer holding a queryable copy of that state knows to go and
+    /// reconcile it.
+    ///
+    /// Fires once per batch of merges rather than once per config, with every namespace that
+    /// changed: one poll can carry all four, and reacting to each in turn would show the
+    /// application a half-applied state.  It fires *after* the changed configs have been dumped,
+    /// so what a handler reads is already on disk.
+    ///
+    /// Only merges are reported.  A config the application changed itself is not news to it, and
+    /// Local never appears at all, since it merges nothing.
+    ///
+    /// This says *that* something changed, not what.  There is deliberately no diff: a config diff
+    /// describes a transition between config states, while the reconciling layer's own currency is
+    /// not a config state and is not tracked -- a merge can jump several updates at once, and a
+    /// crash between merging and reconciling leaves it behind by an unrecorded amount.  Comparing
+    /// against its own stored state is what makes reconciliation self-correcting, and a diff would
+    /// silently skip anything those cases had left behind.
+    ///
+    /// Parameters:
+    /// - changed -- the namespaces whose configs the merge altered.  Valid only for the duration of
+    ///   the call.
+    std::function<void(std::span<const config::Namespace> changed)> configs_changed;
 };
 
 }  // namespace session::core

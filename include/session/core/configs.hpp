@@ -51,6 +51,11 @@ class Configs : public detail::CoreComponent {
     // Depth of nested Batch guards.
     int _batch_depth = 0;
 
+    // Namespaces a merge has altered since the last time the application was told, deduplicated.
+    // Held rather than reported immediately so that one poll carrying several config namespaces
+    // produces one notification of a settled state rather than several of partial ones.
+    std::vector<config::Namespace> _changed;
+
     // Writes the dumps of everything that changed and schedules a push if one is owed -- unless a
     // Batch is holding it back, in which case releasing that Batch is what runs it.
     void _flush();

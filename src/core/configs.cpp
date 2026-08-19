@@ -158,6 +158,21 @@ void Configs::_flush() {
     // sweep: a config changed locally without one gets noticed here rather than sitting unpushed.
     if (needs_push())
         _schedule_push();
+
+    // After the dumps, so a handler never reads state that is not yet on disk.  A throwing handler
+    // must not take the merge down with it, and the change is not redelivered -- the next merge of
+    // that config reports it again, and reconciliation compares rather than replays regardless.
+    if (!_changed.empty()) {
+        auto changed = std::move(_changed);
+        _changed.clear();
+        if (cb().configs_changed) {
+            try {
+                cb().configs_changed(changed);
+            } catch (const std::exception& e) {
+                log::warning(cat, "configs_changed callback threw: {}", e.what());
+            }
+        }
+    }
 }
 
 void Configs::merge(config::Namespace ns, std::span<const SwarmMessage> messages) {
@@ -178,7 +193,12 @@ void Configs::merge(config::Namespace ns, std::span<const SwarmMessage> messages
     for (const auto& m : messages)
         incoming.emplace_back(m.hash, m.data);
 
+    // The returned hash set says which messages parsed, not whether any of them mattered -- a stale
+    // config counts as parsed.  The seqno is what actually moves when a merge changes something.
+    auto before = conf->seqno();
     auto accepted = conf->merge(incoming);
+    if (conf->seqno() != before && std::ranges::find(_changed, ns) == _changed.end())
+        _changed.push_back(ns);
 
     log::debug(
             cat,

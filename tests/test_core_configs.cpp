@@ -213,6 +213,88 @@ TEST_CASE("Configs: a batch holds back the dump", "[core][configs]") {
     CHECK(stored_dumps(c) == 1);
 }
 
+namespace {
+
+/// Records what configs_changed reported, one entry per firing.
+struct ChangeWatcher {
+    std::vector<std::vector<config::Namespace>> reported;
+
+    core::callbacks callbacks() {
+        core::callbacks cbs;
+        cbs.configs_changed = [this](std::span<const config::Namespace> changed) {
+            reported.emplace_back(changed.begin(), changed.end());
+        };
+        return cbs;
+    }
+};
+
+/// What another device pushed to its Contacts config, having added one contact.
+std::vector<std::vector<std::byte>> contacts_from_another_device(
+        TempCore& c, std::string_view session_id) {
+    auto seed = c->globals.account_seed();
+    config::Contacts theirs{seed.ed25519_secret(), std::nullopt};
+    theirs.set(theirs.get_or_construct(std::string{session_id}));
+    auto [seqno, messages, obsolete] = theirs.push();
+    return messages;
+}
+
+}  // namespace
+
+TEST_CASE("Configs: a merge that changed something is reported", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    auto pushed = push_from_another_device(c, "Padmé");
+    auto incoming = as_swarm_messages(pushed);
+    c->receive_messages(incoming, config::Namespace::UserProfile, true);
+
+    REQUIRE(w.reported.size() == 1);
+    CHECK(w.reported[0] == std::vector{config::Namespace::UserProfile});
+
+    // The same message again changes nothing, and nothing is what gets reported -- otherwise every
+    // poll that re-fetched the same config would send the application round the houses again.
+    c->receive_messages(incoming, config::Namespace::UserProfile, true);
+    CHECK(w.reported.size() == 1);
+}
+
+TEST_CASE("Configs: one batch reports everything it changed, once", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    auto profile_pushed = push_from_another_device(c, "Leia");
+    auto profile = as_swarm_messages(profile_pushed);
+    auto contacts_pushed = contacts_from_another_device(c, "05" + std::string(64, 'a'));
+    auto contacts = as_swarm_messages(contacts_pushed);
+
+    {
+        auto held = c->configs.batch();
+        c->receive_messages(profile, config::Namespace::UserProfile, true);
+        c->receive_messages(contacts, config::Namespace::Contacts, true);
+    }
+
+    // One notification carrying both, not one per config: a poll can deliver all four, and telling
+    // the application about each in turn shows it a half-applied state.
+    REQUIRE(w.reported.size() == 1);
+    auto changed = w.reported[0];
+    std::ranges::sort(changed);
+    CHECK(changed ==
+          std::vector{config::Namespace::UserProfile, config::Namespace::Contacts});
+}
+
+TEST_CASE("Configs: a local change is not reported back", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    {
+        auto held = c->configs.batch();
+        c->configs.user_profile().set_name("Leia");
+    }
+
+    // The application made this change; being told about it would be news to nobody, and would
+    // invite it to reconcile its own write back over itself.
+    CHECK(w.reported.empty());
+}
+
 TEST_CASE("Configs: a change goes out as one signed sequence", "[core][configs][push]") {
     PushableCore c;
 

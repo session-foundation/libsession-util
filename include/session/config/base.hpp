@@ -1088,6 +1088,23 @@ class ConfigBase : public ConfigSig {
     std::unordered_set<std::string> merge(
             const std::vector<std::pair<std::string, std::span<const std::byte>>>& configs);
 
+    /// API: base/ConfigBase::seqno
+    ///
+    /// Returns the current sequence number of the config data.
+    ///
+    /// This advances when the config changes: on a local modification, and on a merge that either
+    /// adopted a higher-numbered config from elsewhere or had to resolve a conflict.  A merge that
+    /// changed nothing -- because what arrived was stale, or was already what we held -- leaves it
+    /// alone.  Comparing it either side of a `merge()` is therefore how a caller asks whether that
+    /// merge actually did anything, which the returned hash set does not answer: a hash is reported
+    /// as parsed regardless of whether it turned out to be useful.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `seqno_t` -- the current sequence number
+    seqno_t seqno() const;
+
     /// API: base/ConfigBase::is_dirty
     ///
     /// Returns true if we are currently dirty (i.e. have made changes that haven't been serialized
