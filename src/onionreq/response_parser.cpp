@@ -4,13 +4,15 @@
 #include <oxenc/endian.h>
 #include <sodium/core.h>
 
+#include <session/format.hpp>
 #include <stdexcept>
 
 #include "session/export.h"
-#include "session/network/service_node.hpp"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/hop_encryption.hpp"
+#include "session/onionreq/response_parser.h"
+#include "session/util.hpp"
 
 using namespace session;
 
@@ -34,7 +36,7 @@ bool ResponseParser::response_long_enough(EncryptType enc_type, size_t response_
     return HopEncryption::response_long_enough(enc_type, response_size);
 }
 
-std::vector<unsigned char> ResponseParser::decrypt(std::vector<unsigned char> ciphertext) const {
+std::vector<std::byte> ResponseParser::decrypt(std::vector<std::byte> ciphertext) const {
     HopEncryption d{x25519_keypair_.second, x25519_keypair_.first, false};
 
     // FIXME: The legacy PN server doesn't support 'xchacha20' onion requests so would return an
@@ -85,13 +87,14 @@ DecryptedResponse ResponseParser::_decrypt_v3_response(const std::string& respon
     if (!oxenc::is_base64(base64_iv_and_ciphertext))
         throw std::runtime_error{"Invalid base64 encoded IV and ciphertext."};
 
-    std::vector<unsigned char> iv_and_ciphertext;
+    std::vector<std::byte> iv_and_ciphertext;
     oxenc::from_base64(
             base64_iv_and_ciphertext.begin(),
             base64_iv_and_ciphertext.end(),
             std::back_inserter(iv_and_ciphertext));
     auto result = decrypt(iv_and_ciphertext);
-    auto result_json = nlohmann::json::parse(result);
+    // Parse as a char view: libc++'s std::char_traits has no std::byte specialization.
+    auto result_json = nlohmann::json::parse(to_string_view(result));
     int16_t status_code;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
@@ -180,18 +183,17 @@ LIBSESSION_C_API bool onion_request_decrypt(
                 break;
 
             default:
-                throw std::runtime_error{"Invalid decryption type " + std::to_string(enc_type_)};
+                throw std::runtime_error{
+                        "Invalid decryption type {}"_format(static_cast<int>(enc_type_))};
         }
 
         session::onionreq::HopEncryption d{
-                session::network::x25519_seckey::from_bytes({final_x25519_seckey, 32}),
-                session::network::x25519_pubkey::from_bytes({final_x25519_pubkey, 32}),
+                session::network::x25519_seckey::from_bytes(to_byte_span<32>(final_x25519_seckey)),
+                session::network::x25519_pubkey::from_bytes(to_byte_span<32>(final_x25519_pubkey)),
                 false};
 
-        std::vector<unsigned char> result;
-        std::vector<unsigned char> ciphertext;
-        ciphertext.reserve(ciphertext_len);
-        ciphertext.assign(ciphertext_, ciphertext_ + ciphertext_len);
+        std::vector<std::byte> result;
+        std::vector<std::byte> ciphertext{to_vector(to_byte_span(ciphertext_, ciphertext_len))};
 
         // FIXME: The legacy PN server doesn't support 'xchacha20' onion requests so would return an
         // error encrypted with 'aes_gcm' so try to decrypt in case that is what happened - this
@@ -200,14 +202,15 @@ LIBSESSION_C_API bool onion_request_decrypt(
             result = d.decrypt(
                     enc_type,
                     ciphertext,
-                    session::network::x25519_pubkey::from_bytes({destination_x25519_pubkey, 32}));
+                    session::network::x25519_pubkey::from_bytes(
+                            to_byte_span<32>(destination_x25519_pubkey)));
         } catch (...) {
             if (enc_type == session::onionreq::EncryptType::xchacha20)
                 result = d.decrypt(
                         session::onionreq::EncryptType::aes_gcm,
                         ciphertext,
                         session::network::x25519_pubkey::from_bytes(
-                                {destination_x25519_pubkey, 32}));
+                                to_byte_span<32>(destination_x25519_pubkey)));
             else
                 return false;
         }

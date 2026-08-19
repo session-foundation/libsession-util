@@ -4,7 +4,7 @@
 #include <oxen/log/format.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
 #include "session/network/session_network_types.hpp"
 
 using namespace oxen;
@@ -113,7 +113,7 @@ void QuicTransport::verify_connectivity(
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
             _establish_connection(
-                    {node.remote_pubkey, node.host(), node.omq_port}, request_id, category);
+                    {node.remote_pubkey.view(), node.host(), node.omq_port}, request_id, category);
     });
 }
 
@@ -148,8 +148,9 @@ void QuicTransport::_recreate_endpoint() {
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
             quic::Address{},
-            (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
-                                           : std::nullopt));
+            (_config.max_udp_payload
+                     ? std::make_optional<quic::opt::max_udp_payload>(*_config.max_udp_payload)
+                     : std::nullopt));
 }
 
 void QuicTransport::_close_connections() {
@@ -234,7 +235,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
                             cat,
                             "[Request {}]: Resolving service_node to RemoteAddress.",
                             request_id);
-                    remote.emplace(arg.remote_pubkey, arg.host(), arg.omq_port);
+                    remote.emplace(arg.remote_pubkey.view(), arg.host(), arg.omq_port);
                 }
             },
             request.destination);
@@ -294,8 +295,8 @@ void QuicTransport::_establish_connection(
         if (!_endpoint)
             throw std::runtime_error{"Network is invalid"};
 
-        auto conn_key_pair = ed25519::ed25519_key_pair();
-        auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
+        auto [conn_pk, conn_sk] = ed25519::keypair();
+        auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_sk));
 
         // If we are starting a connection attempt then transition to the "connecting" state
         if (_status.load() == ConnectionStatus::unknown ||
@@ -533,7 +534,7 @@ void QuicTransport::_send_on_connection(
                         final_timeout = result->second;
                     }
 
-                    log::debug(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
+                    log::warning(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
                     return cb(
                             false,
                             final_timeout,

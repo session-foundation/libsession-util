@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 
 #include "base.hpp"
@@ -87,11 +88,11 @@ namespace convo {
 
     struct pro_base : base {
         /// Opaque revocation tag identifying this proof (from the Session Pro backend)
-        std::optional<array_uc32> pro_revocation_tag;
+        std::optional<b32> pro_revocation_tag;
 
         /// Unix epoch timestamp (seconds) until which this proof's entitlement to Session Pro
         /// features is valid
-        sys_seconds pro_expiry_at{};
+        std::chrono::sys_seconds pro_expiry_at{};
 
       protected:
         using base::base;
@@ -230,8 +231,8 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     /// that was previously dumped from an instance of this class by calling `dump()`.
     ConvoInfoVolatile(
-            std::span<const unsigned char> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+            const ed25519::PrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: convo_info_volatile/ConvoInfoVolatile::storage_namespace
     ///
@@ -284,12 +285,12 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// - `std::tuple<seqno_t, std::vector<std::byte>, std::vector<std::string>>` - Returns a
     /// tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `std::vector<std::vector<unsigned char>>` -- data message(s) to push to the server
+    ///   - `std::vector<std::vector<std::byte>>` -- data message(s) to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>> push()
+    std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>> push()
             override;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_1to1
@@ -427,7 +428,7 @@ class ConvoInfoVolatile : public ConfigBase {
     ///         std::string_view base_url, std::string_view room, std::string_view pubkey_hex)
     ///         const;
     /// convo::community get_or_construct_community(
-    ///         std::string_view base_url, std::string_view room, std::span<const unsigned char>
+    ///         std::string_view base_url, std::string_view room, std::span<const std::byte, 32>
     ///         pubkey) const;
     /// ```
     ///
@@ -443,7 +444,7 @@ class ConvoInfoVolatile : public ConfigBase {
     convo::community get_or_construct_community(
             std::string_view base_url,
             std::string_view room,
-            std::span<const unsigned char> pubkey) const;
+            std::span<const std::byte> pubkey) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_community(full_url)
     ///
@@ -507,7 +508,7 @@ class ConvoInfoVolatile : public ConfigBase {
     // Drills into the nested dicts to access community details; if the second argument is
     // non-nullptr then it will be set to the community's pubkey, if it exists.
     DictFieldProxy community_field(
-            const convo::community& og, std::span<const unsigned char>* get_pubkey = nullptr) const;
+            const convo::community& og, std::span<const std::byte>* get_pubkey = nullptr) const;
 
   public:
     /// API: convo_info_volatile/ConvoInfoVolatile::erase_1to1

@@ -3,7 +3,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -59,8 +58,8 @@ void contact_info::set_nickname_truncated(std::string n) {
 }
 
 Contacts::Contacts(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -116,9 +115,9 @@ void contact_info::load(const dict& info_dict) {
 
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
 
-    const session::config::set* profile_bitset_set = maybe_set(info_dict, "f");
-    if (profile_bitset_set)
-        profile_bitset.data = bitset_from_set_of_int64_or_0(*profile_bitset_set);
+    const session::config::set* profile_flags_set = maybe_set(info_dict, "f");
+    if (profile_flags_set)
+        profile_flags = to_flags<ProProfileFlags>(*profile_flags_set);
 }
 
 void contact_info::into(contacts_contact& c) const {
@@ -143,7 +142,7 @@ void contact_info::into(contacts_contact& c) const {
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
     c.created = to_epoch_seconds(created);
-    c.profile_bitset.data = profile_bitset.data;
+    c.profile_bitset = static_cast<uint64_t>(profile_flags);
 }
 
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
@@ -154,7 +153,9 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+        profile_picture.key.assign(
+                reinterpret_cast<const std::byte*>(c.profile_pic.key),
+                reinterpret_cast<const std::byte*>(c.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(c.profile_updated);
     approved = c.approved;
@@ -168,7 +169,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
     created = to_epoch_seconds(c.created);
-    profile_bitset.data = c.profile_bitset.data;
+    profile_flags = static_cast<ProProfileFlags>(c.profile_bitset);
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -228,7 +229,7 @@ void Contacts::set(const contact_info& contact) {
             contact.exp_timer.count());
 
     set_positive_int(info["j"], to_epoch_seconds(contact.created));
-    set_int64_set_from_bitset(info["f"], contact.profile_bitset.data);
+    set_flags(info["f"], contact.profile_flags);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -299,9 +300,9 @@ void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
     set(c);
 }
 
-void Contacts::set_pro_features(std::string_view session_id, ProProfileBitset features) {
+void Contacts::set_pro_features(std::string_view session_id, ProProfileFlags features) {
     auto c = get_or_construct(session_id);
-    c.profile_bitset = features;
+    c.profile_flags = features;
     set(c);
 }
 
@@ -321,7 +322,7 @@ size_t Contacts::size() const {
 
 blinded_contact_info::blinded_contact_info(
         std::string_view community_base_url,
-        std::span<const unsigned char> community_pubkey,
+        std::span<const std::byte, 32> community_pubkey,
         std::string_view blinded_id) :
         comm{community(
                 std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))} {
@@ -331,7 +332,7 @@ blinded_contact_info::blinded_contact_info(
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(blinded_id)};
 }
 
 void blinded_contact_info::load(const dict& info_dict) {
@@ -352,7 +353,7 @@ void blinded_contact_info::load(const dict& info_dict) {
     auto it = info_dict.find("f");
     if (it != info_dict.end()) {
         if (auto* set = std::get_if<session::config::set>(&it->second))
-            profile_bitset.data = bitset_from_set_of_int64_or_0(*set);
+            profile_flags = to_flags<ProProfileFlags>(*set);
     }
 }
 
@@ -374,23 +375,25 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.priority = priority;
     c.legacy_blinding = legacy_blinding;
     c.created = epoch_seconds(created);
-    c.profile_bitset.data = profile_bitset.data;
+    c.profile_bitset = static_cast<uint64_t>(profile_flags);
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
-    comm = community(c.base_url, {c.session_id + 2, 64}, c.pubkey);
+    comm = community(c.base_url, {c.session_id + 2, 64}, std::as_bytes(std::span{c.pubkey}));
     assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
     name = c.name;
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+        profile_picture.key.assign(
+                reinterpret_cast<const std::byte*>(c.profile_pic.key),
+                reinterpret_cast<const std::byte*>(c.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(c.profile_updated);
     priority = c.priority;
     legacy_blinding = c.legacy_blinding;
     created = to_sys_seconds(c.created);
-    profile_bitset.data = c.profile_bitset.data;
+    profile_flags = static_cast<ProProfileFlags>(c.profile_bitset);
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -416,7 +419,7 @@ void blinded_contact_info::set_room(std::string_view room) {
     comm.set_room(room);
 }
 
-void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
+void blinded_contact_info::set_pubkey(std::span<const std::byte, 32> pubkey) {
     comm.set_pubkey(pubkey);
 }
 
@@ -425,13 +428,13 @@ void blinded_contact_info::set_pubkey(std::string_view pubkey) {
 }
 
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
-        const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
+        const blinded_contact_info& bc, std::span<const std::byte>* get_pubkey) const {
     auto record = data["b"][bc.comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey = std::span<const unsigned char>{
-                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = std::span<const std::byte>{
+                    reinterpret_cast<const std::byte*>(pk.data()), pk.size()};
     }
     return record["R"][bc.comm.room()];  // The `room` value is the blinded id without the prefix
 }
@@ -464,8 +467,11 @@ blinded_contact_info Contacts::get_or_construct_blinded(
     if (auto maybe = get_blinded(blinded_id_hex))
         return *std::move(maybe);
 
+    auto pk = oxenc::from_hex(community_pubkey_hex);
     return blinded_contact_info{
-            community_base_url, to_span(oxenc::from_hex(community_pubkey_hex)), blinded_id_hex};
+            community_base_url,
+            std::span<const std::byte, 32>{reinterpret_cast<const std::byte*>(pk.data()), 32},
+            blinded_id_hex};
 }
 
 std::vector<blinded_contact_info> Contacts::blinded() const {
@@ -504,7 +510,7 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_nonzero_int(info["+"], bc.priority);
     set_positive_int(info["y"], bc.legacy_blinding);
     set_ts(info["j"], bc.created);
-    set_int64_set_from_bitset(info["f"], bc.profile_bitset.data);
+    set_flags(info["f"], bc.profile_flags);
 }
 
 bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinded_id) {
@@ -513,7 +519,7 @@ bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinde
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(blinded_id)};
 
     auto base_url = community::canonical_url(base_url_);
     auto pk = std::string(blinded_id.substr(2));

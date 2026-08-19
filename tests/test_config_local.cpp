@@ -1,29 +1,26 @@
 #include <oxenc/hex.h>
 #include <session/config/encrypt.h>
 #include <session/config/local.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <session/config/local.hpp>
 #include <session/config/notify.hpp>
 #include <session/config/theme.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
 
+using namespace session;
 using namespace std::literals;
 
 TEST_CASE("Local", "[config][local]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -32,7 +29,7 @@ TEST_CASE("Local", "[config][local]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Local local{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Local local{seed, std::nullopt};
 
     CHECK(local.get_notification_content() == session::config::notify_content::defaulted);
     CHECK(local.get_ios_notification_sound() == 0);
@@ -60,7 +57,7 @@ TEST_CASE("Local", "[config][local]") {
     CHECK(local.size_settings() == 1);
 
     // Ensure all of these settings were stored in the dump and loaded correctly
-    session::config::Local local2{std::span<const unsigned char>{seed}, local.dump()};
+    session::config::Local local2{seed, local.dump()};
     CHECK_FALSE(local.needs_dump());
 
     CHECK(local2.get_notification_content() == session::config::notify_content::name_no_preview);

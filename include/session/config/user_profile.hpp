@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 
 #include "base.hpp"
@@ -79,8 +80,8 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `UserProfile` - Constructor
     UserProfile(
-            std::span<const unsigned char> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+            const ed25519::PrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: user_profile/UserProfile::storage_namespace
     ///
@@ -148,7 +149,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -158,7 +159,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::set_reupload_profile_pic
@@ -167,7 +168,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_reupload_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -177,7 +178,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_reupload_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::get_nts_priority
@@ -294,18 +295,18 @@ class UserProfile : public ConfigBase {
     /// - `bool` - Flag indicating whether the config had Session Pro config removed or not.
     bool remove_pro_config();
 
-    /// API: user_profile/UserProfile::get_pro_features
+    /// API: user_profile/UserProfile::get_profile_flags
     ///
-    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    /// Retrieves the flags indicating which pro features the user currently has enabled.
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - Bitset with individual bits set on it corresponding to
-    /// SESSION_PROTOCOL_PRO_PROFILE_FEATURES_BITSET. It is possible to receive bits set that don't
-    /// have a corresponding enum value if you are receiving a bitset from a newer client with newer
-    /// features enabled. These flags should be ignored by clients that do not recognise them.
-    ProProfileBitset get_profile_bitset() const;
+    /// - `ProProfileFlags` with the individual `ProProfileFlags::*` bits set that the user has
+    /// enabled. It is possible to receive bits set that don't have a corresponding enumerator if
+    /// you are receiving flags from a newer client with newer features enabled; unrecognised bits
+    /// should be ignored.
+    ProProfileFlags get_profile_flags() const;
 
     /// API: user_profile/UserProfile::set_pro_badge
     ///
@@ -336,9 +337,9 @@ class UserProfile : public ConfigBase {
     /// Inputs:  None
     ///
     /// Outputs:
-    /// - `std::optional<sys_seconds>` - The unix timestamp in
+    /// - `std::optional<std::chrono::sys_seconds>` - The unix timestamp in
     /// seconds that the users pro access will expire, or nullopt if unset.
-    std::optional<sys_seconds> get_pro_access_expiry() const;
+    std::optional<std::chrono::sys_seconds> get_pro_access_expiry() const;
 
     /// API: user_profile/UserProfile::set_pro_access_expiry
     ///
@@ -347,7 +348,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
-    void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
+    void set_pro_access_expiry(std::optional<std::chrono::sys_seconds> access_expiry_ts);
 
     /// API: user_profile/UserProfile::get_pro_auto_renewing
     ///
@@ -412,9 +413,9 @@ class UserProfile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a refund was
-    /// requested, or nullopt if no refund has been requested (or the stored value is stale).
-    std::optional<sys_seconds> get_refund_requested() const;
+    /// - `std::optional<std::chrono::sys_seconds>` - the unix timestamp (seconds) at which a refund
+    /// was requested, or nullopt if no refund has been requested (or the stored value is stale).
+    std::optional<std::chrono::sys_seconds> get_refund_requested() const;
 
     /// API: user_profile/UserProfile::set_refund_requested
     ///
@@ -426,7 +427,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `when` -- the timestamp (unix epoch seconds) at which the refund was requested, or nullopt
     /// to clear the refund-requested state.
-    void set_refund_requested(std::optional<sys_seconds> when);
+    void set_refund_requested(std::optional<std::chrono::sys_seconds> when);
 
     /// API: user_profile/UserProfile::get_pro_prepaid
     ///
@@ -440,7 +441,7 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a purchase was
     /// initiated, or nullopt if none is pending (or the stored value is stale).
-    std::optional<sys_seconds> get_pro_prepaid() const;
+    std::optional<std::chrono::sys_seconds> get_pro_prepaid() const;
 
     /// API: user_profile/UserProfile::set_pro_prepaid
     ///
@@ -453,7 +454,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `when` -- the timestamp (unix epoch seconds) at which the purchase was initiated, or
     /// nullopt to clear the marker.
-    void set_pro_prepaid(std::optional<sys_seconds> when);
+    void set_pro_prepaid(std::optional<std::chrono::sys_seconds> when);
 
     /// API: user_profile/UserProfile::pro_renewal_target
     ///
@@ -476,7 +477,13 @@ class UserProfile : public ConfigBase {
     ///
     /// Outputs:
     /// - `std::optional<sys_seconds>` - when to renew, or nullopt for "no renewal needed".
-    std::optional<sys_seconds> pro_renewal_target(sys_seconds now) const;
+    std::optional<std::chrono::sys_seconds> pro_renewal_target(std::chrono::sys_seconds now) const;
+
+  private:
+    // Enables/disables a single profile feature flag in the synced "f" set. The set stores feature
+    // *bit positions*, so `flag` must be a single-bit ProProfileFlags value (deflated here to its
+    // position via countr_zero).
+    void set_profile_feature(ProProfileFlags flag, bool enabled);
 };
 
 }  // namespace session::config

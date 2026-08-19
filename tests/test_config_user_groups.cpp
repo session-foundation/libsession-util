@@ -1,6 +1,5 @@
 #include <oxenc/hex.h>
 #include <session/config/user_groups.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -79,13 +78,9 @@ TEST_CASE("Open Group URLs", "[config][community_urls]") {
 
 TEST_CASE("User Groups", "[config][groups]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -94,7 +89,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups groups{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserGroups groups{seed, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -159,11 +154,8 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(c.members() == expected_members);
 
     const auto lgroup_seed =
-            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
-    std::array<unsigned char, 32> lg_pk;
-    std::array<unsigned char, 64> lg_sk;
-    crypto_sign_ed25519_seed_keypair(
-            lg_pk.data(), lg_sk.data(), reinterpret_cast<const unsigned char*>(lgroup_seed.data()));
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hex_b;
+    auto [lg_pk, lg_sk] = ed25519::keypair(lgroup_seed);
     // Note: this isn't exactly what Session actually does here for legacy groups (rather it
     // uses X25519 keys) but for this test the distinction doesn't matter.
     c.enc_pubkey.assign(lg_pk.data(), lg_pk.data() + lg_pk.size());
@@ -182,7 +174,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(groups.needs_dump());
 
     const auto community_pubkey =
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     auto og = groups.get_or_construct_community(
             "http://Example.ORG:5678", "SudokuRoom", community_pubkey);
@@ -310,7 +302,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK_FALSE(g2.needs_dump());
 
     REQUIRE(to_push.size() == 1);
-    std::vector<std::pair<std::string, std::vector<unsigned char>>> to_merge;
+    std::vector<std::pair<std::string, std::vector<std::byte>>> to_merge;
     to_merge.emplace_back("fakehash2", to_push[0]);
     groups.merge(to_merge);
     auto x3 = groups.get_community("http://example.org:5678", "SudokuRoom");
@@ -427,13 +419,9 @@ TEST_CASE("User Groups", "[config][groups]") {
 
 TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -442,7 +430,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups groups{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserGroups groups{seed, std::nullopt};
 
     constexpr auto definitely_real_id =
             "035000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -463,10 +451,10 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
     c.secretkey = session::to_vector(ed_sk);  // This *isn't* the right secret key for the group, so
                                               // won't propagate, and so auth data will:
-    c.auth_data =
+    c.auth_data = to_vector(
             "01020304050000000000000000000000000000000000000000000000000000000000000000000000000000"
             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-            "0000000000000000000000000000"_hexbytes;
+            "0000000000000000000000000000"_hex_b);
 
     groups.set(c);
 
@@ -478,7 +466,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
     auto d1 = groups.dump();
 
-    session::config::UserGroups g2{std::span<const unsigned char>{seed}, d1};
+    session::config::UserGroups g2{seed, d1};
 
     auto c2 = g2.get_group(definitely_real_id);
     REQUIRE(c2.has_value());
@@ -504,16 +492,18 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     c2b.secretkey =
             session::to_vector(ed_sk);  // This one does match the group ID, so should propagate
     c2b.auth_data =                     // should get ignored, since we have a valid secret key set:
-            "01020304050000000000000000000000000000000000000000000000000000000000000000000000000000"
-            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-            "0000000000000000000000000000"_hexbytes;
+            to_vector(
+                    "0102030405000000000000000000000000000000000000000000000000000000"
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                    "00000000"_hex_b);
     g2.set(c2b);
 
     std::tie(seqno, to_push, obs) = g2.push();
     g2.confirm_pushed(seqno, {"fakehash2"});
 
     REQUIRE(to_push.size() == 1);
-    std::vector<std::pair<std::string, std::vector<unsigned char>>> to_merge;
+    std::vector<std::pair<std::string, std::vector<std::byte>>> to_merge;
     to_merge.emplace_back("fakehash2", to_push[0]);
     groups.merge(to_merge);
 
@@ -582,13 +572,9 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
 TEST_CASE("User Groups members C API", "[config][groups][c]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -599,7 +585,7 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
 
     char err[256];
     config_object* conf;
-    rc = user_groups_init(&conf, ed_sk.data(), NULL, 0, err);
+    auto rc = user_groups_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, err);
     REQUIRE(rc == 0);
 
     constexpr auto definitely_real_id =
@@ -719,13 +705,11 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     REQUIRE(keys);
     REQUIRE(key_len == 1);
 
-    session::config::UserGroups c2{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserGroups c2{seed, std::nullopt};
 
     REQUIRE(to_push->n_configs == 1);
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> to_merge;
-    to_merge.emplace_back(
-            "fakehash1",
-            std::span<const unsigned char>{to_push->config[0], to_push->config_lens[0]});
+    std::vector<std::pair<std::string, std::span<const std::byte>>> to_merge;
+    to_merge.emplace_back("fakehash1", to_byte_span(to_push->config[0], to_push->config_lens[0]));
     CHECK(c2.merge(to_merge) == std::unordered_set<std::string>{{"fakehash1"}});
 
     auto grp = c2.get_legacy_group(definitely_real_id);
@@ -739,18 +723,14 @@ TEST_CASE("User groups empty member bug", "[config][groups][bug]") {
     // the config, even when the current members (or admin) list is empty.  (This isn't strictly
     // specific to user groups, but that's where the bug is easily encountered).
 
-    const auto seed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups c{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserGroups c{seed, std::nullopt};
 
     CHECK_FALSE(c.needs_push());
 
@@ -825,18 +805,14 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
     // the config, even when the current members (or admin) list is empty.  (This isn't strictly
     // specific to user groups, but that's where the bug is easily encountered).
 
-    const auto seed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups c{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserGroups c{seed, std::nullopt};
 
     CHECK_FALSE(c.needs_push());
 
@@ -872,7 +848,7 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
 
     {
         const auto community_pubkey =
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
         const auto url = "http://example.org:5678";
         const auto room = "sudoku_room";
         auto comm = c.get_or_construct_community(url, room, community_pubkey);
@@ -901,8 +877,8 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
                 "3a03"
                 "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef64313a21303a313a4b"
                 "303a"
-                "313a6a303a65656565313a28303a313a296c6565"_hexbytes;
-        session::config::UserGroups c2{std::span<const unsigned char>{seed}, dump_with_not_seconds};
+                "313a6a303a65656565313a28303a313a296c6565"_hex_b;
+        session::config::UserGroups c2{seed, dump_with_not_seconds};
 
         auto gr = c2.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");

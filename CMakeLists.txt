@@ -17,7 +17,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(libsession-util
-    VERSION 1.8.0
+    VERSION 2.0.0
     DESCRIPTION "Session client utility library"
     LANGUAGES ${LANGS})
 
@@ -58,11 +58,16 @@ else()
     set(static_default ON)
 endif()
 
-option(BUILD_STATIC_DEPS "Build all dependencies statically rather than trying to link to them on the system" ${static_default})
+# Override the default OFF value set in cmake/session-deps/Deps.cmake so that BUILD_STATIC_DEPS
+# defaults to the same value as BUILD_SHARED_LIBS (i.e. static by default).
+set(BUILD_STATIC_DEPS ${static_default} CACHE BOOL "Build all dependencies statically rather than trying to link to them on the system")
+
+include(cmake/session-deps/Deps.cmake)
+
 option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${BUILD_STATIC_DEPS})
 
 if(STATIC_BUNDLE AND NOT BUILD_STATIC_DEPS)
-    message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS=ON (cannot build a static bundle when using shared/system libs)")
+    message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS to be enabled")
 endif()
 
 if(BUILD_SHARED_LIBS OR libsession_IS_TOPLEVEL_PROJECT)
@@ -79,16 +84,15 @@ else()
   set(use_lto_default ON)
 endif()
 
-option(WARNINGS_AS_ERRORS "Treat all compiler warnings as errors" OFF)
 option(WARN_UNUSED_PARAMETERS "Enabled unused parameter warnings" ON)
+option(WARNINGS_AS_ERRORS "Treat all compiler warnings as errors" OFF)
+option(FATAL_MISSING_DECLARATIONS "Developer/CI option: fatal error on non-static definitions without prior declarations (-Werror=missing-declarations)" OFF)
 
 option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd})
 
 option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 
-# Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
-option(ENABLE_NETWORKING "Build with networking functionality" ON)
-option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support (requires ENABLE_NETWORKING)" ON)
+option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support" ON)
 
 if(USE_LTO)
   include(CheckIPOSupported)
@@ -107,6 +111,17 @@ if(IPO_ENABLED AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
+# USE_LTO is the single LTO knob.  Two submodule-provided options default ON independently of it:
+# SESSIONDEPS_LTO (session-deps, several copies sharing one cache variable) controls LTO for static
+# dependency builds, and WITH_LTO (session-router's enable_lto.cmake) controls LTO for session-router's
+# own targets.  Leaving either ON in a non-LTO build breaks the link: LTO'd static archives can't be
+# consumed by a non-LTO link -- clang in particular emits pure bitcode archives that a plain bfd link
+# reports as "file format not recognized", or silently drops the members (undefined references).  Force
+# both to follow USE_LTO, seeding these shared cache variables before any submodule evaluates its own
+# option() so there is exactly one LTO switch.
+set(SESSIONDEPS_LTO ${USE_LTO} CACHE BOOL "Use LTO for static dependency builds, where supported" FORCE)
+set(WITH_LTO ${USE_LTO} CACHE BOOL "enable lto on compile time" FORCE)
+
 if(STATIC_LIBSTD)
     add_link_options(-static-libstdc++)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES Clang)
@@ -122,29 +137,21 @@ include(AddStaticBundleLib)
 # Always build PIC
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# For a static-deps build we build everything from source; don't let oxen-logging pick up system
+# fmt/spdlog via find_package.  Beyond the usual reasons to prefer our own versions, a system
+# fmt/spdlog is built against libstdc++ and cannot be linked into a libc++ build (undefined
+# std::__1 symbols), so force the bundled submodules which build with our toolchain.
+if(BUILD_STATIC_DEPS)
+    set(OXEN_LOGGING_FORCE_SUBMODULES ON CACHE INTERNAL "")
+endif()
+
 
 add_subdirectory(external)
 
-if(ENABLE_NETWORKING)
-    if(NOT TARGET nettle::nettle)
-        if(BUILD_STATIC_DEPS)
-            message(FATAL_ERROR "Internal error: nettle::nettle target (expected via libquic BUILD_STATIC_DEPS) not found")
-        else()
-            find_package(PkgConfig REQUIRED)
-            pkg_check_modules(NETTLE REQUIRED IMPORTED_TARGET nettle)
-            add_library(nettle INTERFACE)
-            target_link_libraries(nettle INTERFACE PkgConfig::NETTLE)
-            add_library(nettle::nettle ALIAS nettle)
-        endif()
-    endif()
-endif()
+session_dep(nettle 3)
 
 add_subdirectory(src)
 add_subdirectory(proto)
-
-if (BUILD_STATIC_DEPS)
-    include(StaticBuild)
-endif()
 
 if(STATIC_BUNDLE)
 

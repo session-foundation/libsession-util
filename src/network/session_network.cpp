@@ -10,6 +10,7 @@
 #include <ranges>
 #include <vector>
 
+#include "../internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
@@ -40,8 +41,19 @@ namespace {
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
+    // Checks a precondition and, if true, fires the request's on_complete with the given error.
+    // Returns true if the condition was met (i.e. the caller should return).
+    template <typename Req>
+    bool fail_if(Req& req, bool cond, int16_t err) {
+        if (cond && req.on_complete)
+            req.on_complete(err, false);
+        return cond;
+    }
+
     config::FileServer build_file_server_config(const config::Config& main_config) {
-        config::FileServer file_server_config = file_server::DEFAULT_CONFIG;
+        config::FileServer file_server_config = main_config.netid == opt::netid::Target::testnet
+                                                      ? file_server::TESTNET_CONFIG
+                                                      : file_server::DEFAULT_CONFIG;
         file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
 
         if (main_config.custom_file_server_scheme)
@@ -81,12 +93,16 @@ namespace {
     config::QuicTransport build_quic_transport_config(const config::Config& main_config) {
         return {main_config.quic_handshake_timeout,
                 main_config.quic_keep_alive,
-                main_config.quic_disable_mtu_discovery};
+                main_config.quic_max_udp_payload};
     }
 
     config::DirectRouter build_direct_router_config(
-            const config::Config& /*main_config*/, const config::FileServer& file_server_config) {
-        return {file_server_config};
+            const config::Config& main_config, const config::FileServer& file_server_config) {
+        return {file_server_config,
+                main_config.netid,
+                main_config.quic_file_server_address,
+                main_config.quic_file_server_ed_pubkey,
+                main_config.quic_file_server_port.value_or(file_server::QUIC_DEFAULT_PORT)};
     }
 
     config::SessionRouter build_session_router_config(
@@ -122,10 +138,6 @@ namespace {
                 main_config.onionreq_min_path_counts};
     }
 
-}  // namespace
-
-namespace detail {
-
     std::vector<network_service_node> convert_service_nodes(
             std::vector<session::network::service_node> nodes) {
         std::vector<network_service_node> converted_nodes;
@@ -138,7 +150,7 @@ namespace detail {
         return converted_nodes;
     }
 
-}  // namespace detail
+}  // namespace
 
 Network::Network(config::Config _conf) :
         config{std::move(_conf)}, file_server_config{std::move(build_file_server_config(config))} {
@@ -205,11 +217,15 @@ Network::Network(config::Config _conf) :
             break;
 
         case opt::router::Type::session_router:
+#ifdef ENABLE_NETWORKING_SROUTER
             _router = SessionRouter::make(
                     std::move(build_session_router_config(config, file_server_config)),
                     _loop,
                     _snode_pool,
                     _transport);
+#else
+            throw std::runtime_error{"Session Router support is not enabled in this build!"};
+#endif
             break;
 
         case opt::router::Type::direct:
@@ -509,21 +525,12 @@ void Network::send_request(Request request, network_response_callback_t callback
 }
 
 void Network::upload(UploadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
     request.on_complete = [weak_self = weak_from_this(), this, user_callback](
@@ -554,25 +561,54 @@ void Network::upload(UploadRequest request) {
             user_callback(std::move(result), timeout);
     };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     _router->upload(std::move(request));
+#pragma GCC diagnostic pop
+}
+
+void Network::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
+        return;
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
+        return;
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
+        return;
+
+    auto user_callback = request.on_complete;
+    request.on_complete =
+            [weak_self = weak_from_this(), this, user_callback](
+                    std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result,
+                    bool timeout) {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (auto* status_code = std::get_if<int16_t>(&result)) {
+                    if (*status_code == ERROR_TOO_EARLY) {
+                        log::info(cat, "File upload received 425, triggering clock resync.");
+                        _resync_clock(std::nullopt, nullptr);
+
+                        if (user_callback)
+                            user_callback(*status_code, timeout);
+                        return;
+                    }
+                }
+
+                if (user_callback)
+                    user_callback(std::move(result), timeout);
+            };
+
+    _router->upload_file(std::move(request), seed);
 }
 
 void Network::download(DownloadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
     request.on_complete = [weak_self = weak_from_this(), this, user_callback, req = request](
@@ -773,7 +809,10 @@ void Network::_update_network_state(const std::string& body) {
 
             if (new_versions != old_versions)
                 on_network_info_changed(
-                        _network_time_offset.load(), new_versions.hardfork, new_versions.softfork);
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                                AdjustedClock::get_offset()),
+                        new_versions.hardfork,
+                        new_versions.softfork);
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse network state from response: {}", e.what());
@@ -984,7 +1023,7 @@ void Network::_launch_next_clock_out_of_sync_request(
                     std::vector<std::pair<std::string, std::string>> /*headers*/,
                     std::optional<std::string> response) {
                 auto end_steady = std::chrono::steady_clock::now();
-                auto end_system = sysclock_now_ms();
+                auto end_system = clock_now_ms();
 
                 // If the resync was cancelled or completed while we were in-flight, do nothing
                 if (!_current_clock_resync_id || *_current_clock_resync_id != request_id) {
@@ -1082,7 +1121,7 @@ void Network::_on_clock_resync_complete(const uint8_t /*total_requests*/) {
             median_offset = (middle_values_sum / 2);
         }
 
-        _network_time_offset = median_offset;
+        AdjustedClock::set_offset(median_offset);
         _last_successful_clock_resync = std::chrono::steady_clock::now();
         log::info(
                 cat, "[Request {}] Network offset set to: {}ms", refresh_id, median_offset.count());
@@ -1142,17 +1181,6 @@ namespace {
 inline std::shared_ptr<session::network::Network> unbox(network_object* network_) {
     assert(network_ && network_->internals);
     return *static_cast<std::shared_ptr<session::network::Network>*>(network_->internals);
-}
-
-inline bool set_error(char* error, const std::exception& e) {
-    if (!error)
-        return false;
-
-    std::string msg = e.what();
-    if (msg.size() > 255)
-        msg.resize(255);
-    std::memcpy(error, msg.c_str(), msg.size() + 1);
-    return false;
 }
 
 }  // namespace
@@ -1247,15 +1275,18 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
                     .count();
     config.quic_keep_alive_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
-    config.quic_disable_mtu_discovery = cpp_defaults.quic_disable_mtu_discovery;
+    config.quic_disable_mtu_discovery = cpp_defaults.quic_max_udp_payload.has_value();
+    config.quic_max_udp_payload = cpp_defaults.quic_max_udp_payload.value_or(0);
 
     return config;
 }
 
 LIBSESSION_C_API bool session_network_init(
         network_object** network, const session_network_config* config, char* error) {
-    if (!network || !config)
-        return set_error(error, std::invalid_argument{"network or config were null."});
+    if (!network || !config) {
+        session::copy_c_str(error, 256, "network or config were null.");
+        return false;
+    }
 
     try {
         // Build the configuration options (ordered this way for the debug logs to make the most
@@ -1434,8 +1465,10 @@ LIBSESSION_C_API bool session_network_init(
                     cpp_opts.emplace_back(opt::quic_keep_alive{
                             std::chrono::seconds{config->quic_keep_alive_seconds}});
 
-                if (config->quic_disable_mtu_discovery)
-                    cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});
+                if (config->quic_max_udp_payload > 0)
+                    cpp_opts.emplace_back(opt::quic_max_udp_payload{config->quic_max_udp_payload});
+                else if (config->quic_disable_mtu_discovery)
+                    cpp_opts.emplace_back(opt::quic_max_udp_payload{1200});
 
                 break;
         }
@@ -1448,7 +1481,8 @@ LIBSESSION_C_API bool session_network_init(
         *network = n_object.release();
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        session::copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
@@ -1582,7 +1616,7 @@ LIBSESSION_C_API void session_network_get_active_paths(
         size_t total_metadata_size = 0;
         for (const auto& p : cpp_paths) {
             std::visit(
-                    [&]<typename T>(const T& /*md*/) {
+                    [&]<typename T>(const T&) {
                         if constexpr (std::is_same_v<T, OnionPathMetadata>)
                             total_metadata_size += sizeof(session_onion_path_metadata);
                         else {
@@ -1674,7 +1708,7 @@ LIBSESSION_C_API void session_network_get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
             ignore_strike_count,
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }
@@ -1687,7 +1721,7 @@ LIBSESSION_C_API void session_network_get_random_nodes(
     assert(callback);
     unbox(network)->get_random_nodes(
             count, [cb = std::move(callback), ctx](std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }
@@ -1748,9 +1782,9 @@ LIBSESSION_C_API void session_network_send_request(
             throw std::invalid_argument(
                     "Invalid request: Must have either 'snode_dest' or 'server_dest' set.");
 
-        std::optional<std::vector<unsigned char>> body;
+        std::optional<std::vector<std::byte>> body;
         if (params->body && params->body_size > 0)
-            body.emplace(params->body, params->body + params->body_size);
+            body = to_vector(to_byte_span(params->body, params->body_size));
 
         std::optional<std::string> request_id;
         if (params->request_id)
@@ -1843,9 +1877,9 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         const auto on_complete_fn = callbacks->on_complete;
         const auto ctx = callbacks->ctx;
 
-        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<unsigned char> {
-            std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
-            size_t bytes = next_data_fn(buffer.data(), buffer.size(), ctx);
+        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<std::byte> {
+            std::vector<std::byte> buffer(64 * 1024);  // 64KB chunks
+            size_t bytes = next_data_fn(to_unsigned(buffer.data()), buffer.size(), ctx);
 
             if (bytes == 0 || bytes == static_cast<size_t>(-1))
                 return {};
@@ -1876,8 +1910,11 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                     result);
         };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         handle->cancelled = cpp_request.cancelled;
         unbox(network)->upload(std::move(cpp_request));
+#pragma GCC diagnostic pop
 
         return handle.release();
     } catch (...) {
@@ -1920,7 +1957,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         if (on_data_fn)
             cpp_request.on_data = [on_data_fn, ctx](
                                           const file_metadata& metadata,
-                                          std::vector<unsigned char> data) {
+                                          std::span<const std::byte> data) {
                 session_file_metadata c_meta{};
                 std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
                 c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
@@ -1928,7 +1965,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 c_meta.uploaded_timestamp = epoch_seconds(metadata.uploaded);
                 c_meta.expiry_timestamp = epoch_seconds(metadata.expiry);
 
-                on_data_fn(&c_meta, data.data(), data.size(), ctx);
+                on_data_fn(&c_meta, to_unsigned(data.data()), data.size(), ctx);
             };
 
         cpp_request.on_complete = [on_complete_fn,

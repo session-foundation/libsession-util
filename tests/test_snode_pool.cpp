@@ -79,7 +79,7 @@ class TestSnodePool : public SnodePool {
 
 // Encodes nodes the way the storage server returns them, so they can be fed to
 // `_on_refresh_complete`: 51 bytes per node, all multi-byte fields big-endian
-std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes) {
+static std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes) {
     std::vector<std::byte> result;
     result.reserve(nodes.size() * 51);
 
@@ -90,7 +90,7 @@ std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes
 
     for (const auto& node : nodes) {
         for (auto byte : node.view_remote_key())
-            result.push_back(static_cast<std::byte>(byte));
+            result.push_back(byte);
 
         append(node.swarm_id, 8);
         append(node.ip.addr, 4);
@@ -119,10 +119,10 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
-    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
-    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
+    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hex_b;
+    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hex_b;
     std::vector<service_node> snode_cache;
     std::vector<service_node> unused_nodes;
 
@@ -243,7 +243,7 @@ TEST_CASE("Network", "[network][update_cache]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     std::vector<service_node> snode_cache;
 
     for (uint16_t i = 0; i < 5; ++i)
@@ -299,7 +299,7 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     std::vector<service_node> snode_cache;
 
     for (uint16_t i = 0; i < 20; ++i)

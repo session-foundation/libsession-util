@@ -5,6 +5,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
+    test_core_devices.cpp
+    test_dm_receive.cpp
+    test_dm_send.cpp
     test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp
@@ -20,12 +23,14 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_curve25519.cpp
     test_ed25519.cpp
     test_encrypt.cpp
+    test_format.cpp
     test_group_keys.cpp
     test_group_info.cpp
     test_group_members.cpp
     test_hash.cpp
     #test_logging.cpp  # Handled separately, see below
     test_multi_encrypt.cpp
+    test_mnemonics.cpp
     test_proto.cpp
     test_pro_backend.cpp
     test_random.cpp
@@ -34,32 +39,34 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_session_protocol.cpp
     test_xed25519.cpp
     test_unicode_operations.cpp
-    test_backend_session_file_server.cpp
-    test_backed_session_open_group_server.cpp
 
     case_logger.cpp
 )
 
-if(ENABLE_NETWORKING)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
-endif()
+list(APPEND LIB_SESSION_UTESTS_SOURCES
+    test_backend_session_file_server.cpp
+    test_backed_session_open_group_server.cpp
+    test_network_swarm.cpp
+    test_onionreq.cpp
+    test_onion_request_router.cpp
+    test_snode_pool.cpp
+    test_core_network.cpp
+    test_poll.cpp
+    test_pfs_key_cache.cpp)
 
 add_library(test_libs INTERFACE)
 
 target_link_libraries(test_libs INTERFACE
     libsession::config
-    libsodium::sodium-internal
+    libsession::core
+    libsession::crypto
+    session::SQLite
+    sessiondep::libsodium
+    mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     oxen::logging)
 
-if (ENABLE_NETWORKING)
-    target_link_libraries(test_libs INTERFACE libsession::network)
-else()
-    target_compile_definitions(test_libs INTERFACE DISABLE_NETWORKING)
-endif()
+target_link_libraries(test_libs INTERFACE libsession::network)
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
 target_link_libraries(testAll PRIVATE
@@ -87,12 +94,32 @@ if(NOT TARGET check)
         COMMAND testAll)
 endif()
 
+option(BUILD_LIVE_TESTS "Build the live testnet integration tests" ON)
+
+if(BUILD_LIVE_TESTS)
+    add_executable(testLive
+        live/main.cpp
+        live/test_swarm.cpp
+        live/test_pubkey_xfer.cpp
+        live/test_file_transfer.cpp)
+    target_link_libraries(testLive PRIVATE
+        test_libs
+        Catch2::Catch2)
+endif()
+
+if(BUILD_LIVE_TESTS)
+    add_executable(quic-files EXCLUDE_FROM_ALL quic-files.cpp)
+    target_link_libraries(quic-files PRIVATE test_libs)
+    target_include_directories(quic-files PRIVATE
+        ${CMAKE_SOURCE_DIR}/external/session-router/external/CLI11/include)
+endif()
+
 add_executable(swarm-auth-test EXCLUDE_FROM_ALL swarm-auth-test.cpp)
 target_link_libraries(swarm-auth-test PRIVATE config)
 
 if(STATIC_BUNDLE)
     add_executable(static-bundle-test static_bundle.cpp)
     target_include_directories(static-bundle-test PUBLIC ../include)
-    target_link_libraries(static-bundle-test PRIVATE "${PROJECT_BINARY_DIR}/libsession-util.a" oxenc::oxenc quic)
+    target_link_libraries(static-bundle-test PRIVATE "${PROJECT_BINARY_DIR}/libsession-util.a" oxenc::oxenc oxen::quic)
     add_dependencies(static-bundle-test session-util)
 endif()

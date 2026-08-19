@@ -1,13 +1,16 @@
 #include "session/network/backends/session_file_server.hpp"
 
 #include <fmt/ranges.h>
+#include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/format.hpp>
 
 #include "../session_network_internal.hpp"
 #include "session/blinding.hpp"
+#include "session/clock.hpp"
 #include "session/network/backends/backend_util.hpp"
 #include "session/network/backends/session_file_server.h"
 #include "session/random.hpp"
@@ -31,6 +34,16 @@ const config::FileServer DEFAULT_CONFIG = {
         .host = "filev2.getsession.org",
         .port = 80,
         .pubkey_hex = "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59",
+        .max_file_size = 10'000'000};
+
+// Testnet file server config.  The X25519 pubkey is derived from the Ed25519 key
+// 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602 via
+// crypto_sign_ed25519_pk_to_curve25519.
+const config::FileServer TESTNET_CONFIG = {
+        .scheme = "http",
+        .host = "superduperfiles.oxen.io",
+        .port = 80,
+        .pubkey_hex = "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d",
         .max_file_size = 10'000'000};
 
 constexpr std::string_view HEADER_CONTENT_TYPE = "Content-Type";
@@ -92,10 +105,35 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
                 oxenc::is_hex(fragment.substr(2)) &&
                 fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
             info.custom_pubkey_hex = fragment.substr(2);
+        else if (fragment.starts_with("sr=")) {
+            // sr=address or sr=address:port (port defaults to 11235 if omitted)
+            auto parts = split(fragment.substr(3), ":");
+            if (parts.size() <= 2 && !parts[0].empty()) {
+                uint16_t port = QUIC_DEFAULT_PORT;
+                if (parts.size() == 2 && (!quic::parse_int(parts[1], port) || port == 0))
+                    continue;  // Invalid port, skip
+                info.srouter_target = SRouterTarget{std::string{parts[0]}, port};
+            }
+        }
         // else ignore (unknown or invalid fragment)
     }
 
     return info;
+}
+
+const std::string QUIC_FS_SESH_ADDRESS_MAINNET = "{:a}.sesh"_format(QUIC_FS_ED_PUBKEY_MAINNET);
+const std::string QUIC_FS_SESH_ADDRESS_TESTNET = "{:a}.sesh"_format(QUIC_FS_ED_PUBKEY_TESTNET);
+
+std::optional<SRouterTarget> default_quic_target(
+        const config::FileServer& http_config, opt::netid::Target netid) {
+    // Map known HTTP file server pubkeys to their QUIC file server .sesh addresses.
+    if (http_config.pubkey_hex == DEFAULT_CONFIG.pubkey_hex && netid == opt::netid::Target::mainnet)
+        return SRouterTarget{QUIC_FS_SESH_ADDRESS_MAINNET, QUIC_DEFAULT_PORT};
+
+    if (http_config.pubkey_hex == TESTNET_CONFIG.pubkey_hex && netid == opt::netid::Target::testnet)
+        return SRouterTarget{QUIC_FS_SESH_ADDRESS_TESTNET, QUIC_DEFAULT_PORT};
+
+    return std::nullopt;
 }
 
 std::string generate_download_url(std::string_view file_id, const config::FileServer& config) {
@@ -136,7 +174,7 @@ Request to_request(
         const std::string& upload_id,
         const config::FileServer& config,
         UploadRequest upload_request) {
-    std::vector<unsigned char> all_data;
+    std::vector<std::byte> all_data;
 
     while (true) {
         if (upload_request.is_cancelled())
@@ -245,7 +283,7 @@ file_metadata parse_upload_response(const std::string& body, size_t upload_size)
     return metadata;
 }
 
-std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
+std::pair<file_metadata, std::vector<std::byte>> parse_download_response(
         std::string_view download_url,
         const std::vector<std::pair<std::string, std::string>>& headers,
         const std::string& body) {
@@ -268,7 +306,7 @@ std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
         }
     }
 
-    std::vector<unsigned char> data(body.begin(), body.end());
+    auto data = to_vector(body);
 
     if (metadata.size == 0)
         metadata.size = data.size();
@@ -315,22 +353,17 @@ Request get_client_version(
     }
 
     // Generate the auth signature
-    auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
-    auto timestamp = epoch_seconds(std::chrono::system_clock::now());
-    auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
+    auto sk = ed25519::PrivKeySpan::from(to_span(seckey.view()));
+    auto blinded_keys = blind_version_key_pair(sk);
+    auto timestamp = epoch_seconds(clock_now_s());
+    auto signature = blind_version_sign(sk, platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(DEFAULT_CONFIG.pubkey_hex);
-    std::string blinded_pk_hex;
-    blinded_pk_hex.reserve(66);
-    blinded_pk_hex += "07";
-    oxenc::to_hex(
-            blinded_keys.first.begin(),
-            blinded_keys.first.end(),
-            std::back_inserter(blinded_pk_hex));
+    auto blinded_pk_hex = "07{:x}"_format(blinded_keys.first);
 
     auto headers = std::vector<std::pair<std::string, std::string>>{};
     headers.emplace_back(HEADER_PUBKEY, blinded_pk_hex);
     headers.emplace_back(HEADER_TIMESTAMP, "{}"_format(timestamp));
-    headers.emplace_back(HEADER_SIGNATURE, oxenc::to_base64(signature.begin(), signature.end()));
+    headers.emplace_back(HEADER_SIGNATURE, oxenc::to_base64(signature));
 
     return Request{
             random::unique_id("GCV"),
@@ -411,7 +444,7 @@ LIBSESSION_C_API session_request_params* session_file_server_get_client_version(
     try {
         auto req = file_server::get_client_version(
                 static_cast<Platform>(platform),
-                network::ed25519_seckey::from_bytes({ed25519_secret, 64}),
+                network::ed25519_seckey::from_bytes(to_byte_span<64>(ed25519_secret)),
                 std::chrono::milliseconds{request_timeout_ms},
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}

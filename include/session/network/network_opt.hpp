@@ -17,8 +17,8 @@ namespace opt {
     using namespace std::chrono_literals;
 
     namespace {
-        inline std::vector<unsigned char> from_hex(std::string_view s) {
-            std::vector<unsigned char> out;
+        inline std::vector<std::byte> from_hex(std::string_view s) {
+            std::vector<std::byte> out;
             out.reserve(s.size() / 2);
             oxenc::from_hex(s.begin(), s.end(), std::back_inserter(out));
 
@@ -362,6 +362,26 @@ namespace opt {
         cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
+    // MARK: QUIC File Server Options
+
+    /// Can be used to override the default QUIC file server Ed25519 pubkey (hex).
+    struct quic_file_server_ed_pubkey {
+        std::string pubkey_hex;
+        quic_file_server_ed_pubkey(std::string pubkey_hex) : pubkey_hex{std::move(pubkey_hex)} {}
+    };
+
+    /// Can be used to specify the direct address (IP:PORT) of the QUIC file server for direct mode.
+    struct quic_file_server_address {
+        std::string address;
+        quic_file_server_address(std::string address) : address{std::move(address)} {}
+    };
+
+    /// Can be used to override the default (11235) QUIC file server port.
+    struct quic_file_server_port {
+        uint16_t port;
+        quic_file_server_port(uint16_t port) : port{port} {}
+    };
+
     // MARK: Quic Transport Options
 
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
@@ -376,8 +396,12 @@ namespace opt {
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
     };
 
-    /// Can be used to disable Quic MTU discovery.
-    struct quic_disable_mtu_discovery {};
+    /// Caps the maximum QUIC UDP payload size for path MTU discovery.  PMTUD will still
+    /// probe upward from 1200, but will not exceed this value.  Must be at least 1200.
+    struct quic_max_udp_payload {
+        size_t size;
+        explicit quic_max_udp_payload(size_t s) : size{s} {}
+    };
 
     // MARK: Onion Request Router Options
 
@@ -464,17 +488,22 @@ namespace opt {
             cache_min_num_refresh_presence_to_include_node,
             cache_node_strike_threshold,
 
+            // QUIC file server options
+            quic_file_server_ed_pubkey,
+            quic_file_server_address,
+            quic_file_server_port,
+
             // Quic transport options
             quic_handshake_timeout,
             quic_keep_alive,
-            quic_disable_mtu_discovery,
+            quic_max_udp_payload,
 
             // Onion request router options
             onionreq_path_strike_threshold,
+            onionreq_path_build_retry_limit,
             onionreq_min_path_count,
             onionreq_single_path_mode,
             onionreq_disable_pre_build_paths,
-            onionreq_path_build_retry_limit,
             onionreq_path_rotation_frequency,
             onionreq_edge_node_cache_duration>;
 

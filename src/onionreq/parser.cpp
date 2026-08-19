@@ -6,12 +6,14 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
+#include "session/util.hpp"
+
 namespace session::onionreq {
 
 OnionReqParser::OnionReqParser(
-        std::span<const unsigned char> x25519_pk,
-        std::span<const unsigned char> x25519_sk,
-        std::span<const unsigned char> req,
+        std::span<const std::byte, 32> x25519_pk,
+        std::span<const std::byte, 32> x25519_sk,
+        std::span<const std::byte> req,
         size_t max_size) :
         keys{network::x25519_pubkey::from_bytes(x25519_pk),
              network::x25519_seckey::from_bytes(x25519_sk)},
@@ -29,7 +31,9 @@ OnionReqParser::OnionReqParser(
         throw std::invalid_argument{"encrypted onion request data segment too small"};
     auto ciphertext = req.subspan(0, size);
     req = req.subspan(size);
-    auto metadata = nlohmann::json::parse(req);
+    // Parse as a char view: nlohmann instantiates char_traits<value_type>, and libc++ only
+    // specializes std::char_traits for the standard character types (not std::byte).
+    auto metadata = nlohmann::json::parse(to_string_view(req));
 
     if (auto encit = metadata.find("enc_type"); encit != metadata.end())
         enc_type = parse_enc_type(encit->get<std::string_view>());
@@ -40,12 +44,11 @@ OnionReqParser::OnionReqParser(
     else
         throw std::invalid_argument{"metadata does not have 'ephemeral_key' entry"};
 
-    payload_ = enc.decrypt(enc_type, to_vector(ciphertext), remote_pk);
+    payload_ = enc.decrypt(enc_type, to_vector<std::byte>(ciphertext), remote_pk);
 }
 
-std::vector<unsigned char> OnionReqParser::encrypt_reply(
-        std::span<const unsigned char> reply) const {
-    return enc.encrypt(enc_type, to_vector(reply), remote_pk);
+std::vector<std::byte> OnionReqParser::encrypt_reply(std::span<const std::byte> reply) const {
+    return enc.encrypt(enc_type, to_vector<std::byte>(reply), remote_pk);
 }
 
 }  // namespace session::onionreq

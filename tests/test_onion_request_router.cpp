@@ -5,8 +5,8 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
-#include <session/curve25519.hpp>
-#include <session/ed25519.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/crypto/x25519.hpp>
 #include <session/network/key_types.hpp>
 #include <session/network/request_queue.hpp>
 #include <session/network/routing/onion_request_router.hpp>
@@ -188,23 +188,22 @@ namespace {
 
         ConnectionStatus get_status() const override { return ConnectionStatus::unknown; };
         void verify_connectivity(
-                service_node /*node*/,
+                service_node,
                 std::chrono::milliseconds /*timeout*/,
                 const std::string& /*request_id*/,
-                const RequestCategory /*category*/,
+                const RequestCategory,
                 std::function<void(bool success, std::optional<uint64_t> error_code)> /*callback*/)
                 override {
             func_called("verify_connectivity");
         }
-        void add_failure_listener(
-                const ed25519_pubkey& /*pubkey*/, std::function<void()> /*listener*/) override {
+        void add_failure_listener(const ed25519_pubkey&, std::function<void()>) override {
             func_called("add_failure_listener");
         }
-        void remove_failure_listeners(const ed25519_pubkey& /*pubkey*/) override {
+        void remove_failure_listeners(const ed25519_pubkey&) override {
             func_called("remove_failure_listeners");
         }
 
-        void send_request(Request /*request*/, network_response_callback_t /*callback*/) override {
+        void send_request(Request, network_response_callback_t) override {
             func_called("send_request");
         }
     };
@@ -249,10 +248,10 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             true,
             true,
             {{PathCategory::standard, 1}}};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
-    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
-    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
+    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hex_b;
+    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hex_b;
     auto target = service_node{
             ed25519_pubkey::from_bytes(ed_pk),
             oxen::quic::ipv4{"127.0.0.1"},
@@ -611,10 +610,10 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             true,
             false,
             {{PathCategory::standard, 1}}};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
-    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
-    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
+    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hex_b;
+    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hex_b;
     auto target = service_node{
             ed25519_pubkey::from_bytes(ed_pk),
             oxen::quic::ipv4{"127.0.0.1"},
@@ -721,7 +720,7 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
             true,
             false,
             {{PathCategory::standard, 1}}};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     auto target = service_node{
             ed25519_pubkey::from_bytes(ed_pk),
             oxen::quic::ipv4{"127.0.0.1"},

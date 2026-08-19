@@ -1,6 +1,9 @@
 #pragma once
 
+#include <oxenc/hex.h>
+
 #include "session/network/key_types.hpp"
+#include "session/network/network_opt.hpp"
 #include "session/network/session_network_types.hpp"
 #include "session/platform.hpp"
 
@@ -18,7 +21,28 @@ struct FileServer {
 
 namespace session::network::file_server {
 
+/// Default QUIC file server port (first 5 non-zero Fibonacci digits).
+constexpr uint16_t QUIC_DEFAULT_PORT = 11235;
+
 extern const config::FileServer DEFAULT_CONFIG;
+extern const config::FileServer TESTNET_CONFIG;
+
+/// Ed25519 pubkeys of the QUIC file servers.
+using namespace oxenc::literals;
+constexpr auto QUIC_FS_ED_PUBKEY_MAINNET =
+        "b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371"_hex_b;
+constexpr auto QUIC_FS_ED_PUBKEY_TESTNET =
+        "929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602"_hex_b;
+
+/// Session-router .sesh addresses of the QUIC file servers (derived from Ed25519 pubkeys).
+extern const std::string QUIC_FS_SESH_ADDRESS_MAINNET;
+extern const std::string QUIC_FS_SESH_ADDRESS_TESTNET;
+
+/// Parsed session-router address from an `sr=` URL fragment, e.g. `sr=abcdef.sesh:11235`.
+struct SRouterTarget {
+    std::string address;  // e.g. "abcdef...xyz.sesh" or "name.loki"
+    uint16_t port;
+};
 
 struct DownloadInfo {
     std::string scheme;
@@ -26,6 +50,7 @@ struct DownloadInfo {
     std::string file_id;
     std::optional<std::string> custom_pubkey_hex;  // If 'p' fragment present
     bool wants_stream_decryption;                  // If 'd' fragment present
+    std::optional<SRouterTarget> srouter_target;   // If 'sr' fragment present
 };
 
 /// API: file_server/parse_download_url
@@ -38,6 +63,14 @@ struct DownloadInfo {
 /// Outputs:
 /// - returns struct containing the information required to download the file.
 std::optional<DownloadInfo> parse_download_url(std::string_view url);
+
+/// Returns a default session-router target for the QUIC file server, if the given HTTP file
+/// server config matches a known default.  This provides the fallback mapping when a download
+/// URL doesn't contain an explicit `sr=` fragment.
+///
+/// Returns nullopt if the HTTP file server is not a known QUIC-capable server.
+std::optional<SRouterTarget> default_quic_target(
+        const config::FileServer& http_config, opt::netid::Target netid);
 
 /// API: file_server/generate_download_url
 ///
@@ -122,10 +155,32 @@ file_metadata parse_upload_response(const std::string& body, size_t upload_size)
 /// Outputs:
 /// - returns a pair of the parsed `file_metadata` and the raw file data.
 /// - throws `invalid_url_exception` if the URL cannot be parsed.
-std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
+std::pair<file_metadata, std::vector<std::byte>> parse_download_response(
         std::string_view download_url,
         const std::vector<std::pair<std::string, std::string>>& headers,
         const std::string& body);
+
+/// API: file_server/extend_ttl
+///
+/// Constructs a request to extend the TTL of an existing file on the file server.
+///
+/// Inputs:
+/// - `file_id` -- [in] the file ID whose TTL should be extended.
+/// - `ttl` -- [in] the new TTL duration to request.
+/// - `config` -- [in] file server configuration to use for the request.
+/// - `request_timeout` -- [in] timeout in milliseconds to use for the request.  This won't take any
+/// pre-flight operations into account so the request will never timeout if pre-flight operations
+/// never complete.
+/// - `overall_timeout` -- [in] timeout in milliseconds to use for the request and any pre-flight
+/// operations that may need to occur (eg. path building).  This value takes presedence over
+/// `request_timeout` if provided, the request itself will be given a timeout of this value
+/// subtracting however long the pre-flight operations took.
+Request extend_ttl(
+        std::string_view file_id,
+        std::chrono::seconds ttl,
+        const config::FileServer& config,
+        std::chrono::milliseconds request_timeout,
+        std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt);
 
 /// API: file_server/get_client_version
 ///

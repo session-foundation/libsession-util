@@ -24,7 +24,7 @@ struct CSRNG {
 
     uint64_t operator()() const {
         uint64_t i;
-        randombytes((uint8_t*)&i, sizeof(i));
+        randombytes_buf(&i, sizeof(i));
         return i;
     };
 };
@@ -36,6 +36,23 @@ inline constexpr CSRNG csrng{};
 
 namespace session::random {
 
+/// API: random/random_fill
+///
+/// Wrapper around the randombytes_buf function.
+///
+/// Inputs:
+/// - `buf` -- span to fill with random bytes
+///
+/// Outputs: None.
+void fill(std::span<std::byte> buf);
+void fill(std::span<char> buf);
+
+/// API: random/random_fill_deterministic
+///
+/// Wrapper around randombytes_buf_deterministic: fills `buf` with deterministic pseudorandom
+/// bytes derived from the given 32-byte seed.
+void fill_deterministic(std::span<std::byte> buf, std::span<const std::byte, 32> seed);
+
 /// API: random/random
 ///
 /// Wrapper around the randombytes_buf function.
@@ -45,7 +62,7 @@ namespace session::random {
 ///
 /// Outputs:
 /// - random bytes of the specified length.
-std::vector<unsigned char> random(size_t size);
+std::vector<std::byte> random(size_t size);
 
 /// API: random/random_base32
 ///
@@ -67,7 +84,7 @@ std::string random_base32(size_t size);
 ///
 /// Outputs:
 /// - generated id string.
-std::string unique_id(std::string_view prefix);
+std::string unique_id(std::string_view prefix, size_t random_len = 4);
 
 /// API: random/get_uniform_distribution
 ///

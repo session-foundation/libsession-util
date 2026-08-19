@@ -153,7 +153,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::vector<PathInfo> get_active_paths() override;
     std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(UploadRequest request) override;
+    void upload(UploadRequest request) override;  // deprecated: use upload_file()
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed) override;
     void download(DownloadRequest request) override;
 
   private:
@@ -172,6 +173,16 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _update_status();
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _upload_internal(UploadRequest request);
+    void _cleanup_upload(const std::string& upload_id);
+
+    // Dispatches a pre-built file server upload request to the loop thread.  Called from a
+    // background thread after data accumulation.  `is_cancelled` is checked before sending
+    // and on completion; `on_result` receives the parsed file_metadata or error.
+    void _dispatch_upload(
+            std::string upload_id,
+            Request request,
+            std::function<bool()> is_cancelled,
+            std::function<void(std::variant<file_metadata, int16_t>, bool)> on_result);
     void _download_internal(DownloadRequest request);
 
     void _build_path(

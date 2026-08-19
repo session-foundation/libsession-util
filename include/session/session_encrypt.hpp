@@ -2,10 +2,14 @@
 
 #include <stdint.h>
 
+#include <array>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "crypto/ed25519.hpp"
 
 // Helper functions for the "Session Protocol" encryption mechanism.  This is the encryption used
 // for DMs sent from one Session user to another.
@@ -53,9 +57,8 @@ namespace session {
 /// Performs session protocol encryption, typically for a DM sent between Session users.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the libsodium-style secret key of the sender, 64 bytes.  Can also be
-///   passed as a 32-byte seed, but the 64-byte value is preferrable (to avoid needing to
-///   recompute the public key from the seed).
+/// - `ed25519_privkey` -- the Ed25519 private key of the sender; accepts a 32-byte seed or
+///   64-byte libsodium key (the latter avoids recomputing the public key from the seed).
 /// - `recipient_pubkey` -- the recipient X25519 pubkey, either as a 0x05-prefixed session ID
 ///   (33 bytes) or an unprefixed pubkey (32 bytes).
 /// - `message` -- the message to encrypt for the recipient.
@@ -63,10 +66,10 @@ namespace session {
 /// Outputs:
 /// - The encrypted ciphertext to send.
 /// - Throw if encryption fails or (which typically means invalid keys provided)
-std::vector<unsigned char> encrypt_for_recipient(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message);
+std::vector<std::byte> encrypt_for_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message);
 
 /// API: crypto/encrypt_for_recipient_deterministic
 ///
@@ -84,10 +87,10 @@ std::vector<unsigned char> encrypt_for_recipient(
 ///
 /// Outputs:
 /// Identical to `encrypt_for_recipient`.
-std::vector<unsigned char> encrypt_for_recipient_deterministic(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message);
+std::vector<std::byte> encrypt_for_recipient_deterministic(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message);
 
 /// API: crypto/session_encrypt_for_blinded_recipient
 ///
@@ -104,11 +107,188 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 /// Outputs:
 /// - The encrypted ciphertext to send.
 /// - Throw if encryption fails or (which typically means invalid keys provided)
-std::vector<unsigned char> encrypt_for_blinded_recipient(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> recipient_blinded_id,
-        std::span<const unsigned char> message);
+std::vector<std::byte> encrypt_for_blinded_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte, 33> recipient_blinded_id,
+        std::span<const std::byte> message);
+
+/// API: crypto/encrypt_for_recipient_v2
+///
+/// Encrypts a v2 Session DM (PFS + post-quantum) for a recipient.
+///
+/// The wire format of the returned ciphertext is:
+///   0x00 0x02 | ki (2B) | E (32B) | mlkem_ct (1088B) | xchacha20poly1305_ciphertext
+///
+/// where:
+/// - `ki` is an encrypted key indicator used by the recipient to cheaply identify which of
+///   their current account keys was used, without revealing it to outside observers.
+/// - `E` is an ephemeral X25519 pubkey.
+/// - `mlkem_ct` is an ML-KEM-768 ciphertext.
+/// - The xchacha20poly1305 ciphertext contains the signed, padded inner plaintext.
+///
+/// The inner plaintext is a bt-encoded dict with:
+/// - "S": the sender's Ed25519 pubkey (32 bytes)
+/// - "c": the message content (typically a serialized protobuf Content)
+/// - "~": a 64-byte Ed25519 signature over a BLAKE2b-64 hash of the preceding content,
+///        keyed with the recipient's 33-byte Session ID (personalized "SessionV2Message")
+/// - "~P": optional Session Pro Ed25519 signature verifying the sender's Pro status.  The public
+///         key for verifying this is embedded within the protobuf Content.  Present only when the
+///         message uses Session Pro features; absent otherwise.
+///
+/// Inputs:
+/// - `sender_ed25519_privkey` -- sender's 32-byte seed or 64-byte Ed25519 secret key
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed long-term X25519 pubkey (S with prefix)
+/// - `recipient_account_x25519` -- 32-byte recently-fetched PFS account X25519 pubkey (X)
+/// - `recipient_account_mlkem768` -- 1184-byte recently-fetched PFS account ML-KEM-768 pubkey (M)
+/// - `content` -- the plaintext message content to encrypt (typically a serialized protobuf)
+/// - `pro_ed25519_privkey` -- optional Session Pro rotating Ed25519 private key (32-byte seed or
+///   64-byte libsodium key).  When provided, a `~P` signature is appended to the inner bt-dict,
+///   signing all preceding dict content.  Pass nullopt / omit when not using Session Pro.
+///
+/// Outputs:
+/// - The encrypted v2 ciphertext to send to the swarm.
+/// - Throws on invalid keys or encryption failure.
+std::vector<std::byte> encrypt_for_recipient_v2(
+        const ed25519::PrivKeySpan& sender_ed25519_privkey,
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> recipient_account_x25519,
+        std::span<const std::byte, 1184> recipient_account_mlkem768,
+        std::span<const std::byte> content,
+        const ed25519::OptionalPrivKeySpan& pro_ed25519_privkey = std::nullopt);
+
+/// Exception thrown when a v2 message could not be decrypted with a given account key.  The
+/// caller should catch this and try the next candidate key.  Other exceptions (e.g.,
+/// std::runtime_error for invalid message format, or std::invalid_argument for bad keys) are
+/// unrecoverable and should not be caught per-key.
+struct DecryptV2Error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+/// Result of decrypt_incoming_v2.
+struct DecryptV2Result {
+    std::vector<std::byte> content;    ///< Decrypted message content.
+    b33 sender_session_id;             ///< 05-prefixed Session ID of the sender.
+    std::optional<b64> pro_signature;  ///< Pro sig, if present.
+};
+
+/// API: crypto/decrypt_incoming_v2_prefix
+///
+/// Extracts and decrypts the 2-byte key indicator from a v2 Session DM ciphertext, returning
+/// the first 2 bytes of the ML-KEM-768 public key that was used to encrypt the message.
+///
+/// This is a cheap pre-filter step: the caller uses the returned prefix to look up which of
+/// their PFS account keys match, then passes the matching key(s) to `decrypt_incoming_v2`.
+///
+/// Inputs:
+/// - `x25519_sec` -- 32-byte long-term X25519 secret key of the recipient (the raw key, *not*
+///   the Ed25519 key).
+/// - `x25519_pub` -- 32-byte long-term X25519 public key of the recipient (i.e. the Session ID
+///   bytes without the `0x05` prefix).
+/// - `ciphertext` -- wire-format v2 ciphertext as produced by `encrypt_for_recipient_v2`.
+///
+/// Outputs:
+/// - The recovered 2-byte ML-KEM-768 public key prefix.
+/// - Throws `std::runtime_error` if the ciphertext is too short or has the wrong prefix bytes.
+std::array<std::byte, 2> decrypt_incoming_v2_prefix(
+        std::span<const std::byte, 32> x25519_sec,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte> ciphertext);
+
+/// API: crypto/decrypt_incoming_v2
+///
+/// Inverse of `encrypt_for_recipient_v2`: decrypts a v2 Session DM using a single PFS account
+/// key.  Verifies the X-Wing (ML-KEM-768 + X25519) shared secret derivation and the inner
+/// Ed25519 message signature.
+///
+/// Typical usage: call `decrypt_incoming_v2_prefix` to get the 2-byte ML-KEM prefix, look up
+/// all PFS account keys whose ML-KEM-768 public key begins with that prefix, then call this
+/// function for each candidate, catching `DecryptV2Error` and trying the next key on failure:
+///
+///     auto prefix = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, ciphertext);
+///     for (auto& key : pfs_keys_by_prefix(prefix)) {
+///         try {
+///             return decrypt_incoming_v2(session_id, key.x_sec, key.x_pub,
+///                                        key.mlkem_sec, ciphertext);
+///         } catch (const DecryptV2Error&) { continue; }
+///     }
+///     throw std::runtime_error{"no PFS account key could decrypt the message"};
+///
+/// Inputs:
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed Session ID of the recipient.  Used to
+///   verify the inner Ed25519 message signature; no private key material is needed here.
+/// - `account_pfs_x25519_sec` -- 32-byte X25519 secret key of the PFS account key to try.
+/// - `account_pfs_x25519_pub` -- 32-byte X25519 public key of the PFS account key to try.
+/// - `account_pfs_mlkem768_sec` -- 2400-byte ML-KEM-768 secret key of the PFS account key
+///   to try.
+/// - `ciphertext` -- wire-format v2 ciphertext as produced by `encrypt_for_recipient_v2`.
+///
+/// Outputs:
+/// - `DecryptV2Result` with the decrypted content, 33-byte (05-prefixed) sender Session ID,
+///   and an optional 64-byte Session Pro signature.
+/// - Throws `DecryptV2Error` if the key did not decrypt the message (try the next candidate).
+/// - Throws `std::runtime_error` for unrecoverable errors (invalid format, signature failure).
+DecryptV2Result decrypt_incoming_v2(
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> account_pfs_x25519_sec,
+        std::span<const std::byte, 32> account_pfs_x25519_pub,
+        std::span<const std::byte, 2400> account_pfs_mlkem768_sec,
+        std::span<const std::byte> ciphertext);
+
+/// API: crypto/encrypt_for_recipient_v2_nopfs
+///
+/// Encrypts a v2 Session DM using the non-PFS fallback (long-term X25519 DH only).
+///
+/// Wire format is identical to `encrypt_for_recipient_v2`:
+///   0x00 0x02 | ki (2B) | E (32B) | outer_ct (1088B) | xchacha20poly1305_ciphertext
+///
+/// but `ki` and `outer_ct` carry no key material — they are random bytes used only to make
+/// non-PFS messages externally indistinguishable from PFS+PQ messages.  The actual shared
+/// secret is derived as:
+///   ss  = eR   (X25519 DH with ephemeral secret e and recipient long-term pubkey R)
+///   ss  = SHA3-256(ss || R || E || "SessionV2NonPFS")
+///   k,n = SHAKE256("SessionV2NonPFSSS", ss)   → 32-byte key + 24-byte nonce
+///
+/// Inputs:
+/// - `sender_ed25519_privkey` -- sender's 32-byte seed or 64-byte Ed25519 secret key
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed long-term X25519 pubkey of the recipient
+/// - `content` -- the plaintext message content to encrypt
+/// - `pro_ed25519_privkey` -- optional Session Pro rotating Ed25519 private key.  When provided,
+///   a `~P` signature is appended to the inner bt-dict.  Pass nullopt / omit when not using Pro.
+///
+/// Outputs:
+/// - Wire-format v2 ciphertext (non-PFS).
+/// - Throws on key or encryption failure.
+std::vector<std::byte> encrypt_for_recipient_v2_nopfs(
+        const ed25519::PrivKeySpan& sender_ed25519_privkey,
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte> content,
+        const ed25519::OptionalPrivKeySpan& pro_ed25519_privkey = std::nullopt);
+
+/// API: crypto/decrypt_incoming_v2_nopfs
+///
+/// Decrypts a v2 Session DM using the non-PFS fallback (long-term X25519 DH only).
+///
+/// Performs the inverse of `encrypt_for_recipient_v2_nopfs`.  The `ki` and ML-KEM fields in
+/// the wire format are ignored; only the ephemeral pubkey E and the recipient's long-term
+/// X25519 key pair are used.
+///
+/// Inputs:
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed Session ID of the recipient (used to
+///   verify the inner Ed25519 message signature).
+/// - `x25519_sec` -- 32-byte long-term X25519 secret key of the recipient.
+/// - `x25519_pub` -- 32-byte long-term X25519 public key of the recipient.
+/// - `ciphertext` -- wire-format v2 ciphertext.
+///
+/// Outputs:
+/// - `DecryptV2Result` with the decrypted content, sender Session ID, and optional Pro sig.
+/// - Throws `DecryptV2Error` if AEAD authentication fails (wrong key — try PFS path instead).
+/// - Throws `std::runtime_error` for unrecoverable errors (invalid format, signature failure).
+DecryptV2Result decrypt_incoming_v2_nopfs(
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> x25519_sec,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte> ciphertext);
 
 static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 
@@ -163,8 +343,8 @@ static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 ///   exhaustion attacks.
 ///
 /// Inputs:
-/// - `user_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
-///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
+/// - `user_ed25519_privkey` -- the Ed25519 private key of the user; accepts a 32-byte seed or
+///   64-byte libsodium key (the latter avoids recomputing the public key from the seed).
 /// - `group_ed25519_pubkey` -- The 32 byte public key of the group
 /// - group_enc_key -- The group's encryption key (32 bytes or 64-byte libsodium key) for groups v2
 ///   messages, typically the latest key for the group (e.g., Keys::group_enc_key).
@@ -177,11 +357,11 @@ static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 ///
 /// Outputs:
 /// - `ciphertext` -- the encrypted, etc. value to send to the swarm
-std::vector<unsigned char> encrypt_for_group(
-        std::span<const unsigned char> user_ed25519_privkey,
-        std::span<const unsigned char> group_ed25519_pubkey,
-        std::span<const unsigned char> group_enc_key,
-        std::span<const unsigned char> plaintext,
+std::vector<std::byte> encrypt_for_group(
+        const ed25519::PrivKeySpan& user_ed25519_privkey,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        std::span<const std::byte> group_enc_key,
+        std::span<const std::byte> plaintext,
         bool compress,
         size_t padding);
 
@@ -204,14 +384,15 @@ std::vector<unsigned char> encrypt_for_group(
 /// signed message.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the seed (32 bytes) or secret key (64 bytes) of the sender
+/// - `ed25519_privkey` -- the Ed25519 private key of the sender; accepts a 32-byte seed or
+///   64-byte libsodium key.
 /// - `recipient_pubkey` -- the recipient X25519 pubkey, which may or may not be prefixed with the
 ///   0x05 session id prefix (33 bytes if prefixed, 32 if not prefixed).
 /// - `message` -- the message to embed and sign.
-std::vector<unsigned char> sign_for_recipient(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message);
+std::vector<std::byte> sign_for_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -219,18 +400,16 @@ std::vector<unsigned char> sign_for_recipient(
 /// pubkey, and verifies that the sender Ed25519 signature on the message.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the private key of the recipient.  Can be a 32-byte seed, or a 64-byte
-///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
-///   from the seed.
+/// - `ed25519_privkey` -- the Ed25519 private key of the recipient; accepts a 32-byte seed or
+///   64-byte libsodium key.
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<std::vector<unsigned char>, std::vector<unsigned char>>` -- the plaintext binary
-/// data that was encrypted and the
-///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
-///   error.
-std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext);
+/// - `std::pair<std::vector<std::byte>, b32>` -- the plaintext binary data that was encrypted
+///   and the sender's Ed25519 pubkey, *if* the message decrypted and validated successfully.
+///   Throws on error.
+std::pair<std::vector<std::byte>, b32> decrypt_incoming(
+        const ed25519::PrivKeySpan& ed25519_privkey, std::span<const std::byte> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -246,14 +425,13 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<std::vector<unsigned char>, std::vector<unsigned char>>` -- the plaintext binary
-/// data that was encrypted and the
-///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
-///   error.
-std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
-        std::span<const unsigned char> ciphertext);
+/// - `std::pair<std::vector<std::byte>, b32>` -- the plaintext binary data that was encrypted
+///   and the sender's Ed25519 pubkey, *if* the message decrypted and validated successfully.
+///   Throws on error.
+std::pair<std::vector<std::byte>, b32> decrypt_incoming(
+        std::span<const std::byte, 32> x25519_pubkey,
+        std::span<const std::byte, 32> x25519_seckey,
+        std::span<const std::byte> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -261,17 +439,16 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 /// signature on the message and converts the extracted sender's Ed25519 pubkey into a session ID.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the private key of the recipient.  Can be a 32-byte seed, or a 64-byte
-///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
-///   from the seed.
+/// - `ed25519_privkey` -- the Ed25519 private key of the recipient; accepts a 32-byte seed or
+///   64-byte libsodium key.
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
 /// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
 /// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext);
+std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
+        const ed25519::PrivKeySpan& ed25519_privkey, std::span<const std::byte> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -286,13 +463,13 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
+/// - `std::pair<std::vector<std::byte>, std::string>` -- the plaintext binary data that was
 /// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
-        std::span<const unsigned char> ciphertext);
+std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
+        std::span<const std::byte, 32> x25519_pubkey,
+        std::span<const std::byte, 32> x25519_seckey,
+        std::span<const std::byte> ciphertext);
 
 /// API: crypto/decrypt_from_blinded_recipient
 ///
@@ -301,10 +478,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// the `ciphertext` is an outgoing message and decrypts it as such.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the Ed25519 private key of the receiver.  Can be a 32-byte seed, or a
-/// 64-byte
-///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
-///   from the seed.
+/// - `ed25519_privkey` -- the Ed25519 private key of the receiver; accepts a 32-byte seed or
+///   64-byte libsodium key.
 /// - `server_pk` -- the public key of the community server to route the blinded message through
 /// (32 bytes).
 /// - `sender_id` -- the blinded id of the sender including the blinding prefix (33 bytes),
@@ -317,17 +492,17 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
 /// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> sender_id,
-        std::span<const unsigned char> recipient_id,
-        std::span<const unsigned char> ciphertext);
+std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte, 33> sender_id,
+        std::span<const std::byte, 33> recipient_id,
+        std::span<const std::byte> ciphertext);
 
 struct DecryptGroupMessage {
     size_t index;            // Index of the key that successfully decrypted the message
     std::string session_id;  // In hex
-    std::vector<unsigned char> plaintext;
+    std::vector<std::byte> plaintext;
 };
 
 /// API: crypto/decrypt_group_message
@@ -357,9 +532,9 @@ struct DecryptGroupMessage {
 /// (and possibly log) but otherwise ignore such exceptions and just not process the message if
 /// it throws.
 DecryptGroupMessage decrypt_group_message(
-        std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
-        std::span<const unsigned char> group_ed25519_pubkey,
-        std::span<const unsigned char> ciphertext);
+        std::span<std::span<const std::byte, 32>> group_enc_keys,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        std::span<const std::byte> ciphertext);
 
 /// API: crypto/decrypt_ons_response
 ///
@@ -375,8 +550,8 @@ DecryptGroupMessage decrypt_group_message(
 ///   a session ID.  Throws on error/failure.
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
-        std::span<const unsigned char> ciphertext,
-        std::optional<std::span<const unsigned char>> nonce);
+        std::span<const std::byte> ciphertext,
+        std::optional<std::span<const std::byte, 24>> nonce);
 
 /// API: crypto/decrypt_push_notification
 ///
@@ -391,8 +566,8 @@ std::string decrypt_ons_response(
 /// - `std::vector<unsigned char>` -- the decrypted push notification payload, *if* the decryption
 /// was
 ///   successful.  Throws on error/failure.
-std::vector<unsigned char> decrypt_push_notification(
-        std::span<const unsigned char> payload, std::span<const unsigned char> enc_key);
+std::vector<std::byte> decrypt_push_notification(
+        std::span<const std::byte> payload, std::span<const std::byte, 32> enc_key);
 
 /// API: crypto/encrypt_xchacha20
 ///
@@ -400,12 +575,12 @@ std::vector<unsigned char> decrypt_push_notification(
 ///
 /// Inputs:
 /// - `plaintext` -- the data to encrypt.
-/// - `enc_key` -- the key to use for encryption (32 bytes).
+/// - `key` -- the 32-byte symmetric key.
 ///
 /// Outputs:
 /// - `std::vector<unsigned char>` -- the resulting ciphertext.
-std::vector<unsigned char> encrypt_xchacha20(
-        std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key);
+std::vector<std::byte> encrypt_xchacha20(
+        std::span<const std::byte> plaintext, std::span<const std::byte, 32> key);
 
 /// API: crypto/decrypt_xchacha20
 ///
@@ -413,11 +588,11 @@ std::vector<unsigned char> encrypt_xchacha20(
 ///
 /// Inputs:
 /// - `ciphertext` -- the data to decrypt.
-/// - `enc_key` -- the key to use for decryption (32 bytes).
+/// - `key` -- the 32-byte symmetric key.
 ///
 /// Outputs:
-/// - `std::vector<unsigned char>` -- the resulting plaintext.
-std::vector<unsigned char> decrypt_xchacha20(
-        std::span<const unsigned char> ciphertext, std::span<const unsigned char> enc_key);
+/// - `std::vector<std::byte>` -- the resulting plaintext.
+std::vector<std::byte> decrypt_xchacha20(
+        std::span<const std::byte> ciphertext, std::span<const std::byte, 32> key);
 
 }  // namespace session

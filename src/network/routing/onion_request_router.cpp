@@ -150,7 +150,7 @@ namespace {
     std::optional<std::pair<ErrorBehaviour, std::optional<std::string_view>>> parse_error_response(
             uint16_t status_code,
             const std::optional<std::string>& error_body,
-            std::optional<std::span<const unsigned char>> destination_pubkey) {
+            std::optional<std::span<const std::byte>> destination_pubkey) {
         for (const auto& pattern : error_patterns) {
             if (pattern.code != status_code)
                 continue;
@@ -314,8 +314,9 @@ OnionRequestRouter::OnionRequestRouter(
                 for (const auto& node : _config.seed_nodes)
                     node.to_disk(std::back_inserter(seed_node_data));
 
-                auto hash_bytes = session::hash::hash(32, session::to_span(seed_node_data));
-                cache_file_name = "edge_nodes_devnet_" + oxenc::to_hex(hash_bytes);
+                cache_file_name =
+                        "edge_nodes_devnet_" +
+                        oxenc::to_hex(session::hash::blake2b<32>(session::to_span(seed_node_data)));
                 break;
         }
 
@@ -559,6 +560,75 @@ void OnionRequestRouter::upload(UploadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_upload_internal(std::move(req));
+    });
+}
+
+void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    attachment::Encryptor enc{seed, request.domain};
+    const auto upload_id = random::unique_id("UPL");
+
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 enc = std::move(enc),
+                                 request = std::move(request),
+                                 upload_id,
+                                 file_server_config = _config.file_server_config]() mutable {
+        try {
+            auto key = enc.load_key_from_file(request.file, request.allow_large);
+            auto enc_size = attachment::encrypted_size(enc.data_size());
+
+            // Accumulate all encrypted output into a buffer (onion requests require the
+            // full payload upfront).
+            std::vector<std::byte> all_data;
+            all_data.reserve(enc_size);
+            for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next())
+                all_data.insert(all_data.end(), chunk.begin(), chunk.end());
+
+            // Build the one-shot Request via to_request (needs an UploadRequest with next_data)
+            UploadRequest legacy_req;
+            legacy_req.request_timeout = request.request_timeout;
+            legacy_req.overall_timeout = request.overall_timeout;
+            legacy_req.stall_timeout = request.stall_timeout;
+            legacy_req.ttl = request.ttl;
+            auto data_ptr = std::make_shared<std::vector<std::byte>>(std::move(all_data));
+            bool consumed = false;
+            legacy_req.next_data = [data_ptr, consumed]() mutable -> std::vector<std::byte> {
+                if (consumed)
+                    return {};
+                consumed = true;
+                return std::move(*data_ptr);
+            };
+
+            auto req = file_server::to_request(upload_id, file_server_config, legacy_req);
+
+            // Wrap the FileUploadRequest callback to inject the key on success
+            _dispatch_upload(
+                    upload_id,
+                    std::move(req),
+                    [request] { return request.is_cancelled(); },
+                    [request, key](std::variant<file_metadata, int16_t> result, bool timeout) {
+                        if (!request.on_complete)
+                            return;
+                        if (auto* meta = std::get_if<file_metadata>(&result))
+                            request.on_complete(std::make_pair(std::move(*meta), key), timeout);
+                        else
+                            request.on_complete(std::get<int16_t>(result), timeout);
+                    });
+        } catch (const std::exception& e) {
+            log::error(cat, "[Upload {}]: File upload failed: {}", upload_id, e.what());
+            _loop->call([weak_self = weak_from_this(), this, request, upload_id] {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+                _cleanup_upload(upload_id);
+                if (request.on_complete)
+                    request.on_complete(ERROR_UNKNOWN, false);
+            });
+        }
     });
 }
 
@@ -850,6 +920,94 @@ void OnionRequestRouter::_send_request_internal(
     }
 }
 
+void OnionRequestRouter::_cleanup_upload(const std::string& upload_id) {
+    auto node = _active_uploads.extract(upload_id);
+    if (!node.empty()) {
+        auto& thread = node.mapped().second;
+        if (thread.joinable())
+            thread.join();
+    }
+}
+
+void OnionRequestRouter::_dispatch_upload(
+        std::string upload_id,
+        Request req,
+        std::function<bool()> is_cancelled,
+        std::function<void(std::variant<file_metadata, int16_t>, bool)> on_result) {
+    _loop->call([weak_self = weak_from_this(),
+                 this,
+                 upload_id,
+                 req = std::move(req),
+                 is_cancelled = std::move(is_cancelled),
+                 on_result = std::move(on_result)]() mutable {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        if (is_cancelled() || !req.body) {
+            log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
+            on_result(ERROR_REQUEST_CANCELLED, false);
+            _cleanup_upload(upload_id);
+            return;
+        }
+
+        const auto upload_size = req.body->size();
+        log::debug(
+                cat, "[Upload {}]: Accumulated {} bytes, sending request.", upload_id, upload_size);
+
+        _send_request_internal(
+                std::move(req),
+                [weak_self, this, upload_id, is_cancelled, on_result, upload_size](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> body) {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
+                    _cleanup_upload(upload_id);
+
+                    try {
+                        if (is_cancelled())
+                            throw cancellation_exception{"Cancelled during request."};
+
+                        if (!success || timeout)
+                            throw status_code_exception{
+                                    status_code,
+                                    headers,
+                                    fmt::format(
+                                            "Request failed with status {}, timeout={}.",
+                                            status_code,
+                                            timeout)};
+
+                        if (!body)
+                            throw std::runtime_error{"No response body."};
+
+                        auto metadata = file_server::parse_upload_response(*body, upload_size);
+                        log::info(
+                                cat,
+                                "[Upload {}]: Successfully uploaded {} bytes as file ID: {}",
+                                upload_id,
+                                metadata.size,
+                                metadata.id);
+
+                        on_result(std::move(metadata), false);
+                    } catch (const cancellation_exception&) {
+                        log::error(cat, "[Upload {}]: Cancelled", upload_id);
+                        on_result(ERROR_REQUEST_CANCELLED, false);
+                    } catch (const status_code_exception& e) {
+                        log::error(cat, "[Upload {}]: Failure with error: {}", upload_id, e.what());
+                        on_result(e.status_code, false);
+                    } catch (const std::exception& e) {
+                        log::error(cat, "[Upload {}]: Failure with error: {}", upload_id, e.what());
+                        on_result(ERROR_UNKNOWN, false);
+                    }
+                });
+    });
+}
+
 void OnionRequestRouter::_upload_internal(UploadRequest request) {
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
@@ -874,100 +1032,14 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
         if (!self)
             return;
 
-        // Onion requests don't support streaming data so we need to load all the data from the
-        // streaming source into memory
         try {
-            Request request =
-                    file_server::to_request(upload_id, file_server_config, upload_request);
+            auto req = file_server::to_request(upload_id, file_server_config, upload_request);
 
-            _loop->call([weak_self, this, upload_request, req = std::move(request), upload_id] {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
-                if (upload_request.is_cancelled() || !req.body) {
-                    log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
-                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-
-                    auto active_upload_node = _active_uploads.extract(upload_id);
-                    if (!active_upload_node.empty() &&
-                        active_upload_node.mapped().second.joinable())
-                        active_upload_node.mapped().second.join();
-                    return;
-                }
-
-                const auto upload_size = req.body->size();
-                log::debug(
-                        cat,
-                        "[Upload {}]: Accumulated {} bytes, building request.",
-                        upload_id,
-                        upload_size);
-
-                _send_request_internal(
-                        std::move(req),
-                        [weak_self, this, upload_id, upload_request, upload_size](
-                                bool success,
-                                bool timeout,
-                                int16_t status_code,
-                                std::vector<std::pair<std::string, std::string>> headers,
-                                std::optional<std::string> body) {
-                            auto self = weak_self.lock();
-                            if (!self)
-                                return;
-
-                            // Join the thread to keep it alive during callback handling
-                            auto active_upload_node = _active_uploads.extract(upload_id);
-                            if (!active_upload_node.empty() &&
-                                active_upload_node.mapped().second.joinable())
-                                active_upload_node.mapped().second.join();
-
-                            try {
-                                if (upload_request.is_cancelled())
-                                    throw cancellation_exception{"Cancelled during request."};
-
-                                if (!success || timeout)
-                                    throw status_code_exception{
-                                            status_code,
-                                            headers,
-                                            fmt::format(
-                                                    "Request failed with status {}, timeout={}.",
-                                                    status_code,
-                                                    timeout)};
-
-                                if (!body)
-                                    throw std::runtime_error{"No response body."};
-
-                                auto metadata =
-                                        file_server::parse_upload_response(*body, upload_size);
-                                log::info(
-                                        cat,
-                                        "[Upload {}]: Successfully uploaded {} bytes as file ID: "
-                                        "{}",
-                                        upload_id,
-                                        metadata.size,
-                                        metadata.id);
-
-                                upload_request.on_complete(std::move(metadata), false);
-                            } catch (const cancellation_exception&) {
-                                log::error(cat, "[Upload {}]: Cancelled", upload_id);
-                                upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-                            } catch (const status_code_exception& e) {
-                                log::error(
-                                        cat,
-                                        "[Upload {}]: Failure with error: {}",
-                                        upload_id,
-                                        e.what());
-                                upload_request.on_complete(e.status_code, false);
-                            } catch (const std::exception& e) {
-                                log::error(
-                                        cat,
-                                        "[Upload {}]: Failure with error: {}",
-                                        upload_id,
-                                        e.what());
-                                upload_request.on_complete(ERROR_UNKNOWN, false);
-                            }
-                        });
-            });
+            _dispatch_upload(
+                    upload_id,
+                    std::move(req),
+                    [upload_request] { return upload_request.is_cancelled(); },
+                    upload_request.on_complete);
         } catch (const std::exception& e) {
             log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, e.what());
 
@@ -975,12 +1047,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
-
-                // Join the thread to keep it alive during callback handling
-                auto active_upload_node = _active_uploads.extract(upload_id);
-                if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
-                    active_upload_node.mapped().second.join();
-
+                _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });
         }
@@ -1040,7 +1107,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
                                 metadata.id);
 
                         if (request.on_data)
-                            request.on_data(metadata, std::move(data));
+                            request.on_data(metadata, to_span<const std::byte>(data));
 
                         request.on_complete(std::move(metadata), false);
                     } catch (const cancellation_exception&) {
@@ -1522,7 +1589,7 @@ void OnionRequestRouter::_send_on_path(
         OnionPath& path, Request request, network_response_callback_t callback) {
     log::trace(cat, "[Request {}]: Sending on path {}", request.request_id, path.id);
 
-    std::vector<unsigned char> encrypted_blob;
+    std::vector<std::byte> encrypted_blob;
     std::shared_ptr<session::onionreq::ResponseParser> parser;
 
     try {

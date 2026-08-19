@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 
+#include "crypto/ed25519.hpp"
 #include "platform.hpp"
 #include "sodium_array.hpp"
 
@@ -59,13 +60,12 @@ namespace session {
 
 /// Returns the blinding factor for 15 blinding.  Typically this isn't used directly, but is
 /// exposed for debugging/testing.  Takes server pk in bytes, not hex.
-std::array<unsigned char, 32> blind15_factor(std::span<const unsigned char> server_pk);
+b32 blind15_factor(std::span<const std::byte, 32> server_pk);
 
 /// Returns the blinding factor for 25 blinding.  Typically this isn't used directly, but is
 /// exposed for debugging/testing.  Takes session id and server pk in bytes, not hex.  session
 /// id can be 05-prefixed (33 bytes) or unprefixed (32 bytes).
-std::array<unsigned char, 32> blind25_factor(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk);
+b32 blind25_factor(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk);
 
 /// Computes the two possible 15-blinded ids from a session id and server pubkey.  Values accepted
 /// and returned are hex-encoded.
@@ -76,8 +76,7 @@ std::array<std::string, 2> blind15_id(std::string_view session_id, std::string_v
 /// session_id here may be passed unprefixed (i.e. 32 bytes instead of 33 with the 05 prefix).  Only
 /// the *positive* possible ID is returned: the alternative can be computed by flipping the highest
 /// bit of byte 32, i.e.: `result[32] ^= 0x80`.
-std::vector<unsigned char> blind15_id(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk);
+b33 blind15_id(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk);
 
 /// Computes the 25-blinded id from a session id and server pubkey.  Values accepted and
 /// returned are hex-encoded.
@@ -86,23 +85,22 @@ std::string blind25_id(std::string_view session_id, std::string_view server_pk);
 /// Same as above, but takes the session id and pubkey as byte values instead of hex, and returns a
 /// 33-byte value (instead of a 66-digit hex value).  Unlike the string version, session_id here may
 /// be passed unprefixed (i.e. 32 bytes instead of 33 with the 05 prefix).
-std::vector<unsigned char> blind25_id(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk);
+b33 blind25_id(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk);
 
 /// Computes the 15-blinded id from a 32-byte Ed25519 pubkey, i.e. from the known underlying Ed25519
 /// pubkey behind a (X25519) Session ID.  Unlike blind15_id, knowing the true Ed25519 pubkey allows
 /// thie method to compute the correct sign and so using this does not require considering that the
 /// resulting blinded ID might need to have a sign flipped.
 ///
-/// If the `session_id` is a non-null pointer then it must point at an empty string to be populated
+/// If the `session_id` is a non-null pointer then it must point at a nullopt to be populated
 /// with the session_id associated with `ed_pubkey`.  This is here for consistency with
 /// `blinded25_id_from_ed`, but unlike the 25 version, this value is not read if non-empty, and is
 /// not an optimization (that is: it is purely for convenience and is no more efficient to use this
 /// than it is to compute it yourself).
-std::vector<unsigned char> blinded15_id_from_ed(
-        std::span<const unsigned char> ed_pubkey,
-        std::span<const unsigned char> server_pk,
-        std::vector<unsigned char>* session_id = nullptr);
+b33 blinded15_id_from_ed(
+        std::span<const std::byte, 32> ed_pubkey,
+        std::span<const std::byte, 32> server_pk,
+        std::optional<b33>* session_id = nullptr);
 
 /// Computes the 25-blinded id from a 32-byte Ed25519 pubkey, i.e. from the known underlying Ed25519
 /// pubkey behind a (X25519) Session ID.  This will be the same as blind25_id (if given the X25519
@@ -110,56 +108,55 @@ std::vector<unsigned char> blinded15_id_from_ed(
 /// known.
 ///
 /// The session_id argument is provided to optimize input or output of the session ID derived from
-/// the Ed25519 pubkey: if already computed, this argument can be a pointer to a 33-byte string
+/// the Ed25519 pubkey: if already computed, this argument can be a pointer to an optional b33
 /// containing the precomputed value (to avoid needing to compute it again).  If unknown but needed
-/// then a pointer to an empty string can be given to computed and stored the value here.  Otherwise
+/// then a pointer to a nullopt can be given to compute and store the value here.  Otherwise
 /// (if omitted or nullptr) then the value will temporarily computed within the function.
-std::vector<unsigned char> blinded25_id_from_ed(
-        std::span<const unsigned char> ed_pubkey,
-        std::span<const unsigned char> server_pk,
-        std::vector<unsigned char>* session_id = nullptr);
+b33 blinded25_id_from_ed(
+        std::span<const std::byte, 32> ed_pubkey,
+        std::span<const std::byte, 32> server_pk,
+        std::optional<b33>* session_id = nullptr);
 
 /// Computes a 15-blinded key pair.
 ///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed) and the server pubkey (in hex (64
 /// digits) or bytes (32 bytes)).  Returns the blinded public key and private key (NOT a seed).
 ///
-/// Can optionally also return the blinding factor, k, by providing a pointer to a uc32 (or
-/// cleared_uc32); if non-nullptr then k will be written to it.
+/// Can optionally also return the blinding factor, k, by providing a pointer to a b32; if
+/// non-nullptr then k will be written to it.
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<std::array<unsigned char, 32>, cleared_uc32> blind15_key_pair(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> server_pk,
-        std::array<unsigned char, 32>* k = nullptr);
+std::pair<b32, cleared_b32> blind15_key_pair(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        b32* k = nullptr);
 
 /// Computes a 25-blinded key pair.
 ///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed) and the server pubkey (in hex (64
 /// digits) or bytes (32 bytes)).  Returns the blinded public key and private key (NOT a seed).
 ///
-/// Can optionally also return the blinding factor, k', by providing a pointer to a uc32 (or
-/// cleared_uc32); if non-nullptr then k' will be written to it, where k' = ±k.  Here, `k'` can be
-/// negative to cancel out a negative in the true pubkey, which the remote client will always assume
-/// is not present when it does a Session ID -> Ed25519 conversion for blinding purposes.
+/// Can optionally also return the blinding factor, k', by providing a pointer to a b32; if
+/// non-nullptr then k' will be written to it, where k' = ±k.  Here, `k'` can be negative to cancel
+/// out a negative in the true pubkey, which the remote client will always assume is not present
+/// when it does a Session ID -> Ed25519 conversion for blinding purposes.
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<std::array<unsigned char, 32>, cleared_uc32> blind25_key_pair(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> server_pk,
-        std::array<unsigned char, 32>* k_prime = nullptr);
+std::pair<b32, cleared_b32> blind25_key_pair(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        b32* k_prime = nullptr);
 
 /// Computes a version-blinded key pair.
 ///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed).  Returns the blinded public key and
-/// blinded libsodium seed value.
+/// blinded libsodium seed value (sensitive; uses cleared memory).
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<std::array<unsigned char, 32>, cleared_uc64> blind_version_key_pair(
-        std::span<const unsigned char> ed25519_sk);
+std::pair<b32, cleared_b64> blind_version_key_pair(const ed25519::PrivKeySpan& ed25519_sk);
 
 /// Computes a verifiable 15-blinded signature that validates with the blinded pubkey that would
 /// be returned from blind15_key_pair().
@@ -169,10 +166,15 @@ std::pair<std::array<unsigned char, 32>, cleared_uc64> blind_version_key_pair(
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::vector<unsigned char> blind15_sign(
-        std::span<const unsigned char> ed25519_sk,
+b64 blind15_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte> message);
+/// String_view overload: accepts hex (64 digits) or raw bytes (32 bytes) as a string_view.
+b64 blind15_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
         std::string_view server_pk_in,
-        std::span<const unsigned char> message);
+        std::span<const std::byte> message);
 
 /// Computes a verifiable 25-blinded signature that validates with the blinded pubkey that would
 /// be returned from blind25_id().
@@ -182,10 +184,15 @@ std::vector<unsigned char> blind15_sign(
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::vector<unsigned char> blind25_sign(
-        std::span<const unsigned char> ed25519_sk,
+b64 blind25_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte> message);
+/// String_view overload: accepts hex (64 digits) or raw bytes (32 bytes) as a string_view.
+b64 blind25_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
         std::string_view server_pk,
-        std::span<const unsigned char> message);
+        std::span<const std::byte> message);
 
 /// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey
 /// that would be returned from blind_version_key_pair.
@@ -193,20 +200,20 @@ std::vector<unsigned char> blind25_sign(
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed), unix timestamp, method, path, and
 /// optional body.
 /// Returns the version-blinded signature.
-std::vector<unsigned char> blind_version_sign_request(
-        std::span<const unsigned char> ed25519_sk,
+b64 blind_version_sign_request(
+        const ed25519::PrivKeySpan& ed25519_sk,
         uint64_t timestamp,
         std::string_view method,
         std::string_view path,
-        std::optional<std::span<const unsigned char>> body);
+        std::optional<std::span<const std::byte>> body);
 
 /// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey
 /// that would be returned from blind_version_key_pair.
 ///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed), current platform and unix timestamp.
 /// Returns the version-blinded signature.
-std::vector<unsigned char> blind_version_sign(
-        std::span<const unsigned char> ed25519_sk, Platform platform, uint64_t timestamp);
+b64 blind_version_sign(
+        const ed25519::PrivKeySpan& ed25519_sk, Platform platform, uint64_t timestamp);
 
 /// Takes in a standard session_id and returns a flag indicating whether it matches the given
 /// blinded_id for a given server_pk.

@@ -6,7 +6,6 @@
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/utils.h>
 
@@ -20,10 +19,12 @@
 
 #include "internal.hpp"
 #include "oxenc/bt_serialize.h"
+#include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/encrypt.hpp"
 #include "session/config/protos.hpp"
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -70,8 +71,8 @@ std::unique_ptr<ConfigMessage> make_config_message(bool from_dirty, Args&&... ar
 }
 
 std::unordered_set<std::string> ConfigBase::merge(
-        const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs) {
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> config_views;
+        const std::vector<std::pair<std::string, std::vector<std::byte>>>& configs) {
+    std::vector<std::pair<std::string, std::span<const std::byte>>> config_views;
     config_views.reserve(configs.size());
     for (auto& [hash, data] : configs)
         config_views.emplace_back(hash, data);
@@ -79,28 +80,22 @@ std::unordered_set<std::string> ConfigBase::merge(
 }
 
 std::unordered_set<std::string> ConfigBase::merge(
-        const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs) {
+        const std::vector<std::pair<std::string, std::span<const std::byte>>>& configs) {
     if (accepts_protobuf() && !_keys.empty()) {
-        std::list<std::vector<unsigned char>> keep_alive;
-        std::vector<std::pair<std::string, std::span<const unsigned char>>> parsed;
+        std::list<std::vector<std::byte>> keep_alive;
+        std::vector<std::pair<std::string, std::span<const std::byte>>> parsed;
         parsed.reserve(configs.size());
 
         for (auto& [h, c] : configs) {
             try {
-                auto unwrapped = protos::unwrap_config(
-                        std::span<const unsigned char>{_keys.front().data(), _keys.front().size()},
-                        c,
-                        storage_namespace());
+                auto unwrapped = protos::unwrap_config(_keys.front(), c, storage_namespace());
 
                 // There was a release of one of the clients which resulted in double-wrapped
                 // config messages so we now need to try to double-unwrap in order to better
                 // support multi-device for users running those old versions
                 try {
-                    auto unwrapped2 = protos::unwrap_config(
-                            std::span<const unsigned char>{
-                                    _keys.front().data(), _keys.front().size()},
-                            unwrapped,
-                            storage_namespace());
+                    auto unwrapped2 =
+                            protos::unwrap_config(_keys.front(), unwrapped, storage_namespace());
                     log::warning(
                             cat,
                             "Found double wraped message in namespace {}",
@@ -120,9 +115,9 @@ std::unordered_set<std::string> ConfigBase::merge(
     return _merge(configs);
 }
 
-std::pair<bool, std::optional<std::pair<std::list<std::string>, std::vector<unsigned char>>>>
-ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned char> message) {
-    assert(!message.empty() && message[0] == 'm');
+std::pair<bool, std::optional<std::pair<std::list<std::string>, std::vector<std::byte>>>>
+ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte> message) {
+    assert(!message.empty() && message[0] == std::byte{'m'});
 
     // Handle multipart messages.  Each part of a multipart message starts with `m` and then is
     // immediately followed by a bt_list where:
@@ -139,7 +134,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
 
         oxenc::bt_list_consumer c{message.subspan<1>()};
 
-        auto h = c.consume<std::span<const unsigned char>>();
+        auto h = c.consume<std::span<const std::byte>>();
         hash_t final_hash;
         if (h.size() != final_hash.size())
             throw std::runtime_error{"Invalid multi-part final message hash"};
@@ -155,7 +150,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
             throw std::runtime_error{"Invalid multi-part message part numbering ({} of {})"_format(
                     index, num_parts)};
 
-        auto data = c.consume_span<unsigned char>();
+        auto data = c.consume_span<std::byte>();
         if (data.empty())
             throw std::runtime_error{"Invalid multi-part message with empty data"};
 
@@ -200,7 +195,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
         if (parts.parts.size() == parts.size) {
             // We've completed a set of multiparts!
 
-            std::pair<std::list<std::string>, std::vector<unsigned char>> result{};
+            std::pair<std::list<std::string>, std::vector<std::byte>> result{};
             auto& [msgids, recombined] = result;
 
             size_t final_size = 0;
@@ -213,13 +208,11 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
             }
 
             {
-                hash_t actual_hash;
-                hash::hash(actual_hash, recombined);
+                auto actual_hash = hash::blake2b<32>(recombined);
                 if (actual_hash != final_hash)
                     throw std::runtime_error{
                             "recombined message hash ({}) does not match part hash ({})"_format(
-                                    oxenc::to_hex(actual_hash.begin(), actual_hash.end()),
-                                    oxenc::to_hex(final_hash.begin(), final_hash.end()))};
+                                    actual_hash, final_hash)};
             }
 
             log::debug(
@@ -228,7 +221,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
                     msg_id,
                     index,
                     parts.size,
-                    oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                    final_hash,
                     final_size);
 
             parts.finish(MULTIPART_MAX_REMEMBER);
@@ -237,47 +230,47 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
             if (auto it = std::find_if(
                         recombined.begin(),
                         recombined.end(),
-                        [](unsigned char c) { return c != 0; });
+                        [](std::byte c) { return c != std::byte{0}; });
                 it != recombined.begin() && it != recombined.end()) {
                 auto p = std::distance(recombined.begin(), it);
                 std::memmove(recombined.data(), recombined.data() + p, recombined.size() - p);
                 recombined.resize(recombined.size() - p);
             }
 
-            if (recombined[0] == 'z') {
-                if (auto decompressed = zstd_decompress(std::span<const unsigned char>{
+            if (recombined[0] == std::byte{'z'}) {
+                if (auto decompressed = zstd_decompress(std::span<const std::byte>{
                             recombined.data() + 1, recombined.size() - 1});
                     decompressed && !decompressed->empty()) {
                     log::debug(
                             cat,
                             "multipart message {} inflated to {}B plaintext from {}B compressed",
-                            oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                            final_hash,
                             decompressed->size(),
                             recombined.size());
                     recombined = std::move(*decompressed);
                 } else
                     throw std::runtime_error{
                             "Invalid recombined data (hash {}): decompression failed"_format(
-                                    oxenc::to_hex(final_hash.begin(), final_hash.end()), msg_id)};
+                                    final_hash, msg_id)};
             }
 
             if (recombined.empty())
                 throw std::runtime_error{"recombined data is empty"};
 
-            if (recombined[0] != 'd')
+            if (recombined[0] != std::byte{'d'})
                 throw std::runtime_error{"Recombined data has invalid/unsupported type {:?}"_format(
                         static_cast<const char>(recombined[0]))};
 
             return {true, std::move(result)};
         } else {
-            parts.expiry = std::chrono::system_clock::now() + MULTIPART_MAX_WAIT;
+            parts.expiry = clock_now() + MULTIPART_MAX_WAIT;
             log::debug(
                     cat,
                     "message {} (part {} of {}) stored without completing a multipart set for {}",
                     msg_id,
                     index,
                     parts.size,
-                    oxenc::to_hex(final_hash.begin(), final_hash.end()));
+                    final_hash);
             return {true, std::nullopt};
         }
 
@@ -288,7 +281,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
 }
 
 void ConfigBase::_expire_multiparts() {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     for (auto it = _multiparts.begin(); it != _multiparts.end();) {
         auto& [hash, parts] = *it;
         if (parts.expiry < now)
@@ -299,7 +292,7 @@ void ConfigBase::_expire_multiparts() {
 }
 
 void ConfigBase::_dump_multiparts(oxenc::bt_dict_producer&& multi) const {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     for (const auto& [fhash, parts] : _multiparts) {
         if (parts.expiry < now)
             continue;
@@ -319,7 +312,7 @@ void ConfigBase::_dump_multiparts(oxenc::bt_dict_producer&& multi) const {
 }
 
 void ConfigBase::_load_multiparts(oxenc::bt_dict_consumer&& multi) {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     while (!multi.is_finished()) {
         auto [k, pdata] = multi.next_dict_consumer();
         if (k.size() != sizeof(hash_t)) {
@@ -355,7 +348,7 @@ void ConfigBase::_load_multiparts(oxenc::bt_dict_consumer&& multi) {
                 auto pd = parts_list.consume_dict_consumer();
                 auto index = pd.consume_integer<int>();
                 auto msgid = pd.consume_string_view();
-                auto chunk = pd.consume_span<unsigned char>();
+                auto chunk = pd.consume_span<std::byte>();
                 pm.parts.emplace_back(index, msgid, chunk);
             }
         }
@@ -364,14 +357,14 @@ void ConfigBase::_load_multiparts(oxenc::bt_dict_consumer&& multi) {
 }
 
 std::unordered_set<std::string> ConfigBase::_merge(
-        std::span<const std::pair<std::string, std::span<const unsigned char>>> configs) {
+        std::span<const std::pair<std::string, std::span<const std::byte>>> configs) {
 
     if (_keys.empty())
         throw std::logic_error{"Cannot merge configs without any decryption keys"};
 
     const auto old_seqno = _config->seqno();
     std::vector<std::list<std::string>> all_hashes;  // >1 hashes for multipart configs
-    std::vector<std::span<const unsigned char>> all_confs;
+    std::vector<std::span<const std::byte>> all_confs;
     all_hashes.reserve(configs.size() + 1);
     all_confs.reserve(configs.size() + 1);
 
@@ -396,7 +389,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
     // at the end (rather than the beginning) so that it is identical to one of the incoming
     // messages, *that* one becomes the config superset rather than our current, hash-unknown value.
 
-    std::vector<unsigned char> mine;
+    std::vector<std::byte> mine;
     bool mine_last = false;
     if (old_seqno != 0 || is_dirty()) {
         mine = _config->serialize();
@@ -409,7 +402,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
         }
     }
 
-    std::vector<std::pair<std::string_view, std::vector<unsigned char>>> plaintexts;
+    std::vector<std::pair<std::string_view, std::vector<std::byte>>> plaintexts;
 
     std::unordered_set<std::string> good_hashes;
 
@@ -440,7 +433,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
     for (auto& [hash, plain] : plaintexts) {
         // Remove prefix padding:
         if (auto it = std::find_if(
-                    plain.begin(), plain.end(), [](unsigned char c) { return c != 0; });
+                    plain.begin(), plain.end(), [](std::byte c) { return c != std::byte{0}; });
             it != plain.begin() && it != plain.end()) {
             auto p = std::distance(plain.begin(), it);
             std::memmove(plain.data(), plain.data() + p, plain.size() - p);
@@ -451,7 +444,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
             continue;
         }
 
-        bool was_multipart = plain[0] == 'm';
+        bool was_multipart = plain[0] == std::byte{'m'};
 
         if (was_multipart) {
             // Multipart message
@@ -471,11 +464,11 @@ std::unordered_set<std::string> ConfigBase::_merge(
         }
 
         // Single-part message
-        bool was_compressed = plain[0] == 'z';
+        bool was_compressed = plain[0] == std::byte{'z'};
 
         if (was_compressed) {  // zstd-compressed data
             if (auto decompressed = zstd_decompress(
-                        std::span<const unsigned char>{plain.data() + 1, plain.size() - 1});
+                        std::span<const std::byte>{plain.data() + 1, plain.size() - 1});
                 decompressed && !decompressed->empty())
                 plain = std::move(*decompressed);
             else {
@@ -484,7 +477,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
             }
         }
 
-        if (plain[0] != 'd') {
+        if (plain[0] != std::byte{'d'}) {
             log::error(
                     cat,
                     "invalid/unsupported config message with type {:?}",
@@ -656,7 +649,7 @@ std::unordered_set<std::string> ConfigBase::active_hashes() const {
     // First copy any hashes that make up the currently active config:
     std::unordered_set<std::string> hashes{_curr_hashes};
 
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     // Add include any pending partial configs that *might* be newer:
     for (const auto& [_, part] : _multiparts)
         if (!part.done && part.expiry > now)
@@ -681,27 +674,23 @@ bool ConfigBase::needs_push() const {
     return !is_clean();
 }
 
-// Tries to compresses the message; if the compressed version (including the 'z' prefix tag) is
-// smaller than the source message then we modify `msg` to contain the 'z'-prefixed compressed
-// message, otherwise we leave it as-is.  Returns true if compression was beneficial and `msg` has
-// been compressed; false if compression did not reduce the size and msg was left as-is.
-void compress_message(std::vector<unsigned char>& msg, int level) {
+void compress_message(std::vector<std::byte>& msg, int level) {
     if (!level)
         return;
     // "z" is our zstd compression marker prefix byte
-    std::vector<unsigned char> compressed = zstd_compress(msg, level, to_span("z"));
+    std::vector<std::byte> compressed = zstd_compress(msg, level, to_span("z"));
     if (compressed.size() < msg.size())
         msg = std::move(compressed);
 }
 
-std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>>
 ConfigBase::push() {
     if (_keys.empty())
         throw std::logic_error{"Cannot push data without an encryption key!"};
 
     auto s = _config->seqno();
 
-    std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>> ret{
+    std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>> ret{
             s, {}, {}};
     auto& [seqno, msgs, obs] = ret;
 
@@ -728,8 +717,7 @@ ConfigBase::push() {
         //   - element 3 is the chunk of data (and so, when ordered by sequence number, each data
         //   chunk
         //     concatenated together gives us the `msg` value we have right now in this function).
-        hash_t final_hash;
-        hash::hash(final_hash, msg);
+        auto final_hash = hash::blake2b<32>(msg);
 
         constexpr size_t ENCODE_OVERHEAD =
                 1         // The `m` prefix indicating a multipart message part
@@ -754,17 +742,17 @@ ConfigBase::push() {
                 cat,
                 "splitting large config message ({}B, hash {}) into {} parts",
                 msg.size(),
-                oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                final_hash,
                 num_parts);
 
-        std::span<const unsigned char> remaining{msg};
+        std::span<const std::byte> remaining{msg};
         for (uint8_t index = 0; !remaining.empty(); ++index) {
             auto& out = msgs.emplace_back();
             auto chunk = remaining.subspan(0, std::min(MAX_CHUNK_SIZE, remaining.size()));
             remaining = remaining.subspan(chunk.size());
             out.reserve(chunk.size() + ENCODE_OVERHEAD + ENCRYPT_DATA_OVERHEAD);
             out.resize(chunk.size() + ENCODE_OVERHEAD);
-            out[0] = 'm';
+            out[0] = std::byte{'m'};
             {
                 oxenc::bt_list_producer lp{reinterpret_cast<char*>(out.data() + 1), out.size() - 1};
                 lp.append(std::span{final_hash});
@@ -790,8 +778,7 @@ ConfigBase::push() {
         encrypt_inplace(msg, key(), encryption_domain());
 
         if (accepts_protobuf() && !_keys.empty()) {
-            auto pbwrapped = protos::wrap_config(
-                    {_keys.front().data(), _keys.front().size()}, msg, s, storage_namespace());
+            auto pbwrapped = protos::wrap_config(_keys.front(), msg, s, storage_namespace());
             // If protobuf wrapping would push us *over* the max message size then we just skip the
             // protobuf wrapping because older clients (that need protobuf) also don't support
             // multipart anyway, so we can't produce a message they will accept no matter what.
@@ -825,7 +812,7 @@ void ConfigBase::confirm_pushed(seqno_t seqno, std::unordered_set<std::string> m
     }
 }
 
-std::vector<unsigned char> ConfigBase::dump() {
+std::vector<std::byte> ConfigBase::dump() {
     if (is_readonly())
         _old_hashes.clear();
 
@@ -836,7 +823,7 @@ std::vector<unsigned char> ConfigBase::dump() {
     return d;
 }
 
-std::vector<unsigned char> ConfigBase::make_dump() const {
+std::vector<std::byte> ConfigBase::make_dump() const {
     auto data = _config->serialize(false /* disable signing for local storage */);
     auto data_sv = to_string_view(data);
     oxenc::bt_list old_hashes;
@@ -856,9 +843,9 @@ std::vector<unsigned char> ConfigBase::make_dump() const {
 }
 
 ConfigBase::ConfigBase(
-        std::optional<std::span<const unsigned char>> dump,
-        std::optional<std::span<const unsigned char>> ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
+        std::optional<std::span<const std::byte>> dump,
+        std::optional<std::span<const std::byte, 32>> ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& ed25519_secretkey) {
 
     if (sodium_init() == -1)
         throw std::runtime_error{"libsodium initialization failed!"};
@@ -867,11 +854,10 @@ ConfigBase::ConfigBase(
 }
 
 void ConfigSig::init_sig_keys(
-        std::optional<std::span<const unsigned char>> ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
+        std::optional<std::span<const std::byte, 32>> ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& ed25519_secretkey) {
     if (ed25519_secretkey) {
-        if (ed25519_pubkey &&
-            to_string_view(*ed25519_pubkey) != to_string_view(ed25519_secretkey->subspan(32)))
+        if (ed25519_pubkey && !std::ranges::equal(*ed25519_pubkey, ed25519_secretkey->pubkey()))
             throw std::invalid_argument{"Invalid signing keys: secret key and pubkey do not match"};
         set_sig_keys(*ed25519_secretkey);
     } else if (ed25519_pubkey) {
@@ -882,9 +868,9 @@ void ConfigSig::init_sig_keys(
 }
 
 void ConfigBase::init(
-        std::optional<std::span<const unsigned char>> dump,
-        std::optional<std::span<const unsigned char>> ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
+        std::optional<std::span<const std::byte>> dump,
+        std::optional<std::span<const std::byte, 32>> ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& ed25519_secretkey) {
     if (!dump) {
         _state = ConfigState::Clean;
         _config = std::make_unique<ConfigMessage>();
@@ -952,10 +938,7 @@ int ConfigBase::key_count() const {
     return _keys.size();
 }
 
-bool ConfigBase::has_key(std::span<const unsigned char> key) const {
-    if (key.size() != 32)
-        throw std::invalid_argument{"invalid key given to has_key(): not 32-bytes"};
-
+bool ConfigBase::has_key(std::span<const std::byte, 32> key) const {
     auto* keyptr = key.data();
     for (const auto& key : _keys)
         if (sodium_memcmp(keyptr, key.data(), KEY_SIZE) == 0)
@@ -963,21 +946,18 @@ bool ConfigBase::has_key(std::span<const unsigned char> key) const {
     return false;
 }
 
-std::vector<std::span<const unsigned char>> ConfigBase::get_keys() const {
-    std::vector<std::span<const unsigned char>> ret;
+std::vector<std::span<const std::byte, 32>> ConfigBase::get_keys() const {
+    std::vector<std::span<const std::byte, 32>> ret;
     ret.reserve(_keys.size());
     for (const auto& key : _keys)
-        ret.emplace_back(key.data(), key.size());
+        ret.emplace_back(key);
     return ret;
 }
 
 void ConfigBase::add_key(
-        std::span<const unsigned char> key, bool high_priority, bool dirty_config) {
+        std::span<const std::byte, 32> key, bool high_priority, bool dirty_config) {
     static_assert(
             sizeof(Key) == KEY_SIZE, "std::array appears to have some overhead which seems bad");
-
-    if (key.size() != KEY_SIZE)
-        throw std::invalid_argument{"add_key failed: key size must be 32 bytes"};
 
     if (!_keys.empty() && sodium_memcmp(_keys.front().data(), key.data(), KEY_SIZE) == 0)
         return;
@@ -1011,17 +991,13 @@ int ConfigBase::clear_keys(bool dirty_config) {
 }
 
 void ConfigBase::replace_keys(
-        const std::vector<std::span<const unsigned char>>& new_keys, bool dirty_config) {
+        const std::vector<std::span<const std::byte, 32>>& new_keys, bool dirty_config) {
     if (new_keys.empty()) {
         if (_keys.empty())
             return;
         clear_keys(dirty_config);
         return;
     }
-
-    for (auto& k : new_keys)
-        if (k.size() != KEY_SIZE)
-            throw std::invalid_argument{"replace_keys failed: keys must be 32 bytes"};
 
     dirty_config = dirty_config && !is_readonly() &&
                    (_keys.empty() ||
@@ -1036,7 +1012,7 @@ void ConfigBase::replace_keys(
         dirty();
 }
 
-bool ConfigBase::remove_key(std::span<const unsigned char> key, size_t from, bool dirty_config) {
+bool ConfigBase::remove_key(std::span<const std::byte, 32> key, size_t from, bool dirty_config) {
     auto starting_size = _keys.size();
     if (from >= starting_size)
         return false;
@@ -1059,52 +1035,36 @@ bool ConfigBase::remove_key(std::span<const unsigned char> key, size_t from, boo
     return _keys.size() < starting_size;
 }
 
-void ConfigBase::load_key(std::span<const unsigned char> ed25519_secretkey) {
-    if (!(ed25519_secretkey.size() == 64 || ed25519_secretkey.size() == 32))
-        throw std::invalid_argument{
-                encryption_domain() + " requires an Ed25519 64-byte secret key or 32-byte seed"s};
-
-    add_key(ed25519_secretkey.subspan(0, 32));
+void ConfigBase::load_key(const ed25519::PrivKeySpan& ed25519_secretkey) {
+    add_key(ed25519_secretkey.seed());
 }
 
-void ConfigSig::set_sig_keys(std::span<const unsigned char> secret) {
-    if (secret.size() != 64)
-        throw std::invalid_argument{"Invalid sodium secret: expected 64 bytes"};
+void ConfigSig::set_sig_keys(const ed25519::PrivKeySpan& secret) {
     clear_sig_keys();
-    _sign_sk.reset(64);
-    std::memcpy(_sign_sk.data(), secret.data(), secret.size());
-    _sign_pk.emplace();
-    crypto_sign_ed25519_sk_to_pk(_sign_pk->data(), _sign_sk.data());
+    _sign_sk.assign(secret.begin(), secret.end());
+    ed25519::sk_to_pk(_sign_pk.emplace(), secret);
 
-    set_verifier([this](std::span<const unsigned char> data, std::span<const unsigned char> sig) {
-        return 0 == crypto_sign_ed25519_verify_detached(
-                            sig.data(), data.data(), data.size(), _sign_pk->data());
+    set_verifier([this](std::span<const std::byte> data, std::span<const std::byte> sig) {
+        return sig.size() == 64 && ed25519::verify(sig.first<64>(), *_sign_pk, data);
     });
-    set_signer([this](std::span<const unsigned char> data) {
-        std::vector<unsigned char> sig;
-        sig.resize(64);
-        if (0 != crypto_sign_ed25519_detached(
-                         sig.data(), nullptr, data.data(), data.size(), _sign_sk.data()))
-            throw std::runtime_error{"Internal error: config signing failed!"};
-        return sig;
+    set_signer([this](std::span<const std::byte> data) {
+        ed25519::PrivKeySpan sk{std::span<const std::byte, 64>{_sign_sk.data(), 64}};
+        auto sig = ed25519::sign(sk, data);
+        return std::vector<std::byte>{sig.begin(), sig.end()};
     });
 }
 
-void ConfigSig::set_sig_pubkey(std::span<const unsigned char> pubkey) {
-    if (pubkey.size() != 32)
-        throw std::invalid_argument{"Invalid pubkey: expected 32 bytes"};
-    _sign_pk.emplace();
-    std::memcpy(_sign_pk->data(), pubkey.data(), 32);
+void ConfigSig::set_sig_pubkey(std::span<const std::byte, 32> pubkey) {
+    std::ranges::copy(pubkey, _sign_pk.emplace().begin());
 
-    set_verifier([this](std::span<const unsigned char> data, std::span<const unsigned char> sig) {
-        return 0 == crypto_sign_ed25519_verify_detached(
-                            sig.data(), data.data(), data.size(), _sign_pk->data());
+    set_verifier([this](std::span<const std::byte> data, std::span<const std::byte> sig) {
+        return sig.size() == 64 && ed25519::verify(sig.first<64>(), *_sign_pk, data);
     });
 }
 
 void ConfigSig::clear_sig_keys() {
     _sign_pk.reset();
-    _sign_sk.reset();
+    _sign_sk.clear();
     set_signer(nullptr);
     set_verifier(nullptr);
 }
@@ -1117,25 +1077,23 @@ void ConfigBase::set_signer(ConfigMessage::sign_callable s) {
     _config->signer = std::move(s);
 }
 
-std::array<unsigned char, 32> ConfigSig::seed_hash(std::string_view key) const {
-    if (!_sign_sk)
+cleared_b32 ConfigSig::seed_hash(std::string_view key) const {
+    if (_sign_sk.empty())
         throw std::runtime_error{"Cannot make a seed hash without a signing secret key"};
-    std::array<unsigned char, 32> out;
-    crypto_generichash_blake2b(
-            out.data(),
-            out.size(),
-            _sign_sk.data(),
-            32,  // Just the seed part of the value, not the last half (which is just the pubkey)
-            reinterpret_cast<const unsigned char*>(key.data()),
-            std::min<size_t>(key.size(), 64));
-    return out;
+    cleared_b32 result;
+    hash::blake2b_key(result, key, std::span{_sign_sk.data(), 32});
+    return result;
 }
 
-void set_error(config_object* conf, std::string e) {
-    auto& error = unbox(conf).error;
-    error = std::move(e);
-    conf->last_error = error.c_str();
-}
+namespace {
+
+    void set_error(config_object* conf, std::string e) {
+        auto& error = unbox(conf).error;
+        error = std::move(e);
+        conf->last_error = error.c_str();
+    }
+
+}  // namespace
 
 }  // namespace session::config
 
@@ -1161,11 +1119,10 @@ LIBSESSION_EXPORT config_string_list* config_merge(
         size_t count) {
     return wrap_exceptions(conf, [&] {
         auto& config = *unbox(conf);
-        std::vector<std::pair<std::string, std::span<const unsigned char>>> confs;
+        std::vector<std::pair<std::string, std::span<const std::byte>>> confs;
         confs.reserve(count);
         for (size_t i = 0; i < count; i++)
-            confs.emplace_back(
-                    msg_hashes[i], std::span<const unsigned char>{configs[i], lengths[i]});
+            confs.emplace_back(msg_hashes[i], to_byte_span(configs[i], lengths[i]));
 
         return make_string_list(config.merge(confs));
     });
@@ -1313,7 +1270,7 @@ LIBSESSION_EXPORT bool config_add_key(config_object* conf, const unsigned char* 
     return wrap_exceptions(
             conf,
             [&] {
-                unbox(conf)->add_key({key, 32});
+                unbox(conf)->add_key(to_byte_span<32>(key));
                 return true;
             },
             false);
@@ -1323,7 +1280,7 @@ LIBSESSION_EXPORT bool config_add_key_low_prio(config_object* conf, const unsign
     return wrap_exceptions(
             conf,
             [&] {
-                unbox(conf)->add_key({key, 32}, /*high_priority=*/false);
+                unbox(conf)->add_key(to_byte_span<32>(key), /*high_priority=*/false);
                 return true;
             },
             false);
@@ -1332,20 +1289,20 @@ LIBSESSION_EXPORT int config_clear_keys(config_object* conf) {
     return unbox(conf)->clear_keys();
 }
 LIBSESSION_EXPORT bool config_remove_key(config_object* conf, const unsigned char* key) {
-    return unbox(conf)->remove_key({key, 32});
+    return unbox(conf)->remove_key(to_byte_span<32>(key));
 }
 LIBSESSION_EXPORT int config_key_count(const config_object* conf) {
     return unbox(conf)->key_count();
 }
 LIBSESSION_EXPORT bool config_has_key(const config_object* conf, const unsigned char* key) {
     try {
-        return unbox(conf)->has_key({key, 32});
+        return unbox(conf)->has_key(to_byte_span<32>(key));
     } catch (...) {
         return false;
     }
 }
 LIBSESSION_EXPORT const unsigned char* config_key(const config_object* conf, size_t i) {
-    return unbox(conf)->key(i).data();
+    return to_unsigned(unbox(conf)->key(i).data());
 }
 
 LIBSESSION_EXPORT const char* config_encryption_domain(const config_object* conf) {
@@ -1356,7 +1313,7 @@ LIBSESSION_EXPORT bool config_set_sig_keys(config_object* conf, const unsigned c
     return wrap_exceptions(
             conf,
             [&] {
-                unbox(conf)->set_sig_keys({secret, 64});
+                unbox(conf)->set_sig_keys(ed25519::PrivKeySpan{secret, 64});
                 return true;
             },
             false);
@@ -1366,7 +1323,7 @@ LIBSESSION_EXPORT bool config_set_sig_pubkey(config_object* conf, const unsigned
     return wrap_exceptions(
             conf,
             [&] {
-                unbox(conf)->set_sig_pubkey({pubkey, 32});
+                unbox(conf)->set_sig_pubkey(to_byte_span<32>(pubkey));
                 return true;
             },
             false);
@@ -1375,7 +1332,7 @@ LIBSESSION_EXPORT bool config_set_sig_pubkey(config_object* conf, const unsigned
 LIBSESSION_EXPORT const unsigned char* config_get_sig_pubkey(const config_object* conf) {
     const auto& pk = unbox(conf)->get_sig_pubkey();
     if (pk)
-        return pk->data();
+        return to_unsigned(pk->data());
     return nullptr;
 }
 

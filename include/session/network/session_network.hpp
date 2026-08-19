@@ -5,6 +5,7 @@
 #include <optional>
 #include <oxen/quic.hpp>
 
+#include "session/clock.hpp"
 #include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"
@@ -52,14 +53,16 @@ class Network : public std::enable_shared_from_this<Network> {
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
                  config::Config>)
-    Network(Opt&&... opts) : Network(Config(std::forward<Opt>(opts)...)){};
+    Network(Opt&&... opts) : Network{config::Config{std::forward<Opt>(opts)...}} {};
     explicit Network(config::Config config);
     virtual ~Network();
 
     bool has_retrieved_time_offset() const {
         return (_last_successful_clock_resync == std::chrono::steady_clock::time_point{});
     };
-    std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
+    std::chrono::milliseconds network_time_offset() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(AdjustedClock::get_offset());
+    };
     fork_versions fork() const { return _fork_versions.load(); };
     uint16_t hardfork() const { return _fork_versions.load().hardfork; };
     uint16_t softfork() const { return _fork_versions.load().softfork; };
@@ -83,8 +86,10 @@ class Network : public std::enable_shared_from_this<Network> {
     /// - 'ignore_strike_count' - [in] flag indicating whether node strikes should be ignored when
     /// retrieving the swarm.
     /// - 'callback' - [in] callback to be called with the retrieved swarm (in the case of an error
-    /// the callback will be called with an empty list).
-    void get_swarm(
+    ///   the callback will be called with an empty list).  The order of items in the swarm vector
+    ///   will be shuffled (but may prioritize some nodes over others depend on observed past
+    ///   behaviour; see SnodePool::get_swarm).
+    virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
             std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback);
@@ -101,13 +106,14 @@ class Network : public std::enable_shared_from_this<Network> {
     void get_random_nodes(
             uint16_t count, std::function<void(std::vector<service_node> nodes)> callback);
 
-    void send_request(Request request, network_response_callback_t callback);
+    virtual void send_request(Request request, network_response_callback_t callback);
+    [[deprecated("use upload_file() instead")]]
     void upload(UploadRequest request);
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed);
     void download(DownloadRequest request);
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
-    std::atomic<std::chrono::milliseconds> _network_time_offset{0ms};
     std::atomic<fork_versions> _fork_versions{{0, 0}};
 
     void configure();

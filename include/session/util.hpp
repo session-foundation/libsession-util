@@ -30,29 +30,34 @@ namespace session {
 using namespace oxenc;
 
 // Helper functions to convert to/from spans
-template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+template <oxenc::basic_char OutChar = std::byte, oxenc::basic_char InChar, size_t Extent>
 inline std::span<const OutChar, Extent> as_span(std::span<const InChar, Extent> sp) {
     return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
 }
-template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+template <oxenc::basic_char OutChar = std::byte, oxenc::basic_char InChar, size_t Extent>
 inline std::span<OutChar, Extent> as_span(std::span<InChar, Extent> sp) {
     return std::span<OutChar, Extent>{reinterpret_cast<OutChar*>(sp.data()), sp.size()};
 }
 
-template <typename OutChar = unsigned char, oxenc::bt_input_string T>
+template <typename OutChar = std::byte, oxenc::bt_input_string T>
 inline std::span<const OutChar> to_span(const T& c) {
     return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
 }
 
-template <typename OutChar = unsigned char, std::size_t N>
+template <typename OutChar = std::byte, std::size_t N>
 inline std::span<const OutChar> to_span(const char (&literal)[N]) {
     return {reinterpret_cast<const OutChar*>(literal), N - 1};
 }
 
-template <typename OutChar = unsigned char, typename Container>
-    requires(!oxenc::bt_input_string<Container>)
-inline std::span<const OutChar> to_span(const Container& c) {
-    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+template <typename OutChar = std::byte, typename Container>
+    requires(
+            std::convertible_to<
+                    const Container&,
+                    std::span<const typename Container::value_type>> &&
+            !oxenc::bt_input_string<Container> && oxenc::basic_char<typename Container::value_type>)
+inline auto to_span(const Container& c) {
+    constexpr size_t Extent{decltype(std::span{c})::extent};
+    return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(c.data()), c.size()};
 }
 
 // Helper functions to convert container types
@@ -63,34 +68,32 @@ inline OutContainer convert(const InContainer& in) {
     return OutContainer(begin, begin + in.size());
 }
 
-template <typename OutChar = unsigned char, typename InChar>
+template <typename OutChar = std::byte, typename InChar>
 inline std::vector<OutChar> to_vector(std::span<const InChar> sp) {
     return convert<std::vector<OutChar>>(sp);
 }
 
-template <typename OutChar = unsigned char, oxenc::bt_input_string T>
+template <typename OutChar = std::byte, oxenc::bt_input_string T>
 inline std::vector<OutChar> to_vector(const T& c) {
     return convert<std::vector<OutChar>>(to_span(c));
 }
 
-template <typename OutChar = unsigned char, typename InChar, std::size_t N>
+template <typename OutChar = std::byte, typename InChar, std::size_t N>
 inline std::vector<OutChar> to_vector(const std::array<InChar, N>& arr) {
     return convert<std::vector<OutChar>>(arr);
 }
 
-template <typename OutChar = unsigned char, typename Container>
+template <typename OutChar = std::byte, typename Container>
     requires(!oxenc::bt_input_string<Container>)
 inline std::vector<OutChar> to_vector(const Container& c) {
     return convert<std::vector<OutChar>>(to_span(c));
 }
 
 template <std::size_t N, typename InChar>
-inline std::array<unsigned char, N> to_array(std::span<const InChar> sp) {
-    std::array<unsigned char, N> result{};
+inline std::array<std::byte, N> to_array(std::span<const InChar> sp) {
+    std::array<std::byte, N> result{};
     std::copy_n(
-            reinterpret_cast<const unsigned char*>(sp.data()),
-            std::min(N, sp.size()),
-            result.begin());
+            reinterpret_cast<const std::byte*>(sp.data()), std::min(N, sp.size()), result.begin());
     return result;
 }
 
@@ -108,7 +111,52 @@ inline std::string_view to_string_view(const Container& c) {
     return {reinterpret_cast<const char*>(c.data()), static_cast<size_t>(c.size())};
 }
 
-// Helper function to go to/from char pointers to unsigned char pointers:
+/// Returns a fixed-extent std::byte span viewing N bytes starting at p.  Primarily useful for
+/// wrapping C API pointers (e.g. `unsigned char*`) into typed spans without a reinterpret_cast at
+/// the call site.  A dynamic-size overload taking a length is also provided.  A third overload
+/// accepts a C array directly and deduces N.
+template <size_t N, oxenc::basic_char Char>
+inline std::span<const std::byte, N> to_byte_span(const Char* p) {
+    return std::span<const std::byte, N>(reinterpret_cast<const std::byte*>(p), N);
+}
+template <size_t N, oxenc::basic_char Char>
+inline std::span<std::byte, N> to_byte_span(Char* p) {
+    return std::span<std::byte, N>(reinterpret_cast<std::byte*>(p), N);
+}
+template <size_t N>
+inline std::span<const std::byte, N> to_byte_span(const std::byte* p) {
+    return std::span<const std::byte, N>(p, N);
+}
+template <size_t N>
+inline std::span<std::byte, N> to_byte_span(std::byte* p) {
+    return std::span<std::byte, N>(p, N);
+}
+template <oxenc::basic_char Char>
+inline std::span<const std::byte> to_byte_span(const Char* p, size_t n) {
+    return {reinterpret_cast<const std::byte*>(p), n};
+}
+template <oxenc::basic_char Char>
+inline std::span<std::byte> to_byte_span(Char* p, size_t n) {
+    return {reinterpret_cast<std::byte*>(p), n};
+}
+inline std::span<const std::byte> to_byte_span(const std::byte* p, size_t n) {
+    return {p, n};
+}
+inline std::span<std::byte> to_byte_span(std::byte* p, size_t n) {
+    return {p, n};
+}
+// Array overloads: deduce N from a C array, returning a fixed-extent span.
+template <size_t N, oxenc::basic_char Char>
+inline std::span<const std::byte, N> to_byte_span(const Char (&arr)[N]) {
+    return std::span<const std::byte, N>(reinterpret_cast<const std::byte*>(arr), N);
+}
+template <size_t N, oxenc::basic_char Char>
+inline std::span<std::byte, N> to_byte_span(Char (&arr)[N]) {
+    return std::span<std::byte, N>(reinterpret_cast<std::byte*>(arr), N);
+}
+
+// Helper functions to reinterpret char-type pointers as unsigned char* or std::byte*.
+// These are primarily for passing binary data to/from C APIs.
 template <oxenc::basic_char Char>
 inline const unsigned char* to_unsigned(const Char* x) {
     return reinterpret_cast<const unsigned char*>(x);
@@ -131,69 +179,31 @@ inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
 }
 
-// The same as std::chrono::system_clock::now(), except that it allows you to get it in a different
-// precision.  E.g. sysclock_now<std::chrono::seconds> gives a timepoint with seconds precision (aka
-// std::chrono::sys_seconds).
-template <typename Precision = std::chrono::system_clock::duration>
-inline std::chrono::sys_time<Precision> sysclock_now() {
-    return std::chrono::floor<Precision>(std::chrono::system_clock::now());
+template <oxenc::basic_char Char>
+inline const std::byte* to_bytes(const Char* x) {
+    return reinterpret_cast<const std::byte*>(x);
 }
-// Shortcut for sysclock_now<std::chrono::seconds>();
-inline std::chrono::sys_seconds sysclock_now_s() {
-    return sysclock_now<std::chrono::seconds>();
+template <oxenc::basic_char Char>
+inline std::byte* to_bytes(Char* x) {
+    return reinterpret_cast<std::byte*>(x);
 }
-using sys_ms = std::chrono::sys_time<std::chrono::milliseconds>;
-using sys_seconds = std::chrono::sys_seconds;
-// Shortcut for sysclock_now<std::chrono::sys_time<std::chrono::milliseconds>>();
-inline sys_ms sysclock_now_ms() {
-    return sysclock_now<std::chrono::milliseconds>();
+// These do nothing, but having them makes template metaprogramming easier:
+inline const std::byte* to_bytes(const std::byte* x) {
+    return x;
+}
+inline std::byte* to_bytes(std::byte* x) {
+    return x;
 }
 
-// Returns the duration count of the given duration cast into ToDuration.  Example:
-//     duration_count<std::chrono::seconds>(30000ms)  // returns 30
-// This function requires that the target type is no more precise than d, that is, it will not allow
-// you to cast from seconds to milliseconds because such a cast indicates that the sub-second
-// precision has already been lost.
-template <typename ToDuration, typename Rep, typename Period>
-    requires std::is_convertible_v<ToDuration, std::chrono::duration<Rep, Period>>
-constexpr int64_t duration_count(const std::chrono::duration<Rep, Period>& d) {
-    return std::chrono::duration_cast<ToDuration>(d).count();
+/// Returns the data pointer of a std::byte span as an `unsigned char*`, for passing to C APIs
+/// that expect `unsigned char*`.  The const overload returns `const unsigned char*`.
+template <size_t N>
+inline unsigned char* ucdata(std::span<std::byte, N> sp) {
+    return reinterpret_cast<unsigned char*>(sp.data());
 }
-// Returns the seconds count of the given duration
-template <typename Rep, typename Period>
-    requires std::is_convertible_v<std::chrono::seconds, std::chrono::duration<Rep, Period>>
-constexpr int64_t duration_seconds(const std::chrono::duration<Rep, Period>& d) {
-    return duration_count<std::chrono::seconds>(d);
-}
-// Returns the milliseconds count of the given duration
-template <typename Rep, typename Period>
-    requires std::is_convertible_v<std::chrono::milliseconds, std::chrono::duration<Rep, Period>>
-constexpr int64_t duration_ms(const std::chrono::duration<Rep, Period>& d) {
-    return duration_count<std::chrono::milliseconds>(d);
-}
-
-// Returns the time-since-epoch count of the given time point, cast into ToDuration.  The given time
-// point must be at least as precise as ToDuration, i.e. this will not allow you to cast to a more
-// precise time point as that would mean the intended precision has already been lost by an earlier
-// cast.
-template <class ToDuration, class Clock, class Duration>
-    requires std::is_convertible_v<ToDuration, Duration>
-constexpr int64_t epoch_count(const std::chrono::time_point<Clock, Duration>& t) {
-    return duration_count<ToDuration>(t.time_since_epoch());
-}
-// Returns the seconds-since-epoch count of the given time point.  The given time point must be at
-// least as precise as seconds.
-template <class Clock, class Duration>
-    requires std::is_convertible_v<std::chrono::seconds, Duration>
-constexpr int64_t epoch_seconds(const std::chrono::time_point<Clock, Duration>& t) {
-    return duration_seconds(t.time_since_epoch());
-}
-// Returns the milliseconds-since-epoch count of the given time point.  The given time point must
-// have at least milliseconds precision.
-template <class Clock, class Duration>
-    requires std::is_convertible_v<std::chrono::milliseconds, Duration>
-constexpr int64_t epoch_ms(const std::chrono::time_point<Clock, Duration>& t) {
-    return duration_ms(t.time_since_epoch());
+template <size_t N>
+inline const unsigned char* ucdata(std::span<const std::byte, N> sp) {
+    return reinterpret_cast<const unsigned char*>(sp.data());
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.
@@ -204,15 +214,19 @@ inline bool string_iequal(std::string_view s1, std::string_view s2) {
     });
 }
 
+using b32 = std::array<std::byte, 32>;
+using b33 = std::array<std::byte, 33>;
+using b64 = std::array<std::byte, 64>;
+
 using uc32 = std::array<unsigned char, 32>;
 using uc33 = std::array<unsigned char, 33>;
 using uc64 = std::array<unsigned char, 64>;
 
-/// Takes a container of string-like binary values and returns a vector of unsigned char spans
-/// viewing those values.  This can be used on a container of any type with a `.data()` and a
-/// `.size()` where `.data()` is a one-byte value pointer; std::string, std::string_view,
-/// std::vector<const unsigned char>, std::span<const unsigned char>, etc. apply, as does std::array
-/// of 1-byte char types.
+/// Takes a container of string-like binary values and returns a vector of std::byte spans viewing
+/// those values.  This can be used on a container of any type with a `.data()` and a `.size()`
+/// where `.data()` is a one-byte value pointer; std::string, std::string_view,
+/// std::vector<std::byte>, std::span<const std::byte>, etc. apply, as does std::array of 1-byte
+/// char types.
 ///
 /// This is useful in various libsession functions that require such a vector.  Note that the
 /// returned vector's views are valid only as the original container remains alive; this is
@@ -223,25 +237,25 @@ using uc64 = std::array<unsigned char, 64>;
 /// There are two versions of this: the first takes a generic iterator pair; the second takes a
 /// single container.
 template <typename It>
-std::vector<std::span<const unsigned char>> to_view_vector(It begin, It end) {
-    std::vector<std::span<const unsigned char>> vec;
+std::vector<std::span<const std::byte>> to_view_vector(It begin, It end) {
+    std::vector<std::span<const std::byte>> vec;
     vec.reserve(std::distance(begin, end));
     for (; begin != end; ++begin) {
         if constexpr (std::is_same_v<std::remove_cv_t<decltype(*begin)>, char*>)  // C strings
-            vec.emplace_back(*begin);
+            vec.emplace_back(reinterpret_cast<const std::byte*>(*begin), std::strlen(*begin));
         else {
             static_assert(
                     sizeof(*begin->data()) == 1,
                     "to_view_vector can only be used with containers of string-like types of "
                     "1-byte characters");
-            vec.emplace_back(reinterpret_cast<const unsigned char*>(begin->data()), begin->size());
+            vec.emplace_back(reinterpret_cast<const std::byte*>(begin->data()), begin->size());
         }
     }
     return vec;
 }
 
 template <typename Container>
-std::vector<std::span<const unsigned char>> to_view_vector(const Container& c) {
+std::vector<std::span<const std::byte>> to_view_vector(const Container& c) {
     return to_view_vector(c.begin(), c.end());
 }
 
@@ -250,6 +264,9 @@ std::vector<std::span<const unsigned char>> to_view_vector(const Container& c) {
 /// valid.  Leading and trailing empty substrings are not removed.  If delim is empty you get back a
 /// vector of string_views each viewing one character.  If `trim` is true then leading and trailing
 /// empty values will be suppressed.
+///
+/// The returned vector always contains at least one element when `trim` is false (even for an empty
+/// input string).  With `trim` true, an empty input returns an empty vector.
 ///
 ///     auto v = split("ab--c----de", "--"); // v is {"ab", "c", "", "de"}
 ///     auto v = split("abc", ""); // v is {"a", "b", "c"}
@@ -363,15 +380,48 @@ static_assert(std::is_same_v<
 
 /// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
 /// serious error.
-std::vector<unsigned char> zstd_compress(
-        std::span<const unsigned char> data,
-        int level = 1,
-        std::span<const unsigned char> prefix = {});
+std::vector<std::byte> zstd_compress(
+        std::span<const std::byte> data, int level = 1, std::span<const std::byte> prefix = {});
 
 /// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
 /// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<std::vector<unsigned char>> zstd_decompress(
-        std::span<const unsigned char> data, size_t max_size = 0);
+std::optional<std::vector<std::byte>> zstd_decompress(
+        std::span<const std::byte> data, size_t max_size = 0);
+
+/// Wrapper for formatting byte sizes with SI prefixes via fmt/oxen-logging.  Provides a
+/// `format_as` friend function discoverable via ADL, so no fmt headers are needed here.
+/// Usage: `log::info(cat, "Size: {}", human_size{12345});` => "Size: 12.3 kB"
+struct human_size {
+    int64_t bytes;
+    friend std::string format_as(human_size s);
+};
+
+/// NTTP helper struct for the `_bytes` user-defined literal.
+template <size_t N>
+struct BytesLiteral {
+    std::byte data[N - 1];
+    static constexpr size_t size = N - 1;
+    consteval BytesLiteral(const char (&s)[N]) {
+        for (size_t i = 0; i < N - 1; ++i)
+            data[i] = static_cast<std::byte>(static_cast<unsigned char>(s[i]));
+    }
+};
+
+inline namespace literals {
+
+    /// User-defined literal that returns a compile-time `std::span<const std::byte>` view over the
+    /// string literal's bytes (excluding the null terminator).  Example:
+    ///
+    ///     using namespace session::literals;  // or `using namespace session;`
+    ///     constexpr auto domain = "MyDomainKey"_bytes;
+    ///
+    template <BytesLiteral Lit>
+    consteval std::span<const std::byte, Lit.size> operator""_bytes() {
+        return std::span<const std::byte, Lit.size>(Lit.data, Lit.size);
+    }
+
+}  // namespace literals
+
 }  // namespace session
 
 #ifndef _WIN32

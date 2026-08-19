@@ -44,14 +44,14 @@ struct service_node {
     uint64_t requested_unlock_height;
 
     oxen::quic::RemoteAddress to_https_address() const {
-        return oxen::quic::RemoteAddress{remote_pubkey, ip, https_port};
+        return oxen::quic::RemoteAddress{remote_pubkey.view(), ip, https_port};
     }
 
-    oxen::quic::RemoteAddress to_omq_address() const {
-        return oxen::quic::RemoteAddress{remote_pubkey, ip, omq_port};
+    oxen::quic::RemoteAddress to_quic_address() const {
+        return oxen::quic::RemoteAddress{remote_pubkey.view(), ip, omq_port};
     }
 
-    std::span<const unsigned char> view_remote_key() const { return remote_pubkey; }
+    std::span<const std::byte, 32> view_remote_key() const { return remote_pubkey; }
     std::string host() const { return ip.to_string(); }
 
     std::string to_string() const;

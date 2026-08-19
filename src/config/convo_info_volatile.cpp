@@ -3,15 +3,16 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <charconv>
 #include <chrono>
 #include <iterator>
+#include <session/format.hpp>
 #include <stdexcept>
 #include <variant>
 
 #include "internal.hpp"
+#include "session/clock.hpp"
 #include "session/config/convo_info_volatile.h"
 #include "session/config/error.h"
 #include "session/export.h"
@@ -61,7 +62,7 @@ namespace convo {
     }
 
     community::community(const convo_info_volatile_community& c) :
-            config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
+            config::community{c.base_url, c.room, std::as_bytes(std::span{c.pubkey})},
             base(c.last_read, c.unread) {}
 
     void community::into(convo_info_volatile_community& c) const {
@@ -175,8 +176,8 @@ namespace convo {
 }  // namespace convo
 
 ConvoInfoVolatile::ConvoInfoVolatile(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -201,12 +202,12 @@ convo::one_to_one ConvoInfoVolatile::get_or_construct_1to1(std::string_view pubk
 }
 
 ConfigBase::DictFieldProxy ConvoInfoVolatile::community_field(
-        const convo::community& comm, std::span<const unsigned char>* get_pubkey) const {
+        const convo::community& comm, std::span<const std::byte>* get_pubkey) const {
     auto record = data["o"][comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey = to_span(pk);
+            *get_pubkey = to_span<std::byte>(pk);
     }
     return record["R"][comm.room_norm()];
 }
@@ -215,11 +216,11 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
         std::string_view base_url, std::string_view room) const {
     convo::community og{base_url, community::canonical_room(room)};
 
-    std::span<const unsigned char> pubkey;
+    std::span<const std::byte> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
-            og.set_pubkey(pubkey);
+            og.set_pubkey(pubkey.first<32>());
         return og;
     }
     return std::nullopt;
@@ -232,10 +233,8 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
 }
 
 convo::community ConvoInfoVolatile::get_or_construct_community(
-        std::string_view base_url,
-        std::string_view room,
-        std::span<const unsigned char> pubkey) const {
-    convo::community result{base_url, community::canonical_room(room), pubkey};
+        std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey) const {
+    convo::community result{base_url, community::canonical_room(room), pubkey.first<32>()};
 
     if (auto* info_dict = community_field(result).dict())
         result.load(*info_dict);
@@ -305,7 +304,7 @@ std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{pubkey_hex}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(pubkey_hex)};
 
     std::string pubkey = session_id_to_bytes(pubkey_hex, to_string(prefix));
 
@@ -333,7 +332,7 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto pro_expiry = epoch_seconds(c.pro_expiry_at);
     if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_revocation_tag;
+        info["g"] = to_span<std::byte>(*c.pro_revocation_tag);
     }
 }
 
@@ -346,7 +345,7 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
         r = c.last_read;
     else {
         std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
-        if (last_read > std::chrono::system_clock::now() - PRUNE_LOW)
+        if (last_read > clock_now() - PRUNE_LOW)
             info["r"] = c.last_read;
     }
 
@@ -364,7 +363,7 @@ static bool is_stale(const C& c, std::chrono::system_clock::time_point cutoff) {
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const auto cutoff = std::chrono::system_clock::now() - prune;
+    const auto cutoff = clock_now() - prune;
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
@@ -403,7 +402,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         erase_community(base, room);
 }
 
-std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>>
 ConvoInfoVolatile::push() {
     // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
@@ -439,7 +438,7 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
     auto pro_expiry = epoch_seconds(c.pro_expiry_at);
     if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_revocation_tag;
+        info["g"] = to_span<std::byte>(*c.pro_revocation_tag);
     }
 }
 
@@ -735,7 +734,10 @@ LIBSESSION_C_API bool convo_info_volatile_get_or_construct_community(
             [&] {
                 unbox<ConvoInfoVolatile>(conf)
                         ->get_or_construct_community(
-                                base_url, room, std::span<const unsigned char>{pubkey, 32})
+                                base_url,
+                                room,
+                                std::span<const std::byte>{
+                                        reinterpret_cast<const std::byte*>(pubkey), 32})
                         .into(*convo);
                 return true;
             },

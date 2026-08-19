@@ -2,12 +2,12 @@
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
 #include <session/session_protocol.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <random>
 #include <session/config/contacts.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 #include <string_view>
 #include <thread>
@@ -16,15 +16,13 @@
 
 static constexpr int64_t created_ts = 1680064059;
 
+using namespace session;
+
 TEST_CASE("Contacts", "[config][contacts]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -33,7 +31,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     constexpr auto definitely_real_id =
             "050000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -133,7 +131,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash2", to_push[0]);
     contacts.merge(merge_configs);
     contacts2.confirm_pushed(seqno, {"fakehash2"});
@@ -177,7 +175,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     session::config::profile_pic p;
     {
         // These don't stay alive, so we use set_key/set_url to make a local copy:
-        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+        constexpr auto k = "qwerty78901234567890123456789012"_bytes;
+        std::vector<std::byte> key(k.begin(), k.end());
         std::string url = "http://example.com/huge.bmp";
         p.set_key(std::move(key));
         p.url = std::move(url);
@@ -266,13 +265,9 @@ TEST_CASE("Contacts", "[config][contacts]") {
 }
 
 TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -282,7 +277,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     config_object* conf;
-    REQUIRE(0 == contacts_init(&conf, ed_sk.data(), NULL, 0, NULL));
+    REQUIRE(0 == contacts_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, NULL));
 
     const char* const definitely_real_id =
             "050000000000000000000000000000000000000000000000000000000000000000";
@@ -329,7 +324,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(to_push->seqno == 1);
 
     config_object* conf2;
-    REQUIRE(contacts_init(&conf2, ed_sk.data(), NULL, 0, NULL) == 0);
+    REQUIRE(contacts_init(&conf2, to_unsigned(ed_sk.data()), NULL, 0, NULL) == 0);
 
     const char* merge_hash[1];
     const unsigned char* merge_data[1];
@@ -442,20 +437,16 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
     // Test that we can produce a config message whose *uncompressed* length exceeds the maximum
     // message length as long as its *compressed* length does not.
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     for (uint16_t i = 0; i < 12000; i++) {
         char buf[2];
@@ -492,20 +483,16 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
     // Test that we can produce a config message whose *uncompressed* length exceeds the maximum
     // message length as long as its *compressed* length does not.
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{session::to_span(seed), std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     std::string friend42;
 
@@ -514,8 +501,8 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
         // are randomly generated and thus not usefully compressible, which results in a much larger
         // (compressed) config.
         std::mt19937_64 rng{i};
-        std::array<unsigned char, 33> random_sessionid;
-        random_sessionid[0] = 0x05;
+        b33 random_sessionid;
+        random_sessionid[0] = std::byte{0x05};
         for (int i = 1; i < 33; i += 8)
             oxenc::write_host_as_little(rng(), random_sessionid.data() + i);
 
@@ -575,9 +562,9 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
     dump = contacts.dump();
     CHECK(dump.size() == base_dump_size + 12 * 13);  // 12 x "10:fakehashNN"
 
-    auto c2 = std::make_unique<session::config::Contacts>(session::to_span(seed), std::nullopt);
+    auto c2 = std::make_unique<session::config::Contacts>(seed, std::nullopt);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs, merge_more;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs, merge_more;
     bool dump_load_in_between = false;
     std::mt19937_64 rng{12345};
 
@@ -656,8 +643,7 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
         CHECK(dump.size() < total_dumps + 500 /* ~ various other dump overhead */);
 
         if (dump_load_in_between) {
-            auto c2b =
-                    std::make_unique<session::config::Contacts>(session::to_span(seed), c2->dump());
+            auto c2b = std::make_unique<session::config::Contacts>(seed, c2->dump());
             CHECK_FALSE(c2b->needs_dump());
             c2 = std::move(c2b);
             CHECK_FALSE(c2->needs_dump());
@@ -687,37 +673,28 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
 TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     // Tests that stored multipart message expires as expected.
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{session::to_span(seed), std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     std::string friend42;
 
-    std::array<unsigned char, 32> seedi = {0};
+    b32 seedi = {};
     for (uint16_t i = 0; i < 2000; i++) {
         // Unlike the above case where we have nearly identical Session IDs, here our session IDs
         // are randomly generated from fixed seeds and thus not usefully compressible, which results
         // in a much larger (compressed) config.
-        seedi[0] = i % 256;
-        seedi[1] = i >> 8;
-        std::array<unsigned char, 32> i_ed_pk, i_curve_pk;
-        std::array<unsigned char, 64> i_ed_sk;
-        crypto_sign_ed25519_seed_keypair(
-                i_ed_pk.data(),
-                i_ed_sk.data(),
-                reinterpret_cast<const unsigned char*>(seedi.data()));
-        rc = crypto_sign_ed25519_pk_to_curve25519(i_curve_pk.data(), i_ed_pk.data());
+        seedi[0] = static_cast<std::byte>(i % 256);
+        seedi[1] = static_cast<std::byte>(i >> 8);
+        auto [i_ed_pk, i_ed_sk] = ed25519::keypair(seedi);
+        auto i_curve_pk = ed25519::pk_to_x25519(i_ed_pk);
         std::string session_id = "05" + oxenc::to_hex(i_curve_pk.begin(), i_curve_pk.end());
 
         auto c = contacts.get_or_construct(session_id);
@@ -742,7 +719,7 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
 
     contacts.confirm_pushed(seqno, {"fakehash0", "fakehash1"});
 
-    auto c2 = std::make_unique<session::config::Contacts>(session::to_span(seed), std::nullopt);
+    auto c2 = std::make_unique<session::config::Contacts>(seed, std::nullopt);
 
     c2->MULTIPART_MAX_WAIT = 200ms;
     c2->MULTIPART_MAX_REMEMBER = 600ms;
@@ -750,7 +727,7 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     auto old_seqno = std::get<seqno_t>(c2->push());
     REQUIRE(old_seqno == 0);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash0", to_push[0]);
 
     std::unordered_set<std::string> accepted;
@@ -856,9 +833,9 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
 
 TEST_CASE("needs_dump bug", "[config][needs_dump]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
 
-    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     CHECK_FALSE(contacts.needs_dump());
 
@@ -890,13 +867,9 @@ TEST_CASE("needs_dump bug", "[config][needs_dump]") {
 
 TEST_CASE("Contacts", "[config][blinded_contacts]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -905,7 +878,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     constexpr auto definitely_real_id =
             "150000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -993,7 +966,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash2", to_push[0]);
     contacts.merge(merge_configs);
     contacts2.confirm_pushed(seqno, {"fakehash2"});
@@ -1039,7 +1012,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     session::config::profile_pic p;
     {
         // These don't stay alive, so we use set_key/set_url to make a local copy:
-        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+        auto key = to_vector("qwerty78901234567890123456789012"_bytes);
         std::string url = "http://example.com/huge.bmp";
         p.set_key(std::move(key));
         p.url = std::move(url);
@@ -1120,9 +1093,9 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
 
 TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
 
-    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts contacts{seed, std::nullopt};
 
     REQUIRE(contacts.is_clean());
 
@@ -1130,50 +1103,50 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.data == 0);
+        CHECK(c.profile_flags == ProProfileFlags::None);
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags |= ProProfileFlags::ProBadge;
         contacts.set(c);
 
         CHECK(contacts.is_dirty());
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
 
         contacts.set(c);
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK_FALSE(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK_FALSE(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
+        c.profile_flags |= ProProfileFlags::AnimatedAvatar;
         contacts.set(c);
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
 
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
+        CHECK(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
     }
 
     // Set and unset the bitset from the profile on a new contact
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(c.profile_bitset.data == 0);
+        CHECK(c.profile_flags == ProProfileFlags::None);
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags |= ProProfileFlags::ProBadge;
         contacts.set(c);
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
 
-        c.profile_bitset.unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags &= ~ProProfileFlags::ProBadge;
         contacts.set(c);
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(!c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(!contains(c.profile_flags, ProProfileFlags::ProBadge));
     }
 
     CHECK(contacts.needs_push());
@@ -1191,8 +1164,8 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
+        CHECK(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
         // This previously exposed a bug in set_erase_impl where the contact was being dirtied even
         // when nothing was actually being removed.
         contacts.set(c);

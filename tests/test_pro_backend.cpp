@@ -1,3 +1,4 @@
+#include <oxenc/base64.h>
 #include <oxenc/hex.h>
 #include <session/pro_backend.h>
 #include <sodium.h>
@@ -19,12 +20,12 @@ static bool span_u8_equals(span_u8 s, std::string_view str) {
 }
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
     // Setup: Generate keys and payment token hash
-    bytes32 master_pubkey = {};
-    bytes64 master_privkey = {};
+    cbytes32 master_pubkey = {};
+    cbytes64 master_privkey = {};
     crypto_sign_ed25519_keypair(master_pubkey.data, master_privkey.data);
 
-    bytes32 rotating_pubkey = {};
-    bytes64 rotating_privkey = {};
+    cbytes32 rotating_pubkey = {};
+    cbytes64 rotating_privkey = {};
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
@@ -137,7 +138,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         }
 
         SECTION("session_pro_backend_pro_proof_response_parse") {
-            std::array<uint8_t, 32> fake_revocation_tag;
+            b32 fake_revocation_tag;
             randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             nlohmann::json j;
@@ -251,6 +252,40 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 j_bad["result"]["account_auto_renewing"] = 1;  // int, not bool
                 REQUIRE_THROWS_AS(parse_pro_proof(j_bad.dump()), session::parse_error_type);
 
+                // Binary fields are accepted hex- or base64-encoded, padded or not, decoding to
+                // the same bytes. 32 bytes is 64 hex chars, 44 padded base64 or 43 unpadded, so
+                // the three are distinguishable by length alone.
+                nlohmann::json j_b64 = j;
+                j_b64["result"]["revocation_tag"] = oxenc::to_base64(fake_revocation_tag);
+                auto b64_padded = oxenc::to_base64(rotating_pubkey.data);
+                REQUIRE(b64_padded.size() == 44);
+                j_b64["result"]["rotating_pkey"] = b64_padded;
+                auto b64_unpadded = b64_padded.substr(0, 43);
+                REQUIRE(b64_unpadded.back() != '=');
+                j_b64["result"]["sig"] = oxenc::to_base64(master_privkey.data);
+                auto enc_cpp = parse_pro_proof(j_b64.dump());
+                REQUIRE(enc_cpp);
+                CHECK(enc_cpp.proof.revocation_tag == fake_revocation_tag);
+                CHECK(std::memcmp(
+                              enc_cpp.proof.rotating_pubkey.data(),
+                              rotating_pubkey.data,
+                              sizeof(rotating_pubkey.data)) == 0);
+
+                // An unpadded value of the same field decodes identically.
+                nlohmann::json j_b64u = j_b64;
+                j_b64u["result"]["rotating_pkey"] = b64_unpadded;
+                auto unpadded_cpp = parse_pro_proof(j_b64u.dump());
+                REQUIRE(unpadded_cpp);
+                CHECK(std::memcmp(
+                              unpadded_cpp.proof.rotating_pubkey.data(),
+                              rotating_pubkey.data,
+                              sizeof(rotating_pubkey.data)) == 0);
+
+                // A length matching neither encoding is rejected, naming the field.
+                nlohmann::json j_short = j;
+                j_short["result"]["revocation_tag"] = oxenc::to_hex(fake_revocation_tag).substr(2);
+                REQUIRE_THROWS_AS(parse_pro_proof(j_short.dump()), session::parse_error_key);
+
                 // The non-auto-renewing account: a genuine zero grace, and `E + 0 == E`.
                 nlohmann::json j_false = j;
                 j_false["result"]["account_grace_period_duration"] = 0;
@@ -341,7 +376,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["result"]["retain_for"] = 2592000;
             j["result"]["items"] = nlohmann::json::array();
 
-            std::array<uint8_t, 32> fake_revocation_tag;
+            b32 fake_revocation_tag;
             randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             auto obj = nlohmann::json::object();
@@ -606,7 +641,8 @@ TEST_CASE("Pro Backend X25519 pubkey matches the converted Ed25519 pubkey", "[pr
     // PUBKEY_X25519 is a hardcoded convenience constant; assert it equals the runtime conversion of
     // the Ed25519 PUBKEY so the two can never silently drift.
     unsigned char converted[32] = {};
-    REQUIRE(crypto_sign_ed25519_pk_to_curve25519(converted, PUBKEY.data()) == 0);
+    REQUIRE(crypto_sign_ed25519_pk_to_curve25519(
+                    converted, reinterpret_cast<const unsigned char*>(PUBKEY.data())) == 0);
     REQUIRE(std::memcmp(converted, PUBKEY_X25519.data(), sizeof(converted)) == 0);
     // The C export points at the same bytes.
     REQUIRE(std::memcmp(
@@ -774,7 +810,7 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
         CHECK(sig_covers(req.data, "master_sig", details_cursor_msg_hex, master_pk));
     }
     SECTION("pro proof") {
-        session::ProProof proof;
+        ProProof proof;
         proof.version = 0;
         std::memset(proof.revocation_tag.data(), 0x11, proof.revocation_tag.size());
         std::memcpy(proof.rotating_pubkey.data(), rotating_pk.data(), 32);
@@ -787,9 +823,11 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
         // Direct pin of the proof (spec section 2) message construction.
         CHECK(oxenc::to_hex(proof.signed_message()) == proof_msg_hex);
         // The frozen backend signature (key 0x03 over that message) verifies; a wrong key does not.
-        CHECK(proof.verify_signature(backend_pk));
-        auto wrong = backend_pk;
-        wrong[0] ^= 0x01;
+        std::array<std::byte, 32> bpk{};
+        std::memcpy(bpk.data(), backend_pk.data(), 32);
+        CHECK(proof.verify_signature(bpk));
+        auto wrong = bpk;
+        wrong[0] = static_cast<std::byte>(std::to_integer<unsigned char>(wrong[0]) ^ 0x01);
         CHECK_FALSE(proof.verify_signature(wrong));
     }
 }
@@ -915,7 +953,7 @@ static PostFn make_direct_http_transport(CURL* curl, std::string base_url) {
 // Innermost v4 onion piece to `<base>/oxen/v4/lsrpc` (onion-request mode). `backend_ed25519_pubkey`
 // is the backend's signing pubkey (fetched from /status); its x25519 form is the destination key.
 static PostFn make_onion_v4_transport(
-        CURL* curl, std::string base_url, std::span<const uint8_t, 32> backend_ed25519_pubkey) {
+        CURL* curl, std::string base_url, std::span<const std::byte, 32> backend_ed25519_pubkey) {
     using namespace session::network;
     using namespace session::onionreq;
 
@@ -943,10 +981,10 @@ static PostFn make_onion_v4_transport(
                 /*nodes=*/{},
                 EncryptType::xchacha20};
 
-        std::vector<unsigned char> body_bytes{
-                reinterpret_cast<const unsigned char*>(body.data()),
-                reinterpret_cast<const unsigned char*>(body.data()) + body.size()};
-        std::vector<unsigned char> blob = builder.generate_onion_blob(std::move(body_bytes));
+        std::vector<std::byte> body_bytes{
+                reinterpret_cast<const std::byte*>(body.data()),
+                reinterpret_cast<const std::byte*>(body.data()) + body.size()};
+        std::vector<std::byte> blob = builder.generate_onion_blob(std::move(body_bytes));
 
         // The lsrpc body is the raw encrypted onion blob; post it as opaque bytes. (An unheadered
         // curl POST defaults to application/x-www-form-urlencoded, which makes Werkzeug consume the
@@ -1003,7 +1041,7 @@ TEST_CASE("Pro backend live /status round-trip", "[pro_backend][pro_live]") {
     //    this exercises the full v4 onion encrypt/decrypt round-trip against the real backend.
     auto pubkey_bytes = oxenc::from_hex(direct_pubkey);
     REQUIRE(pubkey_bytes.size() == 32);
-    std::array<uint8_t, 32> ed_pubkey{};
+    std::array<std::byte, 32> ed_pubkey{};
     std::memcpy(ed_pubkey.data(), pubkey_bytes.data(), ed_pubkey.size());
 
     PostFn onion = make_onion_v4_transport(curl, base_url, ed_pubkey);
@@ -1029,13 +1067,13 @@ static void run_seed_helper(const std::vector<std::string>& args) {
     REQUIRE(std::system(cmd.c_str()) == 0);
 }
 
-static std::array<uint8_t, 32> fetch_backend_pubkey(const PostFn& transport) {
+static std::array<std::byte, 32> fetch_backend_pubkey(const PostFn& transport) {
     auto j = nlohmann::json::parse(transport("status", "application/json", ""));
     REQUIRE(j.at("status").get<std::string>() == "ok");
     auto hex = j.at("result").at("signing_pubkey").get<std::string>();
     auto bytes = oxenc::from_hex(hex);
     REQUIRE(bytes.size() == 32);
-    std::array<uint8_t, 32> out{};
+    std::array<std::byte, 32> out{};
     std::memcpy(out.data(), bytes.data(), out.size());
     return out;
 }
@@ -1057,7 +1095,7 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
 
     const std::string& base_url = g_test_pro_backend_dev_server_url;
     PostFn direct = make_direct_http_transport(curl, base_url);
-    std::array<uint8_t, 32> backend_pubkey = fetch_backend_pubkey(direct);
+    std::array<std::byte, 32> backend_pubkey = fetch_backend_pubkey(direct);
     PostFn onion = make_onion_v4_transport(curl, base_url, backend_pubkey);
 
     // Provider under test; the whole flow below re-runs once per SECTION.
@@ -1096,7 +1134,7 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
              "--plan",
              "1m"});
 
-    auto now = session::sysclock_now_s();
+    auto now = session::clock_now_s();
 
     // 1) generate_pro_proof: redemption is implicit, so this master-signed request binds the seeded
     //    payment before answering and returns a signed proof for the paired rotating key.
@@ -1187,7 +1225,7 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
 
     const std::string& base_url = g_test_pro_backend_dev_server_url;
     PostFn direct = make_direct_http_transport(curl, base_url);
-    std::array<uint8_t, 32> backend_pubkey = fetch_backend_pubkey(direct);
+    std::array<std::byte, 32> backend_pubkey = fetch_backend_pubkey(direct);
     PostFn onion = make_onion_v4_transport(curl, base_url, backend_pubkey);
 
     std::array<unsigned char, 32> master_pk{}, rotating_pk{};
@@ -1210,7 +1248,7 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
              "1m"});
     // Bind + redeem it implicitly (any master-signed request binds unbound payments) and get a
     // proof to revoke.
-    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, session::sysclock_now_s());
+    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, session::clock_now_s());
     GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
     INFO("generate_pro_proof " << gen.error.value_or(""));
     REQUIRE(gen.status == ResponseStatus::Ok);

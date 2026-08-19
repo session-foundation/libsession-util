@@ -6,7 +6,7 @@
 #include <oxen/log.hpp>
 #include <type_traits>
 
-#include "network_opt.hpp"
+#include "session/network/network_opt.hpp"
 #include "session/types.hpp"
 
 namespace session::network::config {
@@ -27,6 +27,11 @@ struct Config {
     std::optional<std::string> custom_file_server_pubkey_hex = std::nullopt;
     std::optional<uint64_t> custom_file_server_max_file_size = std::nullopt;
     bool file_server_use_stream_encryption = false;
+
+    // QUIC file server options
+    std::optional<std::string> quic_file_server_ed_pubkey;
+    std::optional<std::string> quic_file_server_address;
+    std::optional<uint16_t> quic_file_server_port;
 
     // General options
     bool increase_no_file_limit = false;
@@ -64,7 +69,7 @@ struct Config {
     // Quic Transport Options
     std::chrono::milliseconds quic_handshake_timeout{3s};
     std::chrono::seconds quic_keep_alive{10s};
-    bool quic_disable_mtu_discovery = false;
+    std::optional<size_t> quic_max_udp_payload;
 
     template <typename... Opt>
         requires(sizeof...(Opt) > 0 && (opt::is_option<std::decay_t<Opt>> && ...))
@@ -112,10 +117,15 @@ struct Config {
     void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
 
+    // QUIC file server options
+    void handle_config_opt(opt::quic_file_server_ed_pubkey qfep);
+    void handle_config_opt(opt::quic_file_server_address qfa);
+    void handle_config_opt(opt::quic_file_server_port qfp);
+
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);
     void handle_config_opt(opt::quic_keep_alive qka);
-    void handle_config_opt(opt::quic_disable_mtu_discovery qdmd);
+    void handle_config_opt(opt::quic_max_udp_payload qmup);
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_strike_threshold pst);

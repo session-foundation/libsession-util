@@ -110,7 +110,7 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 ///
 /// - `data` -- the buffer of data to encrypt.
 ///
-/// - `domain` -- domain separator; uploads of funamentally different types should use a different
+/// - `domain` -- domain separator; uploads of fundamentally different types should use a different
 ///   value, so that an identical upload used for different purposes will have unrelated key/nonce
 ///   values.
 ///
@@ -125,7 +125,7 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is true).
 ///
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -150,7 +150,7 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
 ///
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is true).
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -173,7 +173,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
 ///
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
 /// MAX_REGULAR_SIZE.
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
@@ -197,7 +197,7 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
 /// MAX_REGULAR_SIZE.
 /// Throws std::runtime_error if the file size changes between first and second passes.
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
@@ -220,7 +220,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is given).  Throws on I/O error.  If decryption fails
 /// then any partially written output file will be removed.
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -288,7 +288,7 @@ class Decryptor {
     bool failed = false;
     bool finished = false;
     bool hit_final = false;
-    cleared_uc32 key;
+    cleared_b32 key;
     unsigned char st_data[52];  // crypto_secretstream_xchacha20poly1305_state data
 
     void process_header(std::span<const std::byte, 1 + ENCRYPT_HEADER> chunk);
@@ -315,6 +315,115 @@ class Decryptor {
     ///
     /// Throws std::logic_error if called after a successful finalize().
     [[nodiscard]] bool finalize();
+};
+
+/// API: crypto/attachment::Encryptor
+///
+/// Streaming two-phase encryptor for attachments.  Encryption is deterministic: the same seed and
+/// data always produce the same key, nonce, and ciphertext, which allows the file server to
+/// deduplicate identical uploads.
+///
+/// **Phase 1 (key derivation):** Construct the object and call `update()` with the plaintext data
+/// (in any number of pieces).  This hashes the data to derive the encryption key and nonce.
+/// Normally this is the file contents itself (so that the same file always produces the same
+/// encryption key); however, feeding different data (e.g. random bytes) is permitted for
+/// non-deterministic encryption where deduplication is not desired.  No encrypted output is
+/// produced during this phase.
+///
+/// **Phase 2 (encryption):** Call `start_encryption()` to finalize key derivation and transition to
+/// encryption mode.  Then call `next()` repeatedly to pull encrypted chunks (the encryptor reads
+/// from the data source provided to `start_encryption()`).  Each call returns a span of encrypted
+/// output valid until the next `next()` call, or an empty span when encryption is complete.
+///
+/// The `from_file()` factory handles the common case of encrypting a file: it opens the file, runs
+/// phase 1, seeks back, and returns an Encryptor ready for `next()` calls with the file as the
+/// data source.
+class Encryptor {
+    alignas(64) std::byte hash_st_data[384];  // crypto_generichash_blake2b_state
+    cleared_array<std::byte, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE> nonce_key;
+    std::byte ss_st_data[52];  // crypto_secretstream_xchacha20poly1305_state
+
+    // Phase 1 state
+    size_t hashed_size = 0;
+    bool phase1_done = false;
+
+    // Phase 2 state
+    std::function<size_t(std::span<std::byte> buffer)> source;
+    size_t encrypt_size = 0;
+    size_t encrypted_so_far = 0;
+    size_t padding = 0;
+    size_t padding_remaining = 0;
+    bool header_emitted = false;
+    bool done = false;
+
+    // Internal buffers for producing encrypted output
+    std::vector<std::byte> plaintext_buf;
+    std::array<std::byte, 1 + ENCRYPT_HEADER + ENCRYPTED_CHUNK_TOTAL> out_buf;
+    size_t out_size = 0;
+
+    // Produces the next chunk of encrypted output into out_buf.  Returns false when done.
+    bool produce_next();
+
+  public:
+    /// Returns the data size: during phase 1 this is the number of bytes fed to update_key();
+    /// after start_encryption() this is the target plaintext size for phase 2 (either the
+    /// phase 1 total, or the override if one was given to start_encryption()).
+    size_t data_size() const { return phase1_done ? encrypt_size : hashed_size; }
+
+    /// Constructs an encryptor for the given seed and domain.
+    ///
+    /// `seed` must be at least 32 bytes; typically the user's Session seed.  `domain` is the
+    /// domain separator (ATTACHMENT or PROFILE_PIC).
+    Encryptor(std::span<const std::byte> seed, Domain domain);
+
+    /// Phase 1: feed plaintext data into key derivation (hashing).
+    /// The data is hashed to derive the encryption key; normally this should be the actual file
+    /// contents that will be encrypted in phase 2.
+    void update_key(std::span<const std::byte> data);
+
+    /// Transition from phase 1 to phase 2.  Finalizes the key derivation and prepares for
+    /// encryption.
+    ///
+    /// `allow_large` permits data larger than MAX_REGULAR_SIZE.
+    ///
+    /// `encrypt_size` overrides the expected plaintext size for phase 2.  If omitted, the size
+    /// from phase 1 (sum of update() calls) is used.
+    ///
+    /// `source` is a pull-based data source for phase 2: it is called with a buffer to fill and
+    /// must fill it completely; returning fewer bytes than requested signals the end of data.
+    /// Phase 2 is then driven by next() calls which pull from this source.
+    ///
+    /// Returns the decryption key (in a cleared buffer).
+    cleared_b32 start_encryption(
+            std::function<size_t(std::span<std::byte> buffer)> source,
+            bool allow_large = false,
+            std::optional<size_t> encrypt_size = std::nullopt);
+
+    /// Pull the next chunk of encrypted output.  Returns a non-owning span that is valid until
+    /// the next call to next().  Returns an empty span when all data has been encrypted.
+    std::span<const std::byte> next();
+
+    /// Runs both phases from a file: hashes the file contents (phase 1), then sets up
+    /// streaming encryption with the file as the data source (phase 2).  After this call,
+    /// next() returns encrypted chunks.  The file is held open internally for phase 2 reads.
+    ///
+    /// Must be called on a freshly constructed Encryptor (i.e. before any update_key() calls).
+    ///
+    /// If `progress` is provided, it is called periodically during phase 1 with (bytes_read,
+    /// total_size).  If the callback throws, the operation is aborted and the exception
+    /// propagates to the caller.
+    cleared_b32 load_key_from_file(
+            const std::filesystem::path& file,
+            bool allow_large = false,
+            std::function<void(int64_t bytes_read, int64_t total_size)> progress = nullptr);
+
+    /// Factory: constructs an Encryptor, runs load_from_file, and returns the ready Encryptor
+    /// along with the decryption key.
+    static std::pair<Encryptor, cleared_b32> from_file(
+            std::span<const std::byte> seed,
+            Domain domain,
+            const std::filesystem::path& file,
+            bool allow_large = false);
 };
 
 /// API: crypto/attachment::decrypt

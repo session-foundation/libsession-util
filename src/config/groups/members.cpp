@@ -8,9 +8,9 @@
 namespace session::config::groups {
 
 Members::Members(
-        std::span<const unsigned char> ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        std::span<const std::byte, 32> ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, ed25519_pubkey, ed25519_secretkey);
 }
 
@@ -186,7 +186,9 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
     assert(std::strlen(m.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(m.profile_pic.url)) {
         profile_picture.url = m.profile_pic.url;
-        profile_picture.key.assign(m.profile_pic.key, m.profile_pic.key + 32);
+        profile_picture.key.assign(
+                reinterpret_cast<const std::byte*>(m.profile_pic.key),
+                reinterpret_cast<const std::byte*>(m.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(m.profile_updated);
     admin = m.admin;

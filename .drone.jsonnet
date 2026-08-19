@@ -201,6 +201,16 @@ local windows_cross_pipeline(name,
                  }] else [])
 );
 
+local live_test_step(image, mode) = {
+  name: 'live tests (' + mode + ')',
+  image: image,
+  pull: 'always',
+  commands: apt_setup(image, default_test_deps) + [
+    'cd build',
+    './tests/testLive --' + mode + ' --log-level warning --colour-mode ansi -d yes "[file]"',
+  ],
+};
+
 // Live Pro-backend integration test: build testAll with the dev-server hook, stand up an ephemeral
 // backend (throwaway postgres + flask, provider_dry_run) via tests/pro_backend/run-dev-backend.sh,
 // and run the [pro_live] suite against it. The backend is a separate Python service, checked out at
@@ -409,6 +419,20 @@ local static_build(name,
   // Various debian builds
   debian_build('Debian sid', docker_base + 'debian-sid'),
 
+  // Debian sid with session-router + live file transfer tests
+  local live_image = docker_base + 'debian-sid';
+  debian_build(
+    'Debian sid (live tests)',
+    live_image,
+    cmake_extra='-DENABLE_NETWORKING=ON -DENABLE_NETWORKING_SROUTER=ON -DBUILD_LIVE_TESTS=ON',
+  ) + {
+    steps: super.steps + [
+      live_test_step(live_image, 'onionreq'),
+      live_test_step(live_image, 'srouter'),
+      live_test_step(live_image, 'direct'),
+    ],
+  },
+
   // Live Pro-backend integration tests (ephemeral backend + [pro_live]).
   pro_backend_live_pipeline('Debian sid (Pro backend live)', docker_base + 'debian-sid'),
 
@@ -426,7 +450,7 @@ local static_build(name,
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
 
   // Macos builds:
-  mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
+  //mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
   mac_builder('macOS Arm64 (Debug)', arch='arm64', build_type='Debug'),
 

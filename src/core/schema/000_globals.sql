@@ -1,0 +1,6 @@
+
+CREATE TABLE globals (
+    key TEXT PRIMARY KEY NOT NULL,
+    value ANY NOT NULL
+) STRICT;
+

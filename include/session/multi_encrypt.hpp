@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "crypto/ed25519.hpp"
 #include "sodium_array.hpp"
 #include "types.hpp"
 
@@ -33,29 +34,29 @@ namespace session {
 namespace detail {
 
     void encrypt_multi_key(
-            std::array<unsigned char, 32>& key_out,
-            const unsigned char* a,
-            const unsigned char* A,
-            const unsigned char* B,
+            std::span<std::byte, 32> key_out,
+            std::span<const std::byte, 32> a,
+            std::span<const std::byte, 32> A,
+            std::span<const std::byte, 32> B,
             bool encrypting,
             std::string_view domain);
 
     void encrypt_multi_impl(
-            std::vector<unsigned char>& out,
-            std::span<const unsigned char> message,
-            const unsigned char* key,
-            const unsigned char* nonce);
+            std::vector<std::byte>& out,
+            std::span<const std::byte> message,
+            std::span<const std::byte, 32> key,
+            std::span<const std::byte, 24> nonce);
 
     bool decrypt_multi_impl(
-            std::vector<unsigned char>& out,
-            std::span<const unsigned char> ciphertext,
-            const unsigned char* key,
-            const unsigned char* nonce);
+            std::vector<std::byte>& out,
+            std::span<const std::byte> ciphertext,
+            std::span<const std::byte, 32> key,
+            std::span<const std::byte, 24> nonce);
 
     inline void validate_multi_fields(
-            std::span<const unsigned char> nonce,
-            std::span<const unsigned char> privkey,
-            std::span<const unsigned char> pubkey) {
+            std::span<const std::byte> nonce,
+            std::span<const std::byte> privkey,
+            std::span<const std::byte> pubkey) {
         if (nonce.size() < 24)
             throw std::logic_error{"nonce must be 24 bytes"};
         if (privkey.size() != 32)
@@ -76,7 +77,7 @@ extern const size_t encrypt_multiple_message_overhead;
 /// API: crypto/encrypt_for_multiple
 ///
 /// Encrypts a message multiple times for multiple recipients.  `callable` is invoked once per
-/// encrypted (or junk) value, passed as a `std::span<const unsigned char>`.
+/// encrypted (or junk) value, passed as a `std::span<const std::byte>`.
 ///
 /// Inputs:
 /// - `messages` -- a vector of message bodies to encrypt.  Must be either size 1, or of the same
@@ -97,20 +98,19 @@ extern const size_t encrypt_multiple_message_overhead;
 ///   used to generate individual keys for domain separation, and so should ideally have a different
 ///   value in different contexts (i.e. group keys uses one value, kicked messages use another,
 ///   etc.).  *Can* be empty, but should be set to something.
-/// - `call` -- this is invoked for each different encrypted value with a std::span<const unsigned
-/// char>; the caller
-///   must copy as needed as the std::span<const unsigned char> doesn't remain valid past the call.
+/// - `call` -- this is invoked for each different encrypted value with a std::span<const
+///   std::byte>; the caller must copy as needed as the span doesn't remain valid past the call.
 /// - `ignore_invalid_recipient` -- if given and true then any recipients that appear to have
 ///   invalid public keys (i.e. the shared key multiplication fails) will be silently ignored (the
 ///   callback will not be called).  If not given (or false) then such a failure for any recipient
 ///   will raise an exception.
 template <typename F>
 void encrypt_for_multiple(
-        const std::vector<std::span<const unsigned char>> messages,
-        const std::vector<std::span<const unsigned char>> recipients,
-        std::span<const unsigned char> nonce,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
+        const std::vector<std::span<const std::byte>> messages,
+        const std::vector<std::span<const std::byte>> recipients,
+        std::span<const std::byte> nonce,
+        std::span<const std::byte> privkey,
+        std::span<const std::byte> pubkey,
         std::string_view domain,
         F&& call,
         bool ignore_invalid_recipient = false) {
@@ -129,24 +129,25 @@ void encrypt_for_multiple(
         if (auto sz = m.size(); sz > max_msg_size)
             max_msg_size = sz;
 
-    std::vector<unsigned char> encrypted;
+    std::vector<std::byte> encrypted;
     encrypted.reserve(max_msg_size + encrypt_multiple_message_overhead);
 
-    sodium_cleared<std::array<unsigned char, 32>> key;
+    cleared_b32 key;
     auto msg_it = messages.begin();
     for (const auto& r : recipients) {
         const auto& m = *msg_it;
         if (messages.size() > 1)
             ++msg_it;
         try {
-            detail::encrypt_multi_key(key, privkey.data(), pubkey.data(), r.data(), true, domain);
+            detail::encrypt_multi_key(
+                    key, privkey.first<32>(), pubkey.first<32>(), r.first<32>(), true, domain);
         } catch (const std::exception&) {
             if (ignore_invalid_recipient)
                 continue;
             else
                 throw;
         }
-        detail::encrypt_multi_impl(encrypted, m, key.data(), nonce.data());
+        detail::encrypt_multi_impl(encrypted, m, key, nonce.first<24>());
         call(to_span(encrypted));
     }
 }
@@ -154,7 +155,7 @@ void encrypt_for_multiple(
 /// Wrapper for passing a single message for all recipients; all arguments other than the first are
 /// identical.
 template <typename... Args>
-void encrypt_for_multiple(std::span<const unsigned char> message, Args&&... args) {
+void encrypt_for_multiple(std::span<const std::byte> message, Args&&... args) {
     return encrypt_for_multiple(
             to_view_vector(&message, &message + 1), std::forward<Args>(args)...);
 }
@@ -162,21 +163,17 @@ template <typename... Args>
 void encrypt_for_multiple(std::string_view message, Args&&... args) {
     return encrypt_for_multiple(to_span(message), std::forward<Args>(args)...);
 }
-template <typename... Args>
-void encrypt_for_multiple(std::span<const std::byte> message, Args&&... args) {
-    return encrypt_for_multiple(to_span(message), std::forward<Args>(args)...);
-}
 
 /// API: crypto/decrypt_for_multiple
 ///
 /// Decryption via a lambda: we call the lambda (which must return a std::optional<std::span<const
-/// unsigned char>>) repeatedly until we get back a nullopt, and attempt to decrypt each returned
+/// std::byte>>) repeatedly until we get back a nullopt, and attempt to decrypt each returned
 /// value.  When decryption succeeds, we return the plaintext to the caller.  If none of the fed-in
 /// values can be decrypt, we return std::nullopt.
 ///
 /// Inputs:
-/// - `ciphertext` -- callback that returns a std::optional<std::vector<unsigned char>> or
-/// std::optional<std::span<const unsigned char>>
+/// - `ciphertext` -- callback that returns a std::optional<std::vector<std::byte>> or
+/// std::optional<std::span<const std::byte>>
 ///   when called, containing the next ciphertext; should return std::nullopt when finished.
 /// - `nonce` -- the nonce used for encryption/decryption (which must have been provided by the
 ///   sender alongside the encrypted messages, and is the same as the `nonce` value given to
@@ -191,34 +188,36 @@ void encrypt_for_multiple(std::span<const std::byte> message, Args&&... args) {
 template <
         typename NextCiphertext,
         typename = std::enable_if_t<
+                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext> ||
+                std::is_invocable_r_v<std::optional<std::vector<std::byte>>, NextCiphertext> ||
                 std::is_invocable_r_v<
                         std::optional<std::span<const unsigned char>>,
-                        NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::vector<unsigned char>>, NextCiphertext> ||
+                        NextCiphertext> ||  // legacy
+                std::is_invocable_r_v<
+                        std::optional<std::vector<unsigned char>>,
+                        NextCiphertext> ||  // legacy
                 std::is_invocable_r_v<std::optional<std::string_view>, NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::string>, NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext>>>
-std::optional<std::vector<unsigned char>> decrypt_for_multiple(
+                std::is_invocable_r_v<std::optional<std::string>, NextCiphertext>>>
+std::optional<std::vector<std::byte>> decrypt_for_multiple(
         NextCiphertext next_ciphertext,
-        std::span<const unsigned char> nonce,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
-        std::span<const unsigned char> sender_pubkey,
+        std::span<const std::byte> nonce,
+        std::span<const std::byte> privkey,
+        std::span<const std::byte> pubkey,
+        std::span<const std::byte> sender_pubkey,
         std::string_view domain) {
 
     detail::validate_multi_fields(nonce, privkey, pubkey);
     if (sender_pubkey.size() != 32)
         throw std::logic_error{"pubkey requires a 32-byte pubkey"};
 
-    sodium_cleared<std::array<unsigned char, 32>> key;
+    cleared_b32 key;
     detail::encrypt_multi_key(
-            key, privkey.data(), pubkey.data(), sender_pubkey.data(), false, domain);
+            key, privkey.first<32>(), pubkey.first<32>(), sender_pubkey.first<32>(), false, domain);
 
-    auto decrypted = std::make_optional<std::vector<unsigned char>>();
+    auto decrypted = std::make_optional<std::vector<std::byte>>();
 
     for (auto ciphertext = next_ciphertext(); ciphertext; ciphertext = next_ciphertext())
-        if (detail::decrypt_multi_impl(*decrypted, *ciphertext, key.data(), nonce.data()))
+        if (detail::decrypt_multi_impl(*decrypted, *ciphertext, key, nonce.first<24>()))
             return decrypted;
 
     decrypted.reset();
@@ -243,12 +242,12 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple(
 /// - `domain` -- the encryption domain; this is typically a hard-coded string, and must be the same
 ///   as the one used for encryption.
 ///
-std::optional<std::vector<unsigned char>> decrypt_for_multiple(
-        const std::vector<std::span<const unsigned char>>& ciphertexts,
-        std::span<const unsigned char> nonce,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
-        std::span<const unsigned char> sender_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple(
+        const std::vector<std::span<const std::byte>>& ciphertexts,
+        std::span<const std::byte> nonce,
+        std::span<const std::byte> privkey,
+        std::span<const std::byte> pubkey,
+        std::span<const std::byte> sender_pubkey,
         std::string_view domain);
 
 /// API: crypto/encrypt_for_multiple_simple
@@ -292,28 +291,28 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple(
 ///   entries will be somewhat identifiable.
 ///
 /// Outputs:
-/// std::vector<unsigned char> containing bytes that contains the nonce and encoded encrypted
-/// messages, suitable for decryption by the recipients with `decrypt_for_multiple_simple`.
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        const std::vector<std::span<const unsigned char>>& messages,
-        const std::vector<std::span<const unsigned char>>& recipients,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
+/// std::vector<std::byte> containing the nonce and encoded encrypted messages, suitable for
+/// decryption by the recipients with `decrypt_for_multiple_simple`.
+std::vector<std::byte> encrypt_for_multiple_simple(
+        const std::vector<std::span<const std::byte>>& messages,
+        const std::vector<std::span<const std::byte>>& recipients,
+        std::span<const std::byte, 32> privkey,
+        std::span<const std::byte, 32> pubkey,
         std::string_view domain,
-        std::optional<std::span<const unsigned char>> nonce = std::nullopt,
+        std::optional<std::span<const std::byte, 24>> nonce = std::nullopt,
         int pad = 0);
 
 /// API: crypto/encrypt_for_multiple_simple
 ///
 /// This function is the same as the above, except that instead of taking the sender private and
-/// public X25519 keys, it takes the single, 64-byte libsodium Ed25519 secret key (which is then
-/// converted into the required X25519 keys).
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        const std::vector<std::span<const unsigned char>>& messages,
-        const std::vector<std::span<const unsigned char>>& recipients,
-        std::span<const unsigned char> ed25519_secret_key,
+/// public X25519 keys, it takes the Ed25519 private key (32-byte seed or 64-byte libsodium key,
+/// which is then converted into the required X25519 keys).
+std::vector<std::byte> encrypt_for_multiple_simple(
+        const std::vector<std::span<const std::byte>>& messages,
+        const std::vector<std::span<const std::byte>>& recipients,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
         std::string_view domain,
-        std::span<const unsigned char> nonce = {},
+        std::optional<std::span<const std::byte, 24>> nonce = std::nullopt,
         int pad = 0);
 
 /// API: crypto/encrypt_for_multiple_simple
@@ -323,19 +322,14 @@ std::vector<unsigned char> encrypt_for_multiple_simple(
 /// the first are identical.
 ///
 template <typename... Args>
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        std::span<const unsigned char> message, Args&&... args) {
+std::vector<std::byte> encrypt_for_multiple_simple(
+        std::span<const std::byte> message, Args&&... args) {
     return encrypt_for_multiple_simple(
             to_view_vector(&message, &message + 1), std::forward<Args>(args)...);
 }
 template <typename... Args>
-std::vector<unsigned char> encrypt_for_multiple_simple(std::string_view message, Args&&... args) {
-    return encrypt_for_multiple_simple(to_span(message), std::forward<Args>(args)...);
-}
-template <typename... Args>
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        std::span<const std::byte> message, Args&&... args) {
-    return encrypt_for_multiple_simple(to_span(message), std::forward<Args>(args)...);
+std::vector<std::byte> encrypt_for_multiple_simple(std::string_view message, Args&&... args) {
+    return encrypt_for_multiple_simple(to_span<std::byte>(message), std::forward<Args>(args)...);
 }
 
 /// API: crypto/decrypt_for_multiple_simple
@@ -356,36 +350,36 @@ std::vector<unsigned char> encrypt_for_multiple_simple(
 ///   `encrypt_for_multiple_simple`.
 ///
 /// Outputs:
-/// If decryption succeeds, returns a std::vector<unsigned char> containing the decrypted message,
-/// in bytes.  If parsing or decryption fails, returns std::nullopt.
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
-        std::span<const unsigned char> sender_pubkey,
+/// If decryption succeeds, returns a std::vector<std::byte> containing the decrypted message.
+/// If parsing or decryption fails, returns std::nullopt.
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple(
+        std::span<const std::byte> encoded,
+        std::span<const std::byte, 32> privkey,
+        std::span<const std::byte, 32> pubkey,
+        std::span<const std::byte, 32> sender_pubkey,
         std::string_view domain);
 
 /// API: crypto/decrypt_for_multiple_simple
 ///
 /// This is the same as the above, except that instead of taking an X25519 private and public key
-/// arguments, it takes a single, 64-byte Ed25519 secret key and converts it to X25519 to perform
-/// the decryption.
+/// arguments, it takes the Ed25519 private key (32-byte seed or 64-byte libsodium key) and
+/// converts it to X25519 to perform the decryption.
 ///
 /// Note that `sender_pubkey` is still an X25519 pubkey for this version of the function.
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> ed25519_secret_key,
-        std::span<const unsigned char> sender_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple(
+        std::span<const std::byte> encoded,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
+        std::span<const std::byte, 32> sender_pubkey,
         std::string_view domain);
 
 /// API: crypto/decrypt_for_multiple_simple_ed25519
 ///
 /// This is the same as the above, except that it takes both the sender and recipient as Ed25519
 /// keys, converting them on the fly to attempt the decryption.
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple_ed25519(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> ed25519_secret_key,
-        std::span<const unsigned char> sender_ed25519_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple_ed25519(
+        std::span<const std::byte> encoded,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
+        std::span<const std::byte, 32> sender_ed25519_pubkey,
         std::string_view domain);
 
 }  // namespace session

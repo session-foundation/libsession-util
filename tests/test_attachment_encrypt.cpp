@@ -461,3 +461,84 @@ TEST_CASE(
         CHECK_FALSE(std::filesystem::exists(out.path));
     }
 }
+
+TEST_CASE("Streaming Encryptor", "[attachments][encryptor]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 100, 1000, 4053, 8150, 32768, 65536, 100000);
+
+    auto seed = "9123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    const auto data = make_data(DATA_SIZE);
+
+    SECTION("pull-based encryption with manual source") {
+        attachment::Encryptor enc{seed, attachment::Domain::ATTACHMENT};
+
+        // Phase 1: feed data in chunks to derive key
+        for (size_t pos = 0; pos < data.size();) {
+            size_t chunk = std::min<size_t>(1000, data.size() - pos);
+            enc.update_key(std::span{data}.subspan(pos, chunk));
+            pos += chunk;
+        }
+        if (data.empty())
+            enc.update_key({});
+
+        // Phase 2: start encryption with a pull source
+        size_t src_pos = 0;
+        auto key = enc.start_encryption([&](std::span<std::byte> buf) -> size_t {
+            size_t avail = std::min(buf.size(), data.size() - src_pos);
+            std::memcpy(buf.data(), data.data() + src_pos, avail);
+            src_pos += avail;
+            return avail;
+        });
+
+        // Collect all encrypted output
+        std::vector<std::byte> encrypted;
+        while (true) {
+            auto chunk = enc.next();
+            if (chunk.empty())
+                break;
+            encrypted.insert(encrypted.end(), chunk.begin(), chunk.end());
+        }
+
+        CHECK(encrypted.size() == attachment::encrypted_size(DATA_SIZE));
+
+        // Decrypt with the streaming Decryptor and verify round-trip
+        std::vector<std::byte> decrypted;
+        attachment::Decryptor dec{key, [&](std::span<const std::byte> d) {
+                                      decrypted.insert(decrypted.end(), d.begin(), d.end());
+                                  }};
+        REQUIRE(dec.update(encrypted));
+        REQUIRE(dec.finalize());
+        REQUIRE(decrypted.size() == data.size());
+        CHECK(!!(decrypted == data));
+    }
+
+    SECTION("from_file factory") {
+        if (DATA_SIZE == 0)
+            return;  // Can't write an empty file for this test
+
+        // Write test data to a temp file
+        temp_data_file tmp;
+        {
+            std::ofstream f{tmp.path, std::ios::binary};
+            f.write(reinterpret_cast<const char*>(data.data()), data.size());
+        }
+
+        auto [enc, key] = attachment::Encryptor::from_file(
+                seed, attachment::Domain::ATTACHMENT, tmp.path, true);
+
+        std::vector<std::byte> encrypted;
+        while (true) {
+            auto chunk = enc.next();
+            if (chunk.empty())
+                break;
+            encrypted.insert(encrypted.end(), chunk.begin(), chunk.end());
+        }
+
+        CHECK(encrypted.size() == attachment::encrypted_size(DATA_SIZE));
+
+        // Decrypt and verify
+        auto decrypted = attachment::decrypt(encrypted, key);
+        REQUIRE(decrypted.size() == data.size());
+        CHECK(!!(decrypted == data));
+    }
+}

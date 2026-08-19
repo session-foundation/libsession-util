@@ -8,6 +8,7 @@
 
 #include "oxen/log/level.hpp"
 #include "session/export.h"
+#include "session/logging.h"
 
 namespace session {
 

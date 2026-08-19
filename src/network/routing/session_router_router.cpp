@@ -22,6 +22,8 @@ using namespace oxen::log::literals;
 
 namespace session::network {
 
+static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address);
+
 namespace {
     auto cat = oxen::log::Cat("session-router");
 
@@ -49,31 +51,29 @@ namespace {
         return *key;
     }
 
-    std::pair<std::span<const unsigned char>, uint16_t> remote_info_for_destination(
+    std::pair<std::span<const std::byte, 32>, uint16_t> remote_info_for_destination(
             const network_destination& dest, const std::string& request_id) {
-        std::optional<std::pair<std::span<const unsigned char>, uint16_t>> result;
+        std::optional<std::pair<std::span<const std::byte, 32>, uint16_t>> result;
 
         std::visit(
                 [&result, &request_id]<typename T>(const T& arg) {
                     if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
                         log::trace(
                                 cat, "[Request {}]: Using pre-resolved RemoteAddress.", request_id);
-                        result.emplace(arg.view_remote_key(), arg.port());
+                        result.emplace(
+                                as_span(arg.view_remote_key()).template first<32>(), arg.port());
                     } else if constexpr (std::is_same_v<T, service_node>) {
                         log::trace(
                                 cat,
                                 "[Request {}]: Resolving service_node to RemoteAddress.",
                                 request_id);
-                        result.emplace(arg.remote_pubkey, arg.omq_port);
+                        result.emplace(arg.view_remote_key(), arg.omq_port);
                     }
                 },
                 dest);
 
         if (!result)
             throw std::runtime_error{"Invalid destination"};
-
-        if (result->first.size() != 32)
-            throw std::runtime_error{"Invalid remote key"};
 
         return *result;
     }
@@ -111,9 +111,6 @@ void SessionRouter::_init() {
     data-dir={}
     [bind]
     listen=:0
-    [logging]
-    type=none
-    level=*=debug,quic=info
     )"_format(opt::netid::to_string(_config.netid), _config.cache_directory);
 
     try {
@@ -225,6 +222,94 @@ void SessionRouter::upload(UploadRequest request) {
     });
 }
 
+void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    auto quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
+    if (!quic_target) {
+        // TODO: legacy file upload fallback
+        if (request.on_complete)
+            request.on_complete(ERROR_FILE_SERVER_UNAVAILABLE, false);
+        return;
+    }
+
+    // Construct the Encryptor now (on the caller's thread), consuming the seed.
+    auto enc = std::make_shared<attachment::Encryptor>(seed, request.domain);
+    auto target = std::move(*quic_target);
+
+    // Dispatch to the loop thread so we wait for _ready before spawning the upload thread.
+    _loop->call([weak_self = weak_from_this(),
+                 this,
+                 enc = std::move(enc),
+                 request = std::move(request),
+                 target = std::move(target)]() mutable {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        if (!_ready) {
+            log::debug(cat, "Router not ready, queueing upload_file.");
+            _pending_operations.emplace_back([weak_self,
+                                              this,
+                                              enc = std::move(enc),
+                                              request = std::move(request),
+                                              target = std::move(target)]() mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+                _start_file_upload(std::move(enc), std::move(request), std::move(target));
+            });
+            return;
+        }
+
+        _start_file_upload(std::move(enc), std::move(request), std::move(target));
+    });
+}
+
+void SessionRouter::_start_file_upload(
+        std::shared_ptr<attachment::Encryptor> enc,
+        FileUploadRequest request,
+        file_server::SRouterTarget target) {
+    const std::string upload_id = random::unique_id("UPL");
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 enc = std::move(enc),
+                                 request = std::move(request),
+                                 target = std::move(target),
+                                 upload_id]() mutable {
+        // The get_client callback runs on the loop thread: it establishes the tunnel
+        // and returns the QuicFileClient.  This blocks (via promise/future) until the
+        // tunnel is established.
+        auto client_promise = std::make_shared<std::promise<QuicFileClient*>>();
+        auto client_future = client_promise->get_future();
+
+        streaming_file_upload(
+                _loop,
+                std::move(*enc),
+                std::move(request),
+                [weak_self, this, target, client_promise]() -> QuicFileClient* {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return nullptr;
+
+                    // Establish tunnel synchronously (we're on the loop thread here)
+                    auto info = srouter->establish_udp(target.address, target.port);
+                    auto pubkey = pubkey_from_srouter_address(info.remote);
+                    if (!pubkey)
+                        return nullptr;
+
+                    return &_get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu);
+                });
+
+        _loop->call([weak_self = weak_from_this(), this, upload_id] {
+            if (auto self = weak_self.lock())
+                _cleanup_upload(upload_id);
+        });
+    });
+}
+
 void SessionRouter::download(DownloadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
@@ -240,14 +325,16 @@ void SessionRouter::_finish_setup() {
     log::debug(cat, "Finishing setup, router is now ready.");
 
     auto requests_to_process = std::move(_pending_requests);
-    if (requests_to_process.empty())
+    auto ops_to_process = std::move(_pending_operations);
+
+    size_t pending_count = ops_to_process.size();
+    for (auto& [_, reqs] : requests_to_process)
+        pending_count += reqs.size();
+
+    if (pending_count == 0)
         return;
 
-    // Process any requests that were queued before we were ready
-    log::debug(
-            cat,
-            "Processing {} requests queued during initialization.",
-            requests_to_process.size());
+    log::debug(cat, "Processing {} operations queued during initialization.", pending_count);
 
     for (auto& [address, requests] : requests_to_process) {
         if (!requests.empty()) {
@@ -258,6 +345,9 @@ void SessionRouter::_finish_setup() {
                 _send_request_internal(std::move(req), std::move(cb));
         }
     }
+
+    for (auto& op : ops_to_process)
+        op();
 }
 
 void SessionRouter::_close_connections() {
@@ -490,7 +580,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     }
 
     service_node proxy_node = proxy_nodes[0];
-    std::vector<unsigned char> encrypted_blob;
+    std::vector<std::byte> encrypted_blob;
     std::shared_ptr<onionreq::ResponseParser> parser;
     log::debug(
             cat, "[Request {}]: Selected {} as proxy.", request.request_id, proxy_node.to_string());
@@ -554,22 +644,253 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
+// Extracts the Ed25519 pubkey from a resolved session-router address like "b32zpubkey.sesh"
+// or "b32zpubkey.snode".  Returns nullopt if the address is not a valid pubkey-based address.
+static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address) {
+    auto dot = address.find('.');
+    if (dot == std::string_view::npos || dot == 0)
+        return std::nullopt;
+
+    auto b32z = address.substr(0, dot);
+    if (!oxenc::is_base32z(b32z) || oxenc::from_base32z_size(b32z.size()) != 32)
+        return std::nullopt;
+
+    std::optional<ed25519_pubkey> result{std::in_place};
+    oxenc::from_base32z(b32z.begin(), b32z.end(), result->begin());
+    return result;
+}
+
+void SessionRouter::_cleanup_upload(const std::string& upload_id) {
+    auto node = _active_uploads.extract(upload_id);
+    if (!node.empty()) {
+        auto& thread = node.mapped().second;
+        if (thread.joinable())
+            thread.join();
+    }
+}
+
+QuicFileClient& SessionRouter::_get_file_client(
+        const ed25519_pubkey& pubkey,
+        std::string_view address,
+        uint16_t port,
+        std::optional<size_t> max_udp_payload) {
+    auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
+    if (inserted)
+        it->second = std::make_unique<QuicFileClient>(
+                _loop, pubkey, std::string{address}, port, max_udp_payload);
+    else
+        it->second->set_target(pubkey, std::string{address}, port);
+    return *it->second;
+}
+
+void SessionRouter::_quic_upload_via_tunnel(
+        UploadRequest upload_request,
+        std::string upload_id,
+        std::vector<std::byte> data,
+        router::tunnel_info info) {
+    auto pubkey = pubkey_from_srouter_address(info.remote);
+    if (!pubkey) {
+        log::error(
+                cat,
+                "[Upload {}]: Could not extract pubkey from resolved address {}",
+                upload_id,
+                info.remote);
+        upload_request.on_complete(ERROR_UNKNOWN, false);
+        _cleanup_upload(upload_id);
+        return;
+    }
+
+    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
+            .upload(std::move(data),
+                    upload_request.ttl,
+                    [weak_self = weak_from_this(), this, upload_request, upload_id](
+                            std::variant<file_metadata, int16_t> result) {
+                        auto self = weak_self.lock();
+                        if (!self)
+                            return;
+
+                        if (auto* meta = std::get_if<file_metadata>(&result))
+                            log::info(
+                                    cat, "[Upload {}]: Success, file ID: {}", upload_id, meta->id);
+                        else
+                            log::error(
+                                    cat,
+                                    "[Upload {}]: Failed with error {}",
+                                    upload_id,
+                                    std::get<int16_t>(result));
+
+                        upload_request.on_complete(std::move(result), false);
+                        _cleanup_upload(upload_id);
+                    });
+}
+
+void SessionRouter::_quic_download_via_tunnel(
+        DownloadRequest request,
+        std::string download_id,
+        std::string file_id,
+        router::tunnel_info info) {
+    auto pubkey = pubkey_from_srouter_address(info.remote);
+    if (!pubkey) {
+        log::error(
+                cat,
+                "[Download {}]: Could not extract pubkey from resolved address {}",
+                download_id,
+                info.remote);
+        _active_downloads.erase(download_id);
+        request.on_complete(ERROR_UNKNOWN, false);
+        return;
+    }
+
+    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
+            .download(
+                    std::move(file_id),
+                    request.on_data,
+                    [weak_self = weak_from_this(), this, request, download_id](
+                            std::variant<file_metadata, int16_t> result) {
+                        auto self = weak_self.lock();
+                        if (!self)
+                            return;
+
+                        _active_downloads.erase(download_id);
+
+                        if (auto* meta = std::get_if<file_metadata>(&result))
+                            log::info(
+                                    cat,
+                                    "[Download {}]: Success, file ID: {} ({} bytes)",
+                                    download_id,
+                                    meta->id,
+                                    meta->size);
+                        else
+                            log::error(
+                                    cat,
+                                    "[Download {}]: Failed with error {}",
+                                    download_id,
+                                    std::get<int16_t>(result));
+
+                        request.on_complete(std::move(result), false);
+                    });
+}
+
 void SessionRouter::_upload_internal(UploadRequest request) {
-    // TODO: Update this to use streaming approach
+    if (!_ready) {
+        log::debug(cat, "Router not ready, queueing upload.");
+        _pending_operations.emplace_back(
+                [weak_self = weak_from_this(), req = std::move(request)]() mutable {
+                    if (auto self = weak_self.lock())
+                        self->_upload_internal(std::move(req));
+                });
+        return;
+    }
+
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
-    auto& [_, upload_thread] =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second;
 
-    // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
-    // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
-    // disk should be prioritised)
+    auto quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
+    if (!quic_target) {
+        _upload_internal_legacy(std::move(request), std::move(upload_id));
+        return;
+    }
+
+    // QUIC upload: accumulate data on background thread, then tunnel and upload
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 upload_request = request,
+                                 upload_id,
+                                 target = std::move(*quic_target)] {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        try {
+            std::vector<std::byte> all_data;
+            while (true) {
+                if (upload_request.is_cancelled())
+                    throw cancellation_exception{"Cancelled during data accumulation."};
+                auto chunk = upload_request.next_data();
+                if (chunk.empty())
+                    break;
+                auto* p = reinterpret_cast<const std::byte*>(chunk.data());
+                all_data.insert(all_data.end(), p, p + chunk.size());
+            }
+
+            if (all_data.empty())
+                throw std::runtime_error{"No data to upload"};
+
+            log::debug(
+                    cat,
+                    "[Upload {}]: Accumulated {} bytes, establishing tunnel to {}.",
+                    upload_id,
+                    all_data.size(),
+                    target.address);
+
+            _loop->call([weak_self,
+                         this,
+                         upload_request,
+                         upload_id,
+                         target,
+                         data = std::move(all_data)]() mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (upload_request.is_cancelled()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                    return;
+                }
+
+                srouter->establish_udp(
+                        target.address,
+                        target.port,
+                        [weak_self, this, upload_request, upload_id, data = std::move(data)](
+                                router::tunnel_info info) mutable {
+                            if (auto self = weak_self.lock())
+                                _quic_upload_via_tunnel(
+                                        upload_request,
+                                        upload_id,
+                                        std::move(data),
+                                        std::move(info));
+                        },
+                        [weak_self, this, upload_request, upload_id]() {
+                            if (auto self = weak_self.lock()) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Tunnel establishment timed out.",
+                                        upload_id);
+                                upload_request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                                _cleanup_upload(upload_id);
+                            }
+                        });
+            });
+        } catch (const cancellation_exception&) {
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        } catch (const std::exception& e) {
+            log::error(cat, "[Upload {}]: Exception: {}", upload_id, e.what());
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_UNKNOWN, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        }
+    });
+}
+
+// Legacy HTTP-based upload path, used when no QUIC file server target is available.
+void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string upload_id) {
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
+
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
                                  upload_request = request,
@@ -579,8 +900,6 @@ void SessionRouter::_upload_internal(UploadRequest request) {
         if (!self)
             return;
 
-        // Onion requests don't support streaming data so we need to load all the data from the
-        // streaming source into memory
         try {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
@@ -593,11 +912,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-
-                    auto active_upload_node = _active_uploads.extract(upload_id);
-                    if (!active_upload_node.empty() &&
-                        active_upload_node.mapped().second.joinable())
-                        active_upload_node.mapped().second.join();
+                    _cleanup_upload(upload_id);
                     return;
                 }
 
@@ -620,11 +935,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            // Join the thread to keep it alive during callback handling
-                            auto active_upload_node = _active_uploads.extract(upload_id);
-                            if (!active_upload_node.empty() &&
-                                active_upload_node.mapped().second.joinable())
-                                active_upload_node.mapped().second.join();
+                            _cleanup_upload(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -680,12 +991,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
-
-                // Join the thread to keep it alive during callback handling
-                auto active_upload_node = _active_uploads.extract(upload_id);
-                if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
-                    active_upload_node.mapped().second.join();
-
+                _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });
         }
@@ -693,13 +999,58 @@ void SessionRouter::_upload_internal(UploadRequest request) {
 }
 
 void SessionRouter::_download_internal(DownloadRequest request) {
+    if (!_ready) {
+        log::debug(cat, "Router not ready, queueing download.");
+        _pending_operations.emplace_back(
+                [weak_self = weak_from_this(), req = std::move(request)]() mutable {
+                    if (auto self = weak_self.lock())
+                        self->_download_internal(std::move(req));
+                });
+        return;
+    }
+
     const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
+
+    // Check for a QUIC target: first from the URL's sr= fragment, then from default mapping
+    std::optional<file_server::SRouterTarget> quic_target;
+    auto download_info = file_server::parse_download_url(request.download_url);
+    if (download_info && download_info->srouter_target)
+        quic_target = std::move(download_info->srouter_target);
+    else
+        quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
+
+    if (!quic_target || !download_info) {
+        _download_internal_legacy(std::move(request), std::move(download_id));
+        return;
+    }
+
+    // QUIC download path
+    _active_downloads[download_id] = request;
+    auto file_id = download_info->file_id;
+
+    srouter->establish_udp(
+            quic_target->address,
+            quic_target->port,
+            [weak_self = weak_from_this(), this, request, download_id, file_id](
+                    router::tunnel_info info) mutable {
+                if (auto self = weak_self.lock())
+                    _quic_download_via_tunnel(
+                            request, download_id, std::move(file_id), std::move(info));
+            },
+            [weak_self = weak_from_this(), this, request, download_id]() {
+                if (auto self = weak_self.lock()) {
+                    log::error(cat, "[Download {}]: Tunnel establishment timed out.", download_id);
+                    _active_downloads.erase(download_id);
+                    request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                }
+            });
+}
+
+// Legacy HTTP-based download path, used when no QUIC file server target is available.
+void SessionRouter::_download_internal_legacy(DownloadRequest request, std::string download_id) {
     _active_downloads[download_id] = request;
 
     try {
@@ -745,7 +1096,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
                                 metadata.id);
 
                         if (request.on_data)
-                            request.on_data(metadata, std::move(data));
+                            request.on_data(metadata, to_span<const std::byte>(data));
 
                         request.on_complete(std::move(metadata), false);
                     } catch (const cancellation_exception&) {
@@ -779,7 +1130,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
 }
 
 void SessionRouter::_establish_tunnel(
-        std::span<const unsigned char>& remote_pubkey,
+        std::span<const std::byte, 32> remote_pubkey,
         const uint16_t remote_port,
         const std::string& initiating_req_id) {
     auto address_pubkey_hex = oxenc::to_hex(remote_pubkey);
@@ -819,9 +1170,9 @@ void SessionRouter::_establish_tunnel(
     // }
 
     std::string srouter_address;
-    srouter_address.reserve(oxenc::to_base32z_size(32UL) + ".snode"sv.size());
+    srouter_address.reserve(oxenc::to_base32z_size(remote_pubkey.size()) + ".snode"sv.size());
     oxenc::to_base32z(
-            remote_pubkey.begin(), remote_pubkey.begin() + 32, std::back_inserter(srouter_address));
+            remote_pubkey.begin(), remote_pubkey.end(), std::back_inserter(srouter_address));
     srouter_address += ".snode"sv;
 
     // srouter::RouterID router_id{remote_pubkey.first<32>()};
@@ -936,7 +1287,8 @@ void SessionRouter::_send_via_tunnel(
     // auto test_key =
     // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
     // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
-    auto router_target = oxen::quic::RemoteAddress{test_key, "::1", tunnel.local_port};
+    auto router_target =
+            oxen::quic::RemoteAddress{as_span<unsigned char>(test_key), "::1", tunnel.local_port};
 
     // Construct the actual request to send
     std::optional<std::chrono::milliseconds> remaining_overall_timeout =

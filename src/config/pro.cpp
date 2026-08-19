@@ -4,9 +4,10 @@
 #include <session/pro_backend.h>
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <session/clock.hpp>
 #include <session/config/pro.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/sodium_array.hpp>
-#include <session/util.hpp>
 
 namespace session::config {
 
@@ -20,9 +21,9 @@ bool ProConfig::load(std::string_view bt_encoded) {
         // next proof fetch.
         oxenc::bt_dict_consumer d{bt_encoded};
         auto expiry = d.require<int64_t>("e");
-        auto tag = d.require_span<unsigned char, sizeof(proof.revocation_tag)>("g");
-        auto seed = d.require_span<unsigned char, crypto_sign_ed25519_SEEDBYTES>("r");
-        auto sig = d.require_span<unsigned char, sizeof(proof.sig)>("s");
+        auto tag = d.require_span<std::byte, sizeof(proof.revocation_tag)>("g");
+        auto seed = d.require_span<std::byte, crypto_sign_ed25519_SEEDBYTES>("r");
+        auto sig = d.require_span<std::byte, sizeof(proof.sig)>("s");
 
         // The config proof format is v0 by definition (a future format takes a new key, not an
         // in-dict version marker -- an opaque value can't carry a version that describes itself
@@ -33,8 +34,7 @@ bool ProConfig::load(std::string_view bt_encoded) {
         std::memcpy(proof.sig.data(), sig.data(), proof.sig.size());
 
         // Derive the rotating public key + full private key from the stored seed.
-        crypto_sign_ed25519_seed_keypair(
-                proof.rotating_pubkey.data(), rotating_privkey.data(), seed.data());
+        ed25519::seed_keypair(proof.rotating_pubkey, rotating_privkey, seed);
         return true;
     } catch (const std::exception&) {
         return false;
