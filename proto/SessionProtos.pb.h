@@ -6455,7 +6455,6 @@ class ProProof final :
     kRotatingPublicKeyFieldNumber = 3,
     kSigFieldNumber = 5,
     kExpiryUnixTsFieldNumber = 4,
-    kVersionFieldNumber = 1,
   };
   // optional bytes revocationTag = 2;
   bool has_revocationtag() const;
@@ -6524,19 +6523,6 @@ class ProProof final :
   void _internal_set_expiryunixts(uint64_t value);
   public:
 
-  // optional uint32 version = 1;
-  bool has_version() const;
-  private:
-  bool _internal_has_version() const;
-  public:
-  void clear_version();
-  uint32_t version() const;
-  void set_version(uint32_t value);
-  private:
-  uint32_t _internal_version() const;
-  void _internal_set_version(uint32_t value);
-  public:
-
   // @@protoc_insertion_point(class_scope:SessionProtos.ProProof)
  private:
   class _Internal;
@@ -6551,7 +6537,6 @@ class ProProof final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr rotatingpublickey_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr sig_;
     uint64_t expiryunixts_;
-    uint32_t version_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -13536,34 +13521,6 @@ inline void GroupUpdateDeleteMemberContentMessage::set_allocated_adminsignature(
 // -------------------------------------------------------------------
 
 // ProProof
-
-// optional uint32 version = 1;
-inline bool ProProof::_internal_has_version() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
-  return value;
-}
-inline bool ProProof::has_version() const {
-  return _internal_has_version();
-}
-inline void ProProof::clear_version() {
-  _impl_.version_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000010u;
-}
-inline uint32_t ProProof::_internal_version() const {
-  return _impl_.version_;
-}
-inline uint32_t ProProof::version() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.version)
-  return _internal_version();
-}
-inline void ProProof::_internal_set_version(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000010u;
-  _impl_.version_ = value;
-}
-inline void ProProof::set_version(uint32_t value) {
-  _internal_set_version(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.version)
-}
 
 // optional bytes revocationTag = 2;
 inline bool ProProof::_internal_has_revocationtag() const {

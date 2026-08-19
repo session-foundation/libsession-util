@@ -59,9 +59,9 @@ std::vector<unsigned char> proof_signed_message(
         std::span<const std::uint8_t> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). The
-    // proof version is NOT part of the message; it selects the 16-byte domain prefix (v0 ->
-    // "ProProof_v0_____"), and that choice of prefix is what binds the version into the signature.
+    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). No
+    // version is part of the message: the 16-byte domain prefix (BUILD_PROOF_DOMAIN) is itself what
+    // binds this proof to its format, since it is covered by the signature.
     return session::pro::signed_message(
             session::BUILD_PROOF_DOMAIN, revocation_tag, rotating_pubkey, expiry_ts);
 }
@@ -846,27 +846,22 @@ DecodedEnvelope decode_envelope(
 
             // Extract the pro message
             const SessionProtos::ProMessage& pro_msg = content.promessage();
-            if (!pro_msg.has_proof())
-                throw std::runtime_error(
-                        "Parse decrypted message failed, pro config missing proof");
-
-            // Parse the proof from protobufs
-            const SessionProtos::ProProof& proto_proof = pro_msg.proof();
             session::ProProof& proof = pro.proof;
             pro.msg_bitset.data = pro_msg.msgbitset();
             pro.profile_bitset.data = pro_msg.profilebitset();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
-            // The wire `version` selects which proof layout this is; we only understand v0. Any
-            // other (or a missing) version is a proof we can't verify -- degrade to a non-pro
-            // message flagged UnsupportedVersion rather than dropping it, so a future proof format
-            // does not shut older clients out of the whole message.
-            if (!proto_proof.has_version() ||
-                static_cast<session::ProProofVersion>(proto_proof.version()) !=
-                        session::ProProofVersion::v0) {
-                pro.status = ProStatus::UnsupportedVersion;
+            // No proof to read: either the sender attached none, or it is in a format we don't
+            // know -- a new proof format is a new field/message rather than a version bump on this
+            // one, so to this client it simply isn't here. Nothing to evaluate, so the proof is
+            // flagged Invalid and the message is delivered as non-pro rather than dropped: a future
+            // proof format costs the sender their Pro affordances here, not the whole message.
+            if (!pro_msg.has_proof()) {
+                pro.status = ProStatus::Invalid;
             } else {
-                // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
+                // Parse the proof from protobufs
+                const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+                // A proof that is present but the wrong shape is corruption, not forward-compat: hard error.
                 size_t proof_errors = 0;
                 proof_errors +=
                         !proto_proof.has_revocationtag() ||
@@ -1019,25 +1014,21 @@ DecodedCommunityMessage decode_for_community(
         // Extract the pro message
         DecodedPro& pro = result.pro.emplace();
         const SessionProtos::ProMessage& pro_msg = content.promessage();
-        if (!pro_msg.has_proof())
-            throw std::runtime_error("Decoding community message failed, pro config missing proof");
-
-        // Parse the proof from protobufs
-        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
         session::ProProof& proof = pro.proof;
         pro.msg_bitset.data = pro_msg.msgbitset();
         pro.profile_bitset.data = pro_msg.profilebitset();
 
-        // The wire `version` selects which proof layout this is; we only understand v0. Any other
-        // (or a missing) version is a proof we can't verify -- degrade to a non-pro message flagged
-        // UnsupportedVersion rather than dropping it, so a future proof format does not shut older
-        // clients out of the whole message.
-        if (!proto_proof.has_version() ||
-            static_cast<session::ProProofVersion>(proto_proof.version()) !=
-                    session::ProProofVersion::v0) {
-            pro.status = ProStatus::UnsupportedVersion;
+        // No proof to read: either the sender attached none, or it is in a format we don't know --
+        // a new proof format is a new field/message rather than a version bump on this one, so to
+        // this client it simply isn't here. Nothing to evaluate, so the proof is flagged Invalid
+        // and the message is delivered as non-pro rather than dropped: a future proof format costs
+        // the sender their Pro affordances here, not the whole message.
+        if (!pro_msg.has_proof()) {
+            pro.status = ProStatus::Invalid;
         } else {
-            // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
+            // Parse the proof from protobufs
+            const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+            // A proof that is present but the wrong shape is corruption, not forward-compat: hard error.
             size_t proof_errors = 0;
             proof_errors += !proto_proof.has_revocationtag() ||
                             proto_proof.revocationtag().size() != proof.revocation_tag.max_size();

@@ -72,6 +72,11 @@ inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
 // Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
 // endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
 // bytes (formerly the BLAKE2b personalisation, back when messages were pre-hashed).
+//
+// BUILD_PROOF_DOMAIN is also what pins a proof to its format: the `_v0` in it is part of the signed
+// bytes, so a proof of some future format signed under its own domain simply fails verification
+// here. That is why a proof carries no version field of its own -- and why this literal is a wire
+// constant that must not be "tidied up" along with any C++ renaming.
 inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
 inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
 inline constexpr std::string_view GET_PRO_STATUS_DOMAIN = "ProGetProStatus_";
@@ -80,11 +85,6 @@ static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
 static_assert(BUILD_PROOF_DOMAIN.size() == 16);
 static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
 static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
-
-/// The Session Pro proof wire-format version. This is a *selector*: it says which ProProof_vN
-/// layout a serialized proof uses; it is deliberately NOT stored as a member of the proof struct
-/// (see ProProof_v0 / the ProProof alias below). Only v0 exists today.
-enum class ProProofVersion : std::uint8_t { v0 = 0 };
 
 /// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
 /// for all timestamps within one such period and a fresh one at each boundary.
@@ -119,12 +119,18 @@ enum class ProStatus {
     InvalidUserSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     Valid = SESSION_PROTOCOL_PRO_STATUS_VALID,      // Proof is verified; has not expired
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
-    // Proof's wire version is not one we understand, so it can't be verified; the message is
-    // delivered as non-pro rather than dropped (see ProProofVersion).
-    UnsupportedVersion = SESSION_PROTOCOL_PRO_STATUS_UNSUPPORTED_VERSION,
+    // Nothing could be evaluated, so whatever is in DecodedPro::proof is not to be trusted. Today
+    // this means the message carried no proof we can read: either the sender attached none, or it
+    // is in a format this client does not know -- a new proof format is a new field/message rather
+    // than a version bump on the existing one, so to an older client it simply does not appear as
+    // `proof`. Deliberately the general "unusable proof" answer rather than a reason-specific one,
+    // so a future unreadable-proof case needs no new status and no caller has to learn one. Such a
+    // message is delivered as non-pro rather than dropped, so a future proof format costs the
+    // sender their Pro affordances on old clients instead of costing them the whole message.
+    Invalid = SESSION_PROTOCOL_PRO_STATUS_INVALID,
 };
 
-class ProProof_v0 {
+class ProProof {
   public:
     /// Opaque revocation tag identifying this proof (from the Session Pro backend)
     array_uc32 revocation_tag;
@@ -246,20 +252,11 @@ class ProProof_v0 {
     static cleared_uc32 rotating_seed(
             std::span<const unsigned char> master_seed, std::chrono::sys_seconds now);
 
-    bool operator==(const ProProof_v0& other) const {
+    bool operator==(const ProProof& other) const {
         return revocation_tag == other.revocation_tag && rotating_pubkey == other.rotating_pubkey &&
                expiry_at == other.expiry_at && sig == other.sig;
     }
 };
-
-/// The Session Pro proof layout this codebase currently speaks. The wire `version`
-/// (ProProofVersion) selects *which* ProProof_vN a serialized proof is, rather than being a field
-/// of the proof: today only v0 exists, so this alias points at it. A future format adds its own
-/// struct -- `struct ProProof_v1 : ProProof_v0 { ... }` to extend, or a fresh `struct ProProof_v2 {
-/// ... }` to replace
-/// -- at which point this alias becomes a std::variant (or a virtual base) over the supported
-/// versions, chosen from the wire version at parse time.
-using ProProof = ProProof_v0;
 
 enum class ProFeaturesForMsgStatus {
     Success = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,

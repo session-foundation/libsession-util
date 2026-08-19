@@ -40,7 +40,8 @@ std::pair<bool, std::string_view> json_is(const nlohmann::json& v) {
     else if constexpr (std::is_enum_v<T>)
         // A (scoped) enum reads as its underlying integer -- nlohmann's default serializer converts
         // through the underlying type (json_extract's get_to) -- so callers can request the enum
-        // directly, e.g. json_require<ProProofVersion>(obj, "version").
+        // directly rather than reading an integer and casting. No caller does today: this arrived
+        // for the proof `version` read, which no longer exists.
         return {v.is_number_integer(), "an integer"};
     else if constexpr (is_one_of<T, std::string, std::string_view>)
         return {v.is_string(), "a string"};
