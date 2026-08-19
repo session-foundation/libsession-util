@@ -343,6 +343,41 @@ TEST_CASE("Configs: a conflicting merge at our own seqno is reported", "[core][c
     CHECK(w.reported[0] == std::vector{config::Namespace::Contacts});
 }
 
+TEST_CASE("Configs: merging a change identical to our own", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    auto contact = "05" + std::string(64, 'a');
+    c->configs.contacts().set(c->configs.contacts().get_or_construct(contact));
+    auto our_seqno = c->configs.contacts().seqno();
+
+    // Another device made the very same change from the same starting point.
+    auto pushed = contacts_from_another_device(c, contact);
+    auto incoming = as_swarm_messages(pushed);
+    c->receive_messages(incoming, config::Namespace::Contacts, true);
+
+    // Nothing is lost: we already held exactly what arrived.
+    CHECK(c->configs.contacts().size() == 1);
+    CHECK(c->configs.contacts().get(contact).has_value());
+
+    // And nothing is owed: agreeing with another device settles clean against that device's
+    // message rather than leaving us dirty, so it costs no push carrying no changes.
+    CHECK_FALSE(c->configs.contacts().needs_push());
+
+    // The seqno is deliberately not asserted.  It currently advances even though the data did not,
+    // because merging while dirty builds a MutableConfigMessage and that constructor increments
+    // unconditionally (see its comment in config.hpp) -- and the unwind for that spurious increment
+    // in _merge only applies when the winning config is our own, which here it is not.  Pinning
+    // that down would be encoding an accident.
+
+    // Deliberately not asserted: whether this reported to the application.  It currently does,
+    // because the seqno moved even though the data did not, so the reconciling layer does a walk
+    // that finds nothing to do.  That is the safe direction to be wrong in and is idempotent by
+    // design -- and if the merge ever learns to recognise an identical config and leave the seqno
+    // alone, this would stop reporting with no change needed here.  What must never happen is the
+    // reverse, and the case above covers that.
+}
+
 TEST_CASE("Configs: a local change is not reported back", "[core][configs][notify]") {
     ChangeWatcher w;
     TempCore c{w.callbacks()};
