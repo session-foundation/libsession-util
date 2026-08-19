@@ -55,9 +55,9 @@ std::vector<std::byte> proof_signed_message(
         std::span<const std::byte> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). The
-    // proof version is NOT part of the message; it selects the 16-byte domain prefix (v0 ->
-    // "ProProof_v0_____"), and that choice of prefix is what binds the version into the signature.
+    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). No
+    // version is part of the message: the 16-byte domain prefix (BUILD_PROOF_DOMAIN) is itself what
+    // binds this proof to its format, since it is covered by the signature.
     return session::pro::signed_message(
             session::BUILD_PROOF_DOMAIN, revocation_tag, rotating_pubkey, expiry_ts);
 }
@@ -444,29 +444,27 @@ static void parse_envelope_fields(
 }
 
 // Parses the proof and feature flags embedded in a protobuf ProMessage into a DecodedPro. A proof
-// whose wire `version` we don't recognize is NOT fatal: it degrades to a non-pro message flagged
-// ProStatus::UnsupportedVersion (the caller then skips signature evaluation), so a future proof
-// format cannot make an older client silently drop the whole message. Throws only when the proof is
-// absent, or when a v0 proof is structurally malformed (i.e. corruption, not forward-compat). The
-// caller evaluates `.status` for a proof that parsed.
+// we can't read is NOT fatal: it degrades to a non-pro message flagged ProStatus::Invalid (the
+// caller then skips signature evaluation), so a future proof format -- which arrives as its own
+// field/message, not a version bump on this one -- cannot make an older client silently drop the
+// whole message. Throws only when a proof that IS present is structurally malformed (corruption,
+// not forward-compat). The caller evaluates `.status` for a proof that parsed.
 static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
     DecodedPro pro = {};
-    if (!pro_msg.has_proof())
-        throw std::runtime_error{"Parse failed, pro config missing proof"};
-
-    const SessionProtos::ProProof& proto_proof = pro_msg.proof();
     pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
     pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
 
-    // The wire `version` selects which proof layout this is; we only understand v0. Any other (or a
-    // missing) version is a proof we can't verify -- degrade to non-pro rather than throw.
-    if (!proto_proof.has_version() ||
-        static_cast<ProProofVersion>(proto_proof.version()) != ProProofVersion::v0) {
-        pro.status = ProStatus::UnsupportedVersion;
+    // No proof to read: either the sender attached none, or it is in a format we don't know -- a
+    // new proof format is a new field/message rather than a version bump on this one, so to this
+    // client it simply isn't here. Nothing to evaluate, so flag Invalid and let the caller deliver
+    // a non-pro message rather than dropping it.
+    if (!pro_msg.has_proof()) {
+        pro.status = ProStatus::Invalid;
         return pro;
     }
 
-    // A v0 proof with the wrong shape is corruption, not forward-compat: hard error.
+    // A proof that is present but the wrong shape is corruption, not forward-compat: hard error.
+    const SessionProtos::ProProof& proto_proof = pro_msg.proof();
     ProProof& proof = pro.proof;
     bool valid = proto_proof.has_revocationtag() &&
                  proto_proof.revocationtag().size() == proof.revocation_tag.max_size() &&
@@ -538,9 +536,9 @@ static void parse_content_and_pro(
             result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
             DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
-            // A proof we couldn't parse (unknown version) is already flagged
-            // ProStatus::UnsupportedVersion, with no v0 proof to check -- leave it as non-pro.
-            if (pro.status != ProStatus::UnsupportedVersion) {
+            // A proof we couldn't read is already flagged ProStatus::Invalid, with no proof to
+            // check -- leave it as non-pro.
+            if (pro.status != ProStatus::Invalid) {
                 // Evaluate the pro status given the extracted components (was it signed, is it
                 // expired, was the message signed validly?)
                 // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
@@ -738,9 +736,9 @@ DecodedCommunityMessage decode_for_community(
     if (result.pro_sig && content.has_promessage()) {
         DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
-        // A proof we couldn't parse (unknown version) is already flagged
-        // ProStatus::UnsupportedVersion, with no v0 proof to check -- leave it as non-pro.
-        if (pro.status != ProStatus::UnsupportedVersion) {
+        // A proof we couldn't read is already flagged ProStatus::Invalid, with no proof to
+        // check -- leave it as non-pro.
+        if (pro.status != ProStatus::Invalid) {
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
             // was the message signed validly?)
             //

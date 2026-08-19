@@ -182,10 +182,9 @@ namespace {
     // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
     // proof) from the already-extracted `result` object.
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
-        // No wire `version` to read: this endpoint returns a ProProof_v0 by construction -- the
-        // format is fixed by the endpoint we asked, and the proof's version is bound into its
-        // signature via the personalisation, not carried as a field. A future format is a new
-        // endpoint returning a new ProProof_vN, not a version bump on this response.
+        // No `version` to read: the format is fixed by the endpoint we asked, and is bound into the
+        // proof's signature by its domain prefix rather than carried as a field. A future format is
+        // a new endpoint returning its own proof type, not a version bump on this response.
         result.proof.expiry_at = json::require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
         json::require_binary(result_obj, "revocation_tag", result.proof.revocation_tag);
         json::require_binary(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
