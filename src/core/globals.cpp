@@ -166,6 +166,7 @@ void Globals::init() {
     } else if (!_defer_account) {
         log::info(cat, "Generated new Session account seed");
         _adopt_seed(generate_seed(), true);
+        core.configs.initialise_new_account();
     } else {
         // defer_account, and nothing stored: the application chooses an identity before this
         // account can do anything.  Nothing else in Core needs the seed at init time -- Devices
@@ -183,6 +184,7 @@ void Globals::create_account() {
     SQLite::Transaction tx{c.sql};
     log::info(cat, "Generated new Session account seed");
     _adopt_seed(generate_seed(), true);
+    core.configs.initialise_new_account();
     tx.commit();
 }
 

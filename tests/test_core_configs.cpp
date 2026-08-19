@@ -21,6 +21,27 @@ void reopen(TempCore& c) {
     c.core = std::make_unique<core::Core>(c.path);
 }
 
+/// Publishes the defaults a new account is created with, so a test can start from "nothing owed"
+/// rather than from "this account has just come into being and has not said so yet".
+void settle_new_account(TempCore& c) {
+    auto& profile = c->configs.user_profile();
+    auto [seqno, messages, obsolete] = profile.push();
+    profile.confirm_pushed(seqno, {"seededprofile"});
+    c->configs.store_dumps();
+}
+
+/// What another device pushed to its Contacts config, having added one contact.  Unlike the profile
+/// helper this starts from nothing, because a new account seeds no contacts, so there is no shared
+/// history for it to descend from and nothing for it to collide with.
+std::vector<std::vector<std::byte>> contacts_from_another_device(
+        TempCore& c, std::string_view session_id) {
+    auto seed = c->globals.account_seed();
+    config::Contacts theirs{seed.ed25519_secret(), std::nullopt};
+    theirs.set(theirs.get_or_construct(std::string{session_id}));
+    auto [seqno, messages, obsolete] = theirs.push();
+    return messages;
+}
+
 int64_t stored_dumps(TempCore& c) {
     return c->database().conn().prepared_get<int64_t>("SELECT count(*) FROM config_dumps");
 }
@@ -29,8 +50,13 @@ int64_t stored_dumps(TempCore& c) {
 /// Built from a second config object holding the same account key, since that is exactly what
 /// another device is.
 std::vector<std::vector<std::byte>> push_from_another_device(TempCore& c, std::string_view name) {
+    // Descends from what we published rather than being invented beside it: a device built from
+    // nothing would land on the same seqno as our own account defaults and have to be merged with
+    // them, which is a different scenario (and one this file covers separately).
+    settle_new_account(c);
+
     auto seed = c->globals.account_seed();
-    config::UserProfile theirs{seed.ed25519_secret(), std::nullopt};
+    config::UserProfile theirs{seed.ed25519_secret(), c->configs.user_profile().make_dump()};
     theirs.set_name(name);
     auto [seqno, messages, obsolete] = theirs.push();
     return messages;
@@ -94,15 +120,22 @@ struct PushableCore {
 
 }  // namespace
 
-TEST_CASE("Configs: a fresh account has empty configs", "[core][configs]") {
+TEST_CASE("Configs: a fresh account starts with its defaults", "[core][configs]") {
     TempCore c{};
 
+    // Not blank: creating an account writes the defaults it should start life with, and note to
+    // self starting hidden is one of them.  It is owed to the swarm precisely because it is shared
+    // -- the account's other devices have to be told, or they would each invent their own answer.
+    CHECK(c->configs.user_profile().get_nts_priority() == -1);
+    CHECK(c->configs.needs_push());
+    CHECK(stored_dumps(c) == 1);
+
+    // Everything not defaulted is still empty.
     CHECK_FALSE(c->configs.user_profile().get_name());
     CHECK(c->configs.contacts().size() == 0);
 
-    // Nothing has changed, so nothing is owed to the swarm and nothing has been written.
+    settle_new_account(c);
     CHECK_FALSE(c->configs.needs_push());
-    CHECK(stored_dumps(c) == 0);
 }
 
 TEST_CASE("Configs: a namespace names exactly one config", "[core][configs]") {
@@ -183,6 +216,7 @@ TEST_CASE("Configs: a local change survives merging a config that predates it", 
 
 TEST_CASE("Configs: Local is never owed to a swarm", "[core][configs]") {
     TempCore c{};
+    settle_new_account(c);
 
     c->configs.local().set_setting("a_toggle", true);
 
@@ -199,20 +233,24 @@ TEST_CASE("Configs: Local is never owed to a swarm", "[core][configs]") {
 
 TEST_CASE("Configs: a batch holds back the dump", "[core][configs]") {
     TempCore c{};
+    settle_new_account(c);
 
-    auto pushed = push_from_another_device(c, "Rey");
+    // Contacts rather than UserProfile, because a new account has already dumped the latter to
+    // record its defaults: counting rows only shows the deferral for a config that has none yet.
+    auto pushed = contacts_from_another_device(c, "05" + std::string(64, 'a'));
     auto profile = as_swarm_messages(pushed);
+    REQUIRE(stored_dumps(c) == 1);
 
     {
         auto held = c->configs.batch();
-        c->receive_messages(profile, config::Namespace::UserProfile, true);
+        c->receive_messages(profile, config::Namespace::Contacts, true);
 
         // The merge landed, but writing it out is deferred: nothing reads a half-processed batch.
-        CHECK(c->configs.user_profile().get_name() == "Rey");
-        CHECK(stored_dumps(c) == 0);
+        CHECK(c->configs.contacts().size() == 1);
+        CHECK(stored_dumps(c) == 1);
     }
 
-    CHECK(stored_dumps(c) == 1);
+    CHECK(stored_dumps(c) == 2);
 }
 
 namespace {
@@ -229,16 +267,6 @@ struct ChangeWatcher {
         return cbs;
     }
 };
-
-/// What another device pushed to its Contacts config, having added one contact.
-std::vector<std::vector<std::byte>> contacts_from_another_device(
-        TempCore& c, std::string_view session_id) {
-    auto seed = c->globals.account_seed();
-    config::Contacts theirs{seed.ed25519_secret(), std::nullopt};
-    theirs.set(theirs.get_or_construct(std::string{session_id}));
-    auto [seqno, messages, obsolete] = theirs.push();
-    return messages;
-}
 
 }  // namespace
 

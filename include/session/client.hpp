@@ -514,6 +514,36 @@ class Client {
             core::MessageSendStatus status,
             std::optional<std::string_view> swarm_hash);
 
+    // Applies what a config merge changed to the tables that answer queries about it.
+    //
+    // Every one of these compares against what we already hold and writes only where they differ,
+    // rather than trusting the notification to say what moved.  That is what makes them
+    // self-correcting: the config cannot describe how far behind our tables are -- a merge can
+    // cross several updates at once, and a crash between merging and reconciling leaves them behind
+    // by an amount nothing recorded -- so anything a previous pass missed is picked up by the next.
+    void _on_configs_changed(std::span<const config::Namespace> changed);
+
+    // Records that a note-to-self conversation now exists, by moving its priority off hidden.
+    //
+    // For a contact, the presence of an entry in the Contacts config is what says the conversation
+    // exists, and priority separately says whether it is shown.  Note to self has no such entry to
+    // be present or absent: UserProfile exists from the moment the account does, because it holds
+    // the account's own name.  So priority does both jobs there, and a negative value is the only
+    // way that config can express "there is no note-to-self conversation" -- which is why a new
+    // account writes one, and why putting a message in it has to write the value back.
+    //
+    // Does nothing if it is already visible, so a pin the user chose is left alone.
+    void _reveal_note_to_self(const ConversationId& id);
+
+    // Our own name and picture, and the note-to-self conversation's settings.
+    //
+    // This one runs the opposite way round to the others: UserProfile is authoritative and the
+    // `accounts` row is a projection of it, because the config holds structure the row does not
+    // model -- a second picture slot, carrying the same image at a fresh URL, which exists so a
+    // linked device that already has those bytes can skip re-downloading them.  Deriving the config
+    // back from the row would flatten the two slots and destroy another device's reupload.
+    void _reconcile_user_profile();
+
     // `swarm_hash` is recorded against the message only when it names a copy in our own swarm; the
     // caller passes nullopt for the copy sent to someone else, whose hash is meaningless here.
     void _apply_send_status(

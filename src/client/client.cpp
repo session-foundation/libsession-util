@@ -9,6 +9,8 @@
 #include <oxen/quic/loop.hpp>
 #include <session/attachments.hpp>
 #include <session/client.hpp>
+#include <session/config/expiring.hpp>
+#include <session/config/user_profile.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
 #include <session/random.hpp>
@@ -255,9 +257,9 @@ static std::optional<int64_t> find_conversation(sqlite::Connection& c, const Con
 }
 
 core::callbacks Client::_core_callbacks() {
-    // Capturing `this` here is safe despite running in Core's member-init list: the two callbacks
-    // we install can only fire from receive_messages() and send_dm(), neither of which Core calls
-    // during its own construction.
+    // Capturing `this` here is safe despite running in Core's member-init list: every callback we
+    // install can only fire from receive_messages(), send_dm(), or a config merge, none of which
+    // Core calls during its own construction.
     //
     // These are Client's own wiring, and an application cannot supply any of its own: what it is
     // promised is `client::callbacks`, which is reported through the dispatcher and carries whole
@@ -275,6 +277,10 @@ core::callbacks Client::_core_callbacks() {
                                     core::MessageSendStatus status,
                                     std::optional<std::string_view> swarm_hash) {
         _on_send_status(id, status, swarm_hash);
+    };
+
+    cb.configs_changed = [this](std::span<const config::Namespace> changed) {
+        _on_configs_changed(changed);
     };
 
     return cb;
@@ -739,6 +745,122 @@ void Client::_emit_list_replaced() {
     });
 }
 
+// -- Config reconciliation ----------------------------------------------------------------------
+
+void Client::_on_configs_changed(std::span<const config::Namespace> changed) {
+    for (auto ns : changed) {
+        switch (ns) {
+            case config::Namespace::UserProfile: _reconcile_user_profile(); break;
+            default: break;  // The rest land with the configs that model them.
+        }
+    }
+}
+
+void Client::_reveal_note_to_self(const ConversationId& id) {
+    if (id.type() != ConversationId::Type::dm ||
+        !std::ranges::equal(id.session_id(), core.globals.session_id()))
+        return;
+
+    auto& profile = core.configs.user_profile();
+    if (profile.get_nts_priority() >= 0)
+        return;
+
+    profile.set_nts_priority(0);
+
+    // Then apply the config as a whole rather than just the priority.  Until now there was no
+    // conversation for anything else it holds to attach to -- a disappearing timer set on another
+    // device has been waiting with nowhere to go -- and reconciling is what puts all of it in place
+    // at once.  It cannot arrive by the usual route, since a local change is not a merge and so
+    // reports nothing back to us.
+    _reconcile_user_profile();
+}
+
+void Client::_reconcile_user_profile() {
+    auto& profile = core.configs.user_profile();
+    auto me = ConversationId::dm(core.globals.session_id());
+
+    auto name = profile.get_name();
+    auto pic = profile.get_profile_pic();
+    auto priority = profile.get_nts_priority();
+    auto expiry = profile.get_nts_expiry();
+
+    // Note-to-self carries a duration but no mode, because there is only one that means anything
+    // when the reader is also the writer: there is no moment at which someone else reads it.
+    int exp_mode = expiry && expiry->count() > 0
+                         ? static_cast<int>(config::expiration_mode::after_send)
+                         : static_cast<int>(config::expiration_mode::none);
+    int64_t exp_timer = expiry ? expiry->count() : 0;
+
+    bool profile_changed = false, convo_changed = false, order_changed = false, created = false;
+
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        std::optional<std::string> pic_url;
+        std::optional<std::span<const std::byte>> pic_key;
+        if (!pic.empty()) {
+            pic_url = pic.url;
+            pic_key = std::span<const std::byte>{pic.key};
+        }
+
+        profile_changed =
+                c.prepared_exec(
+                        R"(
+UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
+WHERE id = ?1
+  AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
+)",
+                        identity_id(c, me),
+                        name ? std::optional<std::string>{*name} : std::nullopt,
+                        pic_url,
+                        pic_key,
+                        epoch_seconds(profile.get_profile_updated())) > 0;
+
+        // The config is what says a conversation exists -- a conversation is not defined by having
+        // messages in it, or emptying one would lose it, and reimporting an account would lose every
+        // conversation that happened to be empty.  For note to self that statement is the priority
+        // itself: negative means there is no such conversation, so no row is made for one.
+        //
+        // Guarded by find_conversation rather than calling ensure_conversation outright, because
+        // that helper bumps last_activity on a row that already exists: unguarded, every config
+        // merge would shove note to self back to the top of the list.
+        auto convo = find_conversation(c, me);
+        if (!convo && priority >= 0) {
+            auto row = ensure_conversation(c, me, clock_now_ms());
+            convo = row.id;
+            created = row.created;
+        }
+
+        if (convo) {
+            order_changed =
+                    c.prepared_exec(
+                            "UPDATE conversations SET priority = ?2"
+                            " WHERE id = ?1 AND priority IS NOT ?2",
+                            *convo,
+                            priority) > 0;
+            convo_changed =
+                    c.prepared_exec(
+                            R"(
+UPDATE conversations SET exp_mode = ?2, exp_timer = ?3
+WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
+)",
+                            *convo,
+                            exp_mode,
+                            exp_timer) > 0;
+        }
+
+        tx.commit();
+    }
+
+    if (created)
+        _emit_conversation_added(me);
+    else if (profile_changed || convo_changed)
+        _touch(me);
+    if (order_changed)
+        _emit_list_replaced();
+}
+
 // -- Messages ---------------------------------------------------------------------------------
 
 // No join back to conversations: every row of a given query belongs to one conversation, so its
@@ -967,6 +1089,7 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     if (created)
         _emit_conversation_added(id);
+    _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
     _touch(id);
 
@@ -1144,6 +1267,7 @@ int64_t Client::_send_message(
 
     if (created)
         _emit_conversation_added(id);
+    _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
     _touch(id);
 
@@ -2090,8 +2214,10 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
 
     if (created)
         _emit_conversation_added(convo_id);
-    if (inserted)
+    if (inserted) {
+        _reveal_note_to_self(convo_id);
         _emit_message(true, convo_id, client_id);
+    }
     if (inserted || renamed)
         _touch(convo_id);
 }

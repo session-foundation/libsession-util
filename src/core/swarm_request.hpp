@@ -74,9 +74,8 @@ static_assert(store_requires_auth(5) && retrieve_requires_auth(5));
 // swarm member it tries.
 //
 // A node that has not answered in ten seconds is better abandoned than waited on: the swarm has
-// several other members, and moving to one of them costs less than the rest of a long timeout.
-// session-ios reaches the same conclusion from the other direction, spending its budget on many
-// short attempts rather than one patient one.
+// several other members, and moving to one of them costs less than the rest of a long timeout, so
+// the budget is better spent on several short attempts than on one patient one.
 //
 // The overall figure is what actually bounds the operation.  Without it, a swarm whose members are
 // all unreachable would cost the per-request timeout once per member, which is the sort of

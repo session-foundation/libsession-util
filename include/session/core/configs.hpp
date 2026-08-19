@@ -166,6 +166,13 @@ class Configs : public detail::CoreComponent {
     std::chrono::milliseconds push_debounce = std::chrono::seconds{2};
     std::chrono::milliseconds push_max_delay = std::chrono::seconds{10};
 
+    /// Writes the defaults a brand-new account starts with.
+    ///
+    /// Only for an account created here.  Restoring one deliberately does not come through here:
+    /// the real values are about to arrive from the swarm, and writing local ones first would put
+    /// them in competition with what the account already says.
+    void initialise_new_account();
+
     /// Pushes whatever is owed immediately, rather than waiting out the debounce.
     ///
     /// Everything dirty goes in one `sequence` request: a store per config message, then a single

@@ -212,6 +212,21 @@ void Configs::merge(config::Namespace ns, std::span<const SwarmMessage> messages
     _flush();
 }
 
+void Configs::initialise_new_account() {
+    // Note to self starts with no conversation, which UserProfile can only say by giving it a
+    // negative priority.  A contact's conversation exists because there is an entry for it in the
+    // Contacts config; UserProfile has no entry to be absent, since it exists from the moment the
+    // account does, so priority carries existence as well as visibility here.  An account that has
+    // never written a note is indistinguishable from one that set 0 deliberately unless this is
+    // written, because the getter reports an unset value as 0.
+    //
+    // It matters that this is not a local display decision: nts_priority lives in the shared
+    // UserProfile config, so leaving it at the default 0 would not merely show the conversation
+    // here, it would make it appear on every device on the account the moment they synced.
+    user_profile().set_nts_priority(-1);
+    _flush();
+}
+
 std::vector<config::ConfigBase*> Configs::_pushable() {
     _load();
     return {_user_profile.get(),

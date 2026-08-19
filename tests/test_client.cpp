@@ -8,7 +8,9 @@
 #include <session/attachments.hpp>
 #include <session/client/sync_client.hpp>
 #include <session/clock.hpp>
+#include <session/config/expiring.hpp>
 #include <session/config/namespaces.hpp>
+#include <session/config/user_profile.hpp>
 #include <session/crypto/ed25519.hpp>
 #include <session/format.hpp>
 #include <session/random.hpp>
@@ -1953,4 +1955,187 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
 
     // ... and being terminal, it is refused rather than attempted again.
     CHECK_FALSE(c->retry_send(id));
+}
+
+// -- Config reconciliation ----------------------------------------------------------------------
+
+namespace {
+
+/// What another device on this account pushed to its UserProfile.  Another device is exactly this:
+/// a second config object holding the same account key.
+std::vector<std::vector<std::byte>> profile_from_another_device(
+        SyncClient& c, const std::function<void(config::UserProfile&)>& change) {
+    // The other device has seen what we published, rather than being invented alongside us: it is
+    // built from our own dump once ours has gone out.  Starting it from nothing would make a rival
+    // at the same seqno, which is a different scenario entirely -- and one that resolves by merging
+    // the two sets of changes rather than by taking theirs.
+    auto& ours = c.core.configs.user_profile();
+    auto [seqno, messages, obsolete] = ours.push();
+    ours.confirm_pushed(seqno, {"ourprofile"});
+
+    auto seed = c.core.globals.account_seed();
+    config::UserProfile theirs{seed.ed25519_secret(), ours.make_dump()};
+    change(theirs);
+    auto [their_seqno, their_messages, their_obsolete] = theirs.push();
+    return their_messages;
+}
+
+/// Feeds them in as a poll would.  A SwarmMessage points at its data rather than owning it, so
+/// `messages` has to outlive this call.
+void merge_profile(SyncClient& c, const std::vector<std::vector<std::byte>>& messages) {
+    std::vector<core::SwarmMessage> incoming;
+    for (size_t i = 0; i < messages.size(); i++) {
+        core::SwarmMessage m;
+        m.hash = fmt::format("profilehash{}", i);
+        m.data = messages[i];
+        incoming.push_back(std::move(m));
+    }
+    c.core.receive_messages(incoming, config::Namespace::UserProfile, true);
+}
+
+ConversationId self_convo(SyncClient& c) {
+    return ConversationId::dm(c.core.globals.session_id());
+}
+
+bool listed(SyncClient& c, const ConversationId& id) {
+    auto all = c.conversations();
+    return std::ranges::any_of(all, [&](const auto& x) { return x.id == id; });
+}
+
+}  // namespace
+
+TEST_CASE("Client: a new account starts with note to self hidden", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    // Seeded at account creation rather than left at the default, because nts_priority is carried
+    // in the shared UserProfile config: a default of 0 would not merely show the conversation here,
+    // it would make it appear on every other device on the account once they synced.
+    CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
+    CHECK_FALSE(listed(*c.client, me));
+}
+
+TEST_CASE("Client: writing a note to self reveals it", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    REQUIRE_FALSE(listed(*c.client, me));
+
+    c->send_message(me, "a reminder");
+
+    // Both halves: it is in our own list, and UserProfile says so, which is what stops the other
+    // devices on the account from carrying on hiding it.
+    CHECK(listed(*c.client, me));
+    CHECK(c->core.configs.user_profile().get_nts_priority() == 0);
+    CHECK(c->core.configs.user_profile().needs_push());
+}
+
+TEST_CASE("Client: revealing note to self keeps a pin it already had", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    auto pinned = profile_from_another_device(*c.client, [](auto& p) { p.set_nts_priority(7); });
+    merge_profile(*c.client, pinned);
+    REQUIRE(c->conversation(me)->priority == 7);
+
+    c->send_message(me, "a reminder");
+
+    // Already visible, so there is nothing to reveal and the pin is left where the user put it.
+    CHECK(c->core.configs.user_profile().get_nts_priority() == 7);
+    CHECK(c->conversation(me)->priority == 7);
+}
+
+TEST_CASE("Client: our own profile reaches the conversation", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    auto pushed = profile_from_another_device(*c.client, [](auto& p) {
+        p.set_name("Leia");
+        p.set_nts_priority(0);  // another device unhid it
+    });
+    merge_profile(*c.client, pushed);
+
+    auto convo = c->conversation(me);
+    REQUIRE(convo);
+    CHECK(convo->display_name == "Leia");
+    CHECK(convo->note_to_self);
+    CHECK(listed(*c.client, me));
+}
+
+TEST_CASE("Client: hiding note to self elsewhere keeps it out of the list", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    // Visible first, so the hide is a change rather than the initial state.
+    auto shown = profile_from_another_device(*c.client, [](auto& p) {
+        p.set_name("Leia");
+        p.set_nts_priority(0);
+    });
+    merge_profile(*c.client, shown);
+    REQUIRE(listed(*c.client, me));
+
+    auto hidden = profile_from_another_device(*c.client, [](auto& p) {
+        p.set_name("Leia");
+        p.set_nts_priority(-1);
+    });
+    merge_profile(*c.client, hidden);
+
+    // Still reachable by name -- hiding is a statement about the list, not about existence -- but
+    // gone from it.
+    auto convo = c->conversation(me);
+    REQUIRE(convo);
+    CHECK(convo->priority == -1);
+    CHECK_FALSE(listed(*c.client, me));
+}
+
+TEST_CASE("Client: a note-to-self timer waits for the conversation", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    // A timer set on another device while we have no note-to-self conversation.  There is nothing
+    // to attach it to yet, and that is not a loss: the config is where it lives until there is.
+    auto pushed = profile_from_another_device(
+            *c.client, [](auto& p) { p.set_nts_expiry(std::chrono::seconds{600}); });
+    merge_profile(*c.client, pushed);
+    REQUIRE_FALSE(c->conversation(me));
+
+    // Writing a note brings the conversation into being, and everything the config was holding for
+    // it lands at that moment rather than being lost.
+    c->send_message(me, "a reminder");
+    REQUIRE(c->conversation(me));
+
+    auto [mode, timer] = c->core.database().conn().prepared_get<int, int64_t>(
+            "SELECT exp_mode, exp_timer FROM conversations"
+            " WHERE dm = (SELECT id FROM accounts WHERE session_id = ?)",
+            c->core.globals.session_id());
+
+    // The config carries a duration and no mode, because only one mode means anything when the
+    // reader is also the writer: there is no moment at which someone else reads it.
+    CHECK(mode == static_cast<int>(config::expiration_mode::after_send));
+    CHECK(timer == 600);
+}
+
+TEST_CASE("Client: reconciling twice does not disturb the list", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    auto pushed = profile_from_another_device(*c.client, [](auto& p) {
+        p.set_name("Leia");
+        p.set_nts_priority(0);
+    });
+    merge_profile(*c.client, pushed);
+
+    auto before = c->conversation(me);
+    REQUIRE(before);
+
+    // The same profile again reconciles again, since the seqno detector overfires on an identical
+    // config, so reconciliation has to be idempotent.  The specific trap is ensure_conversation,
+    // which bumps last_activity on a row that already exists -- called unguarded it would shuffle
+    // note to self to the top of the list on every single config merge.
+    merge_profile(*c.client, pushed);
+
+    auto after = c->conversation(me);
+    REQUIRE(after);
+    CHECK(after->last_activity == before->last_activity);
+    CHECK(after->display_name == before->display_name);
 }
