@@ -38,11 +38,12 @@ std::vector<std::vector<std::byte>> push_from_another_device(TempCore& c, std::s
 
 /// Note the spans: a SwarmMessage points at its data rather than owning it, exactly as one decoded
 /// from a poll response does, so whatever is passed in here has to outlive the result.
-std::vector<SwarmMessage> as_swarm_messages(const std::vector<std::vector<std::byte>>& messages) {
+std::vector<SwarmMessage> as_swarm_messages(
+        const std::vector<std::vector<std::byte>>& messages, std::string_view tag = "fakehash") {
     std::vector<SwarmMessage> out;
     for (size_t i = 0; i < messages.size(); i++) {
         SwarmMessage m;
-        m.hash = fmt::format("fakehash{}", i);
+        m.hash = fmt::format("{}{}", tag, i);
         m.data = messages[i];
         out.push_back(std::move(m));
     }
@@ -376,6 +377,61 @@ TEST_CASE("Configs: merging a change identical to our own", "[core][configs][not
     // design -- and if the merge ever learns to recognise an identical config and leave the seqno
     // alone, this would stop reporting with no change needed here.  What must never happen is the
     // reverse, and the case above covers that.
+}
+
+TEST_CASE("Configs: what a skipped seqno costs afterwards", "[core][configs][notify]") {
+    ChangeWatcher w;
+    TempCore c{w.callbacks()};
+
+    auto seed = c->globals.account_seed();
+    config::Contacts them{seed.ed25519_secret(), std::nullopt};
+
+    auto a = "05" + std::string(64, 'a');
+    auto b = "05" + std::string(64, 'b');
+
+    // Both devices make the same change from the same starting point.
+    c->configs.contacts().set(c->configs.contacts().get_or_construct(a));
+    them.set(them.get_or_construct(a));
+    REQUIRE(c->configs.contacts().seqno() == them.seqno());
+    auto agreed_seqno = them.seqno();
+
+    {
+        auto [seqno, messages, obsolete] = them.push();
+        them.confirm_pushed(seqno, {"theirs1"});
+        auto incoming = as_swarm_messages(messages, "theirs");
+        c->receive_messages(incoming, config::Namespace::Contacts, true);
+    }
+
+    // We are now clean at a seqno the swarm has never held.
+    auto phantom = c->configs.contacts().seqno();
+    CHECK(phantom == agreed_seqno + 1);
+    CHECK_FALSE(c->configs.contacts().needs_push());
+
+    // The other device, still at the seqno it actually published, now makes a further change of its
+    // own -- which lands on the number we already consumed.
+    them.set(them.get_or_construct(b));
+    REQUIRE(them.seqno() == phantom);
+
+    {
+        auto [seqno, messages, obsolete] = them.push();
+        auto incoming = as_swarm_messages(messages, "theirs2-");
+        c->receive_messages(incoming, config::Namespace::Contacts, true);
+    }
+
+    // What matters, and all that is asserted: their change arrives intact and ours is still there.
+    // No data is lost by the collision.
+    CHECK(c->configs.contacts().size() == 2);
+    CHECK(c->configs.contacts().get(a).has_value());
+    CHECK(c->configs.contacts().get(b).has_value());
+
+    // What is *observed* but deliberately not asserted, because it is the defect rather than the
+    // contract: their ordinary update lands on the number our phantom already consumed, so instead
+    // of being adopted cleanly it resolves as a conflict -- one past both, leaving us dirty and
+    // owing a push we would not otherwise have made.  One real change, two seqnos.
+    //
+    // It settles once they adopt ours, so it does not run away.  The cost is to the "within N"
+    // window: two of its five are spent carrying a single change, and a device holding an unpushed
+    // change is dropped that much sooner.  Fixing the spurious increment removes both seqnos.
 }
 
 TEST_CASE("Configs: a local change is not reported back", "[core][configs][notify]") {
