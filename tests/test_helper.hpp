@@ -351,6 +351,11 @@ class TestHelper {
         c._sync_contact(id);
     }
 
+    template <typename Client, typename Id>
+    static void sync_convo_volatile(Client& c, const Id& id) {
+        c._sync_convo_volatile(id);
+    }
+
     /// The push debounce, driven by hand.  A test that waited out real intervals would be both slow
     /// and racy -- the timer fires on the event loop while the test reads from its own thread -- so
     /// what is exercised here is the decision the timer makes, with the clock supplied.

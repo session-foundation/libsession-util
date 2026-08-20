@@ -55,6 +55,10 @@ class SyncClient : public Client {
         core.loop().call_get([&] { _set_priority(id, priority); });
     }
 
+    void set_marked_unread(const ConversationId& id, bool unread) {
+        core.loop().call_get([&] { _set_marked_unread(id, unread); });
+    }
+
     void set_blocked(const ConversationId& id, bool blocked) {
         _require_dm("set_blocked", id);
         core.loop().call_get([&] { _set_blocked(id, blocked); });

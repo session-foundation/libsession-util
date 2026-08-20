@@ -27,6 +27,12 @@ struct Conversation {
     /// Count of incoming messages newer than the read watermark.
     int unread = 0;
 
+    /// Deliberately marked unread — "come back to this" — rather than having unread messages.
+    ///
+    /// Independent of `unread`: it survives having read everything, which is what it is for, and
+    /// reading the conversation is what clears it.  Synced, so it arrives from other devices too.
+    bool marked_unread = false;
+
     /// Pinning, numerically identical to the value the Contacts and UserGroups configs sync: 0 is
     /// unpinned, a positive value is pinned with higher values first, and a negative value is
     /// hidden.

@@ -9,6 +9,7 @@
 #include <session/client/sync_client.hpp>
 #include <session/clock.hpp>
 #include <session/config/contacts.hpp>
+#include <session/config/convo_info_volatile.hpp>
 #include <session/config/expiring.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/config/user_profile.hpp>
@@ -2096,6 +2097,32 @@ void insert_message(SyncClient& c, const ConversationId& id, int64_t timestamp, 
             body);
 }
 
+/// A ConvoInfoVolatile update from a device that has seen ours, built the same way and for the same
+/// reason as `contacts_update_from_another_device`.
+std::vector<std::vector<std::byte>> volatile_from_another_device(
+        SyncClient& c, const std::function<void(config::ConvoInfoVolatile&)>& change) {
+    auto& ours = c.core.configs.convo_info_volatile();
+    auto [seqno, messages, obsolete] = ours.push();
+    ours.confirm_pushed(seqno, {"ourvolatile"});
+
+    auto seed = c.core.globals.account_seed();
+    config::ConvoInfoVolatile theirs{seed.ed25519_secret(), ours.make_dump()};
+    change(theirs);
+    auto [their_seqno, their_messages, their_obsolete] = theirs.push();
+    return their_messages;
+}
+
+void merge_volatile(SyncClient& c, const std::vector<std::vector<std::byte>>& messages) {
+    std::vector<core::SwarmMessage> incoming;
+    for (size_t i = 0; i < messages.size(); i++) {
+        core::SwarmMessage m;
+        m.hash = fmt::format("volatilehash{}", i);
+        m.data = messages[i];
+        incoming.push_back(std::move(m));
+    }
+    c.core.receive_messages(incoming, config::Namespace::ConvoInfoVolatile, true);
+}
+
 void merge_contacts(SyncClient& c, const std::vector<std::vector<std::byte>>& messages) {
     std::vector<core::SwarmMessage> incoming;
     for (size_t i = 0; i < messages.size(); i++) {
@@ -2713,6 +2740,130 @@ TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]")
     CHECK(c->message_requests().empty());
     REQUIRE(c->conversation(id));
     CHECK_FALSE(c->conversation(id)->request);
+}
+
+// Recent, because ConvoInfoVolatile refuses to store a last-read older than PRUNE_LOW (30 days)
+// and would silently keep nothing at all from the 1970 timestamps the other tests here use.
+sys_ms recently(std::chrono::milliseconds ago) {
+    return clock_now_ms() - ago;
+}
+
+TEST_CASE("Client: reading a conversation publishes the watermark", "[client][volatile]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    auto hex = oxenc::to_hex(them.session_id);
+    approve(*c, them.session_id);
+
+    auto newest = recently(2s);
+    deliver(*c, them, "one", recently(3s), "h1");
+    deliver(*c, them, "two", newest, "h2");
+    REQUIRE(c->conversation(id)->unread == 2);
+
+    c->mark_read(id);
+
+    CHECK(c->conversation(id)->unread == 0);
+    auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
+    REQUIRE(entry);
+    CHECK(entry->last_read == newest.time_since_epoch().count());
+}
+
+TEST_CASE("Client: a watermark from another device applies", "[client][volatile]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    auto hex = oxenc::to_hex(them.session_id);
+    approve(*c, them.session_id);
+
+    auto older = recently(30s);
+    deliver(*c, them, "one", older, "h1");
+    deliver(*c, them, "two", recently(10s), "h2");
+    REQUIRE(c->conversation(id)->unread == 2);
+
+    // Read up to the first message on another device.
+    auto read = volatile_from_another_device(*c.client, [&](config::ConvoInfoVolatile& theirs) {
+        auto e = theirs.get_or_construct_1to1(hex);
+        e.last_read = older.time_since_epoch().count();
+        theirs.set(e);
+    });
+    merge_volatile(*c.client, read);
+
+    CHECK(c->conversation(id)->unread == 1);
+}
+
+TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client][volatile]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    auto hex = oxenc::to_hex(them.session_id);
+    approve(*c, them.session_id);
+
+    auto older = recently(30s);
+    auto newest = recently(10s);
+    deliver(*c, them, "one", older, "h1");
+    deliver(*c, them, "two", newest, "h2");
+    c->mark_read(id);
+    REQUIRE(c->conversation(id)->unread == 0);
+
+    // The config permits a value to be written backwards on purpose, and a same-seqno conflict
+    // resolves by a tie-break that knows nothing about which value is newer -- so an older one
+    // really can arrive, and applying it would make read messages unread again.
+    auto stale = volatile_from_another_device(*c.client, [&](config::ConvoInfoVolatile& theirs) {
+        auto e = theirs.get_or_construct_1to1(hex);
+        e.last_read = older.time_since_epoch().count();
+        theirs.set(e);
+    });
+    merge_volatile(*c.client, stale);
+
+    CHECK(c->conversation(id)->unread == 0);
+
+    // ...and we do not publish the stale value back out, either.
+    TestHelper::sync_convo_volatile(*c.client, id);
+    auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
+    REQUIRE(entry);
+    CHECK(entry->last_read == newest.time_since_epoch().count());
+}
+
+TEST_CASE("Client: marking unread syncs, and reading clears it", "[client][volatile]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    auto hex = oxenc::to_hex(them.session_id);
+    approve(*c, them.session_id);
+
+    deliver(*c, them, "one", recently(5s), "h1");
+    c->mark_read(id);
+    REQUIRE(c->conversation(id)->unread == 0);
+
+    c->set_marked_unread(id, true);
+
+    // Survives having read everything, which is the whole point of it.
+    CHECK(c->conversation(id)->marked_unread);
+    CHECK(c->conversation(id)->unread == 0);
+    CHECK(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
+
+    c->mark_read(id);
+    CHECK_FALSE(c->conversation(id)->marked_unread);
+    CHECK_FALSE(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
+}
+
+TEST_CASE("Client: read state for a conversation we do not have is ignored", "[client][volatile]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '8');
+    auto id = dm_from_hex(them);
+
+    // An entry outlives the conversation it describes: this config is pruned by age, not by
+    // anything noticing a deletion.  Creating a conversation from one would resurrect what another
+    // device deleted.
+    auto orphan = volatile_from_another_device(*c.client, [&](config::ConvoInfoVolatile& theirs) {
+        auto e = theirs.get_or_construct_1to1(them);
+        e.last_read = clock_now_ms().time_since_epoch().count();
+        theirs.set(e);
+    });
+    merge_volatile(*c.client, orphan);
+
+    CHECK_FALSE(c->conversation(id));
+    CHECK(c->conversations().empty());
 }
 
 TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {

@@ -10,6 +10,7 @@
 #include <session/attachments.hpp>
 #include <session/client.hpp>
 #include <session/config/contacts.hpp>
+#include <session/config/convo_info_volatile.hpp>
 #include <session/config/expiring.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/format.hpp>
@@ -614,6 +615,13 @@ void Client::set_priority(
     _async([this, id, priority] { _set_priority(id, priority); }, std::move(cb));
 }
 
+void Client::set_marked_unread(
+        const ConversationId& id,
+        bool unread,
+        std::function<void(std::optional<std::string>)> cb) {
+    _async([this, id, unread] { _set_marked_unread(id, unread); }, std::move(cb));
+}
+
 void Client::set_blocked(
         const ConversationId& id,
         bool blocked,
@@ -728,7 +736,8 @@ static const auto CONVO_COLUMNS = R"(
            coalesce(ct.nickname, a.name), c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
-           c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0)
+           c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
+           c.marked_unread
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -752,7 +761,7 @@ static std::vector<Conversation> query_conversations(
         const Bind&... bind) {
     std::vector<Conversation> out;
     for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved,
-               approved_me] :
+               approved_me, marked_unread] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -765,6 +774,7 @@ static std::vector<Conversation> query_conversations(
                  int,
                  int,
                  int,
+                 int,
                  int>(query, bind...)) {
         bool me = sid && std::ranges::equal(static_cast<const b33&>(*sid), self);
         out.push_back(
@@ -774,6 +784,7 @@ static std::vector<Conversation> query_conversations(
                         .last_message = std::move(preview),
                         .last_activity = from_epoch_ms(activity),
                         .unread = unread,
+                        .marked_unread = marked_unread != 0,
                         .priority = priority,
                         .request = sid && !me && !approved,
                         .awaiting_approval = sid && !me && !approved_me,
@@ -893,10 +904,42 @@ void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
         )",
                 target,
                 *convo);
+
+        // Reading a conversation undoes having marked it unread, which is the only thing that
+        // could still be holding it bold.  Separate from the watermark because it survives having
+        // read everything, so moving the watermark cannot clear it as a side effect.
+        changed += c.prepared_exec(
+                "UPDATE conversations SET marked_unread = 0 WHERE id = ? AND marked_unread",
+                *convo);
         tx.commit();
     }
-    if (changed > 0)
+    if (changed > 0) {
+        _sync_convo_volatile(id);
         _touch(id);
+    }
+}
+
+void Client::_set_marked_unread(const ConversationId& id, bool unread) {
+    int changed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        changed = c.prepared_exec(
+                "UPDATE conversations SET marked_unread = ?2"
+                " WHERE id = ?1 AND marked_unread IS NOT ?2",
+                *convo,
+                unread ? 1 : 0);
+        tx.commit();
+    }
+    if (changed > 0) {
+        _sync_convo_volatile(id);
+        _touch(id);
+    }
 }
 
 void Client::_set_priority(const ConversationId& id, int priority) {
@@ -1080,13 +1123,27 @@ void Client::_emit_lists_replaced() {
 // -- Config reconciliation ----------------------------------------------------------------------
 
 void Client::_on_configs_changed(std::span<const config::Namespace> changed) {
+    bool conversations_moved = false;
     for (auto ns : changed) {
         switch (ns) {
-            case config::Namespace::UserProfile: _reconcile_user_profile(); break;
-            case config::Namespace::Contacts: _reconcile_contacts(); break;
+            case config::Namespace::UserProfile:
+                _reconcile_user_profile();
+                conversations_moved = true;
+                break;
+            case config::Namespace::Contacts:
+                _reconcile_contacts();
+                conversations_moved = true;
+                break;
             default: break;  // The rest land with the configs that model them.
         }
     }
+
+    // Last, and also whenever anything above may have created a conversation: read state is about
+    // conversations rather than a statement that they exist, so an entry for one we do not have is
+    // skipped -- and the config that would have created it may only just have been applied.
+    if (conversations_moved ||
+        std::ranges::find(changed, config::Namespace::ConvoInfoVolatile) != changed.end())
+        _reconcile_convo_volatile();
 }
 
 void Client::_reconcile_all() {
@@ -1094,11 +1151,15 @@ void Client::_reconcile_all() {
     // the config does not mention, and a row whose dump was never written looks exactly like one
     // deleted elsewhere.  Publishing what we hold first tells those two apart.
     _sync_all_contacts();
+    _sync_all_convo_volatile();
 
     // Each config joins this as it gains a reconciler; the sweep is what makes adding one apply to
     // state that arrived before it existed, rather than only to the next change after it.
     _reconcile_user_profile();
     _reconcile_contacts();
+
+    // After the two above, which are what bring conversations into being.
+    _reconcile_convo_volatile();
 }
 
 void Client::_reconcile_contacts() {
@@ -1316,6 +1377,131 @@ void Client::_sync_all_contacts() {
     // Collected before syncing rather than while iterating: _sync_contact takes its own connection.
     for (const auto& id : ids)
         _sync_contact(id);
+}
+
+void Client::_reconcile_convo_volatile() {
+    auto& volatiles = core.configs.convo_info_volatile();
+
+    std::vector<ConversationId> touched;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        for (auto it = volatiles.begin_1to1(); it != volatiles.end(); ++it) {
+            const auto& entry = *it;
+
+            auto raw = oxenc::from_hex(entry.session_id);
+            if (raw.size() != 33)
+                continue;
+            b33 sid;
+            std::memcpy(sid.data(), raw.data(), sid.size());
+            auto id = ConversationId::dm(sid);
+
+            // Read state about a conversation we do not have says nothing worth acting on, and
+            // acting on it would be wrong: an entry outlives the conversation it describes -- this
+            // config is pruned by age rather than by anything noticing a deletion -- so creating
+            // one here would resurrect what another device deleted.  Whatever creates the
+            // conversation is reconciled first, and this runs again after it.
+            auto convo = find_conversation(c, id);
+            if (!convo)
+                continue;
+
+            // Session Pro lives here rather than with the rest of what we know about an account,
+            // and it is about the account rather than the conversation, so it lands on `accounts`.
+            // The two halves are meaningless apart: an expiry with no tag cannot be checked.
+            std::optional<std::span<const std::byte>> tag;
+            std::optional<int64_t> expiry;
+            if (entry.pro_revocation_tag && entry.pro_expiry_at > std::chrono::sys_seconds{}) {
+                tag = std::span<const std::byte>{*entry.pro_revocation_tag};
+                expiry = epoch_seconds(entry.pro_expiry_at);
+            }
+            bool pro_changed = c.prepared_exec(
+                                       R"(
+UPDATE accounts SET pro_revocation_tag = ?2, pro_expiry = ?3
+WHERE id = ?1 AND (pro_revocation_tag, pro_expiry) IS NOT (?2, ?3)
+)",
+                                       identity_id(c, id),
+                                       tag,
+                                       expiry) > 0;
+
+            // Forwards only.  The config does not enforce this -- it lets a value be written
+            // backwards on purpose, so that a client can reset one -- and a conflict between two
+            // devices at the same seqno resolves by a tie-break that knows nothing about which
+            // value is newer.  Left alone, that would make messages someone has read unread again.
+            bool read_changed =
+                    c.prepared_exec(
+                            R"(
+UPDATE conversations
+SET last_read = ?2,
+    unread_count = (SELECT COUNT(*) FROM messages
+                     WHERE conversation = ?1 AND outgoing = 0 AND timestamp > ?2)
+WHERE id = ?1 AND last_read < ?2
+)",
+                            *convo,
+                            entry.last_read) > 0;
+
+            // The flag is an ordinary setting, though: someone marking a conversation unread on
+            // another device is telling us to, and there is no ordering to preserve.
+            bool unread_changed = c.prepared_exec(
+                                          "UPDATE conversations SET marked_unread = ?2"
+                                          " WHERE id = ?1 AND marked_unread IS NOT ?2",
+                                          *convo,
+                                          entry.unread ? 1 : 0) > 0;
+
+            if (pro_changed || read_changed || unread_changed)
+                touched.push_back(id);
+        }
+
+        tx.commit();
+    }
+
+    // No deletion pass, and there must not be one: entries here are pruned by age -- thirty days
+    // unread, forty-five on push -- so an absent one means only that nothing has been read in it
+    // lately.  Treating that as a removal the way Contacts does would destroy conversations for
+    // having been quiet.
+
+    for (const auto& id : touched)
+        _touch(id);
+}
+
+void Client::_sync_all_convo_volatile() {
+    std::vector<ConversationId> ids;
+    {
+        auto c = core.database().conn();
+        for (auto sid : c.prepared_results<sqlite::blob_guts<b33>>(
+                     "SELECT a.session_id FROM conversations c JOIN accounts a ON a.id = c.dm"))
+            ids.push_back(ConversationId::dm(sid));
+    }
+    for (const auto& id : ids)
+        _sync_convo_volatile(id);
+}
+
+void Client::_sync_convo_volatile(const ConversationId& id) {
+    if (id.type() != ConversationId::Type::dm)
+        return;  // Groups and communities need UserGroups first.
+
+    auto c = core.database().conn();
+    auto row = c.prepared_maybe_get<int64_t, int>(
+            R"(
+        SELECT last_read, marked_unread FROM conversations
+        WHERE dm = (SELECT id FROM accounts WHERE session_id = ?)
+    )",
+            id.session_id());
+    if (!row)
+        return;
+    auto [last_read, marked_unread] = *row;
+
+    auto& volatiles = core.configs.convo_info_volatile();
+
+    // Built on the entry that is there, which is what keeps the Pro fields alive: they are set from
+    // a proof we verified rather than from any row here, so there is nothing to re-derive them from.
+    auto entry = volatiles.get_or_construct_1to1(oxenc::to_hex(id.session_id()));
+
+    // Forwards only here too, and for the same reason as the merge: our value can be the stale one,
+    // and publishing it would tell every other device to unread what it has read.
+    entry.last_read = std::max(entry.last_read, last_read);
+    entry.unread = marked_unread != 0;
+    volatiles.set(entry);
 }
 
 void Client::_sync_conversation(const ConversationId& id) {

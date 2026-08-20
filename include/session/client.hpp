@@ -192,6 +192,14 @@ class Client {
     /// so what changed is the list, not a row in it.
     void set_priority(const ConversationId& id, int priority, failable_function<void()> cb);
 
+    /// Marks a conversation unread, or clears that — the deliberate "I want to come back to this"
+    /// rather than a count of messages.  Synced, so it follows you between devices.
+    ///
+    /// Independent of `unread`, which counts messages: this survives having read all of them, and
+    /// that is the point of it.  Reading the conversation clears it, since that is the thing it was
+    /// asking you to come back and do.
+    void set_marked_unread(const ConversationId& id, bool unread, failable_function<void()> cb);
+
     // -- Blocking and deleting ---------------------------------------------------------------
     //
     // The four destructive things a client offers, named for what a user is choosing rather than
@@ -488,6 +496,7 @@ class Client {
     Conversation _create_conversation(const ConversationId& id);
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
     void _set_priority(const ConversationId& id, int priority);
+    void _set_marked_unread(const ConversationId& id, bool unread);
     void _set_blocked(const ConversationId& id, bool blocked);
     void _clear_messages(const ConversationId& id);
     void _delete_conversation(const ConversationId& id, bool keep_messages);
@@ -653,6 +662,26 @@ class Client {
     // not have to know that note to self lives in UserProfile while everybody else lives in
     // Contacts.
     void _sync_conversation(const ConversationId& id);
+
+    // Read state — the watermark and the marked-unread flag — from ConvoInfoVolatile.
+    //
+    // Deliberately without the deletion pass that Contacts has.  That config is pruned by age
+    // rather than by anyone noticing a removal, so an entry absent from it means only that nothing
+    // has been read in that conversation lately, and treating absence as a deletion would destroy
+    // conversations for having been quiet.
+    //
+    // Runs after whatever might have created a conversation, because read state about one we do not
+    // have is nothing we can apply and nothing we should create a conversation from.
+    void _reconcile_convo_volatile();
+
+    // The other direction, for one conversation and for all of them.
+    //
+    // The watermark only ever moves forwards, in both directions.  The config does not enforce that
+    // — it permits a value to be written backwards on purpose — and a conflict between two devices
+    // at the same seqno resolves by a tie-break that knows nothing about which value is newer, so
+    // without this a stale device would make read messages unread everywhere.
+    void _sync_convo_volatile(const ConversationId& id);
+    void _sync_all_convo_volatile();
 
     // Records a delete-before instruction in the config that carries this conversation, so that
     // every device deletes the same history rather than only the one the user was looking at.
