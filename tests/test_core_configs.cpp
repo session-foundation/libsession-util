@@ -609,6 +609,27 @@ TEST_CASE("Configs: the debounce waits for quiet, up to a limit", "[core][config
     }
 }
 
+TEST_CASE("Configs: pushing can be switched off entirely", "[core][configs][push]") {
+    PushableCore c;
+    c->configs.push_enabled = false;
+
+    c->configs.user_profile().set_name("Leia");
+    c->configs.push_now();
+
+    // Nothing goes out...
+    CHECK(c.net->sent_requests.empty());
+
+    // ...and nothing pretends it did: the change is still held and still owed, so the state reads
+    // as unpublished rather than as settled.
+    CHECK(c->configs.user_profile().get_name() == "Leia");
+    CHECK(c->configs.needs_push());
+
+    // Switching it back on lets everything accumulated since go out together.
+    c->configs.push_enabled = true;
+    c->configs.push_now();
+    CHECK(c.net->sent_requests.size() == 1);
+}
+
 TEST_CASE("Configs: a push already in flight is not duplicated", "[core][configs][push]") {
     PushableCore c;
 

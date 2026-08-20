@@ -297,6 +297,14 @@ void Configs::push_now() {
 }
 
 void Configs::_send_push() {
+    // Checked here rather than at the scheduling end so that everything up to the wire still
+    // happens: changes are held and dumped, and needs_push() keeps reporting them, so the state
+    // reads as unpublished rather than as settled.
+    if (!push_enabled) {
+        log::warning(cat, "Not pushing configs: pushing is disabled");
+        return;
+    }
+
     auto net = core.network();
     if (!net) {
         log::debug(cat, "Not pushing configs: no network attached");

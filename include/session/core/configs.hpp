@@ -173,6 +173,17 @@ class Configs : public detail::CoreComponent {
     /// them in competition with what the account already says.
     void initialise_new_account();
 
+    /// Set false to stop config changes from ever leaving this device.
+    ///
+    /// For working against a real account without risking it: everything else carries on as normal
+    /// -- changes are held, dumped, and reported as owed by needs_push() -- but nothing is sent, so
+    /// nothing this device does can reach the account's other devices or overwrite what they hold.
+    ///
+    /// Deliberately not a pretence that the push happened: `needs_push()` keeps saying yes, so the
+    /// state is visibly unpublished rather than looking settled.  Turning it back on lets the next
+    /// push carry everything accumulated since.
+    bool push_enabled = true;
+
     /// Pushes whatever is owed immediately, rather than waiting out the debounce.
     ///
     /// Everything dirty goes in one `sequence` request: a store per config message, then a single
