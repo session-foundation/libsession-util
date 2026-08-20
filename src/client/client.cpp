@@ -728,7 +728,7 @@ static const auto CONVO_COLUMNS = R"(
            coalesce(ct.nickname, a.name), c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
-           c.unread_count, c.priority, coalesce(ct.approved, 0)
+           c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0)
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -751,7 +751,8 @@ static std::vector<Conversation> query_conversations(
         const std::string& query,
         const Bind&... bind) {
     std::vector<Conversation> out;
-    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved] :
+    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved,
+               approved_me] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -761,6 +762,7 @@ static std::vector<Conversation> query_conversations(
                  std::optional<std::string>,
                  int64_t,
                  std::string,
+                 int,
                  int,
                  int,
                  int>(query, bind...)) {
@@ -774,6 +776,7 @@ static std::vector<Conversation> query_conversations(
                         .unread = unread,
                         .priority = priority,
                         .request = sid && !me && !approved,
+                        .awaiting_approval = sid && !me && !approved_me,
                         .note_to_self = me});
     }
     return out;

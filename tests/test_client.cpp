@@ -2631,6 +2631,29 @@ TEST_CASE("Client: a linked device's answer accepts the request", "[client][requ
     CHECK(c->conversations()[0].id == id);
 }
 
+TEST_CASE("Client: writing first leaves us awaiting their approval", "[client][requests]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+
+    c->send_message(id, "are you there?");
+    sync(*c);
+
+    // The mirror of a request: we are in *their* requests list, and nothing they could be sent
+    // says so -- only a message back from them clears it.  Meanwhile it is an ordinary conversation
+    // of ours, since we chose to start it.
+    REQUIRE(c->conversations().size() == 1);
+    CHECK(c->conversations()[0].awaiting_approval);
+    CHECK_FALSE(c->conversations()[0].request);
+    CHECK(c->message_requests().empty());
+
+    deliver(*c, them, "here", from_epoch_ms(9000), "h1");
+
+    REQUIRE(c->conversation(id));
+    CHECK_FALSE(c->conversation(id)->awaiting_approval);
+    CHECK_FALSE(c->conversation(id)->request);
+}
+
 TEST_CASE("Client: note to self is never a message request", "[client][requests]") {
     TempClient c;
     auto me = self_convo(*c.client);
@@ -2641,6 +2664,9 @@ TEST_CASE("Client: note to self is never a message request", "[client][requests]
     CHECK(c->message_requests().empty());
     REQUIRE(c->conversation(me));
     CHECK_FALSE(c->conversation(me)->request);
+
+    // Nor awaiting anything: there is nobody at the other end to accept.
+    CHECK_FALSE(c->conversation(me)->awaiting_approval);
 }
 
 TEST_CASE("Client: a blocked account's messages are refused", "[client][requests]") {

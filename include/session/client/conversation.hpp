@@ -56,6 +56,19 @@ struct Conversation {
     /// Never true for note to self, and (for now) never true for a group or community.
     bool request = false;
 
+    /// The mirror of `request`: we have written to someone who has never written back, so they have
+    /// us in *their* message requests and have not answered.
+    ///
+    /// Set from the same evidence, read the other way round — nobody sends anything to say they
+    /// accepted, so the only thing that clears this is a message from them.  A display showing
+    /// "waiting for them to accept" wants this; the conversation is otherwise ordinary and is in
+    /// `conversations()` like any other, because it is one we chose to start.
+    ///
+    /// The two are mutually exclusive: their having written to us is exactly what makes this false
+    /// and what can make `request` true.  Exempt for note to self and, for now, for groups and
+    /// communities.
+    bool awaiting_approval = false;
+
     /// True for the conversation with our own account — Session's "Note to Self".  It is an
     /// ordinary DM rather than a kind of its own, so this is the only thing distinguishing it, and
     /// it is reported here so that displaying it differently does not require the caller to know
