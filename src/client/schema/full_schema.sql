@@ -234,9 +234,16 @@ CREATE TABLE message_attachments (
     -- protobuf and how a progress report names one of them.
     idx INTEGER NOT NULL,
 
-    -- The local file: for an outgoing attachment the one we uploaded, which may since have been
-    -- moved or deleted (only fatal if this row still needs uploading); for an incoming one where
-    -- we saved the download, NULL until it is asked for.
+    -- Where the file is, or came from: for an outgoing attachment the one we uploaded, for an
+    -- incoming one where the user asked us to save the download (NULL until they do).
+    --
+    -- Informational rather than owning -- closer to a symlink than a handle.  The file at the far
+    -- end belongs to the user in both directions: they chose it to attach, or they chose where to
+    -- put it.  So it may be moved or deleted behind our back (only fatal while this row still needs
+    -- uploading), and nothing here ever unlinks it.  A cache of our own -- attachments we keep
+    -- encrypted so they outlive the file server -- would be a third thing, at a path we picked, and
+    -- wants its own column: that is what a delete-attachments-before instruction is entitled to
+    -- remove, and sharing this column would leave it unable to tell our copy from the user's.
     path TEXT,
 
     -- Descriptive fields, carried straight through the protobuf pointer in both directions.
