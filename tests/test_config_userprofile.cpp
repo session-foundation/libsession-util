@@ -634,9 +634,6 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        // The config does not persist the proof version (dicts merge per-key, so an in-dict version
-        // can't reliably describe its sibling fields); a config-loaded proof is always v0.
-        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
@@ -647,7 +644,6 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
 
         // C
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
-        pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
         pro.proof.expiry_ts = pro_cpp.proof.expiry_at.time_since_epoch().count();
         std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
@@ -809,7 +805,6 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         auto store_proof = [&](std::chrono::sys_seconds expiry) {
             session::config::ProConfig pc = {};
             pc.rotating_privkey = rotating_sk;  // any valid 64-byte key (only sizes matter here)
-            pc.proof.version = session::ProProofVersion_v0;
             pc.proof.rotating_pubkey = rotating_pk;
             pc.proof.expiry_at = expiry;
             pr.set_pro_config(pc);
