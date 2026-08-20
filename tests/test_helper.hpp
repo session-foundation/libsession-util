@@ -340,6 +340,17 @@ class TestHelper {
 
     static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
 
+    /// Drives the database-to-config direction directly, which is what makes the round-trip
+    /// assertable: applying a config and then deriving one back has to be the identity, and only a
+    /// test can ask for the second half in isolation.
+    ///
+    /// A template so that this header need not know the client types; it is only ever instantiated
+    /// where they are complete.
+    template <typename Client, typename Id>
+    static void sync_contact(Client& c, const Id& id) {
+        c._sync_contact(id);
+    }
+
     /// The push debounce, driven by hand.  A test that waited out real intervals would be both slow
     /// and racy -- the timer fires on the event loop while the test reads from its own thread -- so
     /// what is exercised here is the decision the timer makes, with the clock supplied.

@@ -72,6 +72,8 @@ namespace session::client {
 using namespace std::literals;
 
 class Client {
+    friend class session::TestHelper;  // for unit tests
+
   public:
     /// Constructs a Client and, internally, the Core it sits on.  Takes exactly the options
     /// `core::Core` takes (database encryption, predefined_seed, callbacks, …) and forwards them.
@@ -547,6 +549,27 @@ class Client {
     //
     // Does nothing if it is already visible, so a pin the user chose is left alone.
     void _reveal_note_to_self(const ConversationId& id);
+
+    // Everything the Contacts config says about the people we know.
+    //
+    // Each entry projects onto three tables, because it carries three different kinds of fact: who
+    // someone is goes on `accounts` (which anyone we have merely *seen* also has), the relationship
+    // goes on `contacts`, and how the conversation with them behaves goes on `conversations`.
+    //
+    // Whose name wins is decided by `profile_updated`, not by which source spoke last: the config's
+    // name is applied only when its stamp is at least as new as the one we already hold, so a
+    // profile observed on a message that arrived out of order cannot overwrite a newer one.
+    void _reconcile_contacts();
+
+    // Writes what our tables say about one account back into the Contacts config.
+    //
+    // Re-derived from the rows rather than applied alongside each change, so the mapping lives in
+    // one place and cannot drift from the tables it describes: a caller has to remember to call
+    // this, but it cannot remember to call it *wrongly*.  Idempotent -- assigning a config field its
+    // existing value does not dirty it -- so it is safe to call whenever a row might have moved.
+    //
+    // Not for our own account: our profile is UserProfile's, and we are not a contact.
+    void _sync_contact(const ConversationId& id);
 
     // Our own name and picture, and the note-to-self conversation's settings.
     //

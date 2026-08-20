@@ -9,10 +9,12 @@ namespace session::client {
 struct Conversation {
     ConversationId id;
 
-    /// Best known display name, or empty if none is known yet.  For DMs this currently comes from
-    /// the `LokiProfile` attached to received messages; once Core carries the Contacts config it
-    /// will prefer the contact's name.  Empty is normal and expected — the caller decides how to
-    /// render an unnamed conversation.
+    /// Best known display name, or empty if none is known yet.
+    ///
+    /// For a DM this is the nickname we gave them if there is one, and otherwise the name they gave
+    /// themselves — learned either from the `LokiProfile` on a message or from the Contacts config,
+    /// whichever is the fresher.  Empty is normal and expected: an account we have seen but know
+    /// nothing else about has no name, and the caller decides how to render that.
     std::string display_name;
 
     /// Body of the most recent message, for a conversation-list preview.  Empty if the

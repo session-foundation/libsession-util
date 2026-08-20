@@ -9,6 +9,7 @@
 #include <oxen/quic/loop.hpp>
 #include <session/attachments.hpp>
 #include <session/client.hpp>
+#include <session/config/contacts.hpp>
 #include <session/config/expiring.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/format.hpp>
@@ -192,6 +193,7 @@ static ConversationId subject_to_id(
 static constexpr auto SUBJECT_JOIN = R"(
     FROM conversations c
     LEFT JOIN accounts a ON a.id = c.dm
+    LEFT JOIN contacts ct ON ct.account = a.id
     LEFT JOIN groups g ON g.id = c.closed_group
     LEFT JOIN communities m ON m.id = c.community
 )"sv;
@@ -591,7 +593,9 @@ void Client::save_attachment(
 // Only a DM has a name source so far; groups and communities gain one with the features.
 static const auto CONVO_COLUMNS = R"(
     SELECT c.id, a.session_id, g.group_id, m.base_url, m.room,
-           a.name, c.last_activity,
+           -- A nickname is ours for them and wins over the name they chose for themselves; falling
+           -- back means an account we have seen but never made a contact of still has a name.
+           coalesce(ct.nickname, a.name), c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
            c.unread_count, c.priority
@@ -758,6 +762,7 @@ void Client::_on_configs_changed(std::span<const config::Namespace> changed) {
     for (auto ns : changed) {
         switch (ns) {
             case config::Namespace::UserProfile: _reconcile_user_profile(); break;
+            case config::Namespace::Contacts: _reconcile_contacts(); break;
             default: break;  // The rest land with the configs that model them.
         }
     }
@@ -767,6 +772,206 @@ void Client::_reconcile_all() {
     // Each config joins this as it gains a reconciler; the sweep is what makes adding one apply to
     // state that arrived before it existed, rather than only to the next change after it.
     _reconcile_user_profile();
+    _reconcile_contacts();
+}
+
+void Client::_reconcile_contacts() {
+    auto& contacts = core.configs.contacts();
+    auto me = core.globals.session_id();
+
+    std::vector<ConversationId> touched;
+    std::vector<ConversationId> added;
+    bool order_changed = false;
+
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        for (const auto& entry : contacts) {
+            // Our own entry has no business being here -- our profile is UserProfile's, and we are
+            // not our own contact -- but another client may have written one, so it is skipped
+            // rather than trusted.
+            auto raw = oxenc::from_hex(entry.session_id);
+            if (raw.size() != 33)
+                continue;
+            b33 sid;
+            std::memcpy(sid.data(), raw.data(), 33);
+            if (std::ranges::equal(sid, me))
+                continue;
+
+            auto id = ConversationId::dm(sid);
+            auto account = identity_id(c, id);
+
+            std::optional<std::string> pic_url;
+            std::optional<std::span<const std::byte>> pic_key;
+            if (!entry.profile_picture.empty()) {
+                pic_url = entry.profile_picture.url;
+                pic_key = std::span<const std::byte>{
+                        entry.profile_picture.key.data(), entry.profile_picture.key.size()};
+            }
+
+            // Only when the config's stamp is at least as new as ours: a name observed from a
+            // message that arrived late must not displace a newer one.
+            bool renamed = false;
+            if (epoch_seconds(entry.profile_updated) >=
+                c.prepared_get<int64_t>("SELECT profile_updated FROM accounts WHERE id = ?", account))
+                renamed = c.prepared_exec(
+                                  R"(
+UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
+WHERE id = ?1
+  AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
+)",
+                                  account,
+                                  entry.name.empty() ? std::optional<std::string>{}
+                                                     : std::optional<std::string>{entry.name},
+                                  pic_url,
+                                  pic_key,
+                                  epoch_seconds(entry.profile_updated)) > 0;
+
+            // Pro flags are the profile's claim about itself, so they follow the profile.
+            c.prepared_exec(
+                    "UPDATE accounts SET pro_flags = ?2 WHERE id = ?1 AND pro_flags IS NOT ?2",
+                    account,
+                    static_cast<int64_t>(entry.profile_flags));
+
+            // Existence here *is* being a contact, so this is an upsert rather than an update: the
+            // row appearing is the fact being recorded.
+            bool new_contact = c.prepared_exec(
+                                       R"(
+INSERT INTO contacts (account, nickname, approved, approved_me, blocked) VALUES (?1, ?2, ?3, ?4, ?5)
+ON CONFLICT (account) DO UPDATE SET nickname = ?2, approved = ?3, approved_me = ?4, blocked = ?5
+WHERE (nickname, approved, approved_me, blocked) IS NOT (?2, ?3, ?4, ?5)
+)",
+                                       account,
+                                       entry.nickname.empty()
+                                               ? std::optional<std::string>{}
+                                               : std::optional<std::string>{entry.nickname},
+                                       entry.approved ? 1 : 0,
+                                       entry.approved_me ? 1 : 0,
+                                       entry.blocked ? 1 : 0) > 0;
+
+            // The config saying a contact exists is what brings the conversation into being -- a
+            // conversation is not defined by having messages in it, or emptying one would lose it.
+            auto convo = find_conversation(c, id);
+            bool created = false;
+            if (!convo) {
+                auto row = ensure_conversation(
+                        c,
+                        id,
+                        entry.created > 0 ? from_epoch_s(entry.created) : clock_now_ms());
+                convo = row.id;
+                created = row.created;
+            }
+
+            auto settings_changed =
+                    c.prepared_exec(
+                            R"(
+UPDATE conversations SET priority = ?2, notifications = ?3, mute_until = ?4, exp_mode = ?5,
+                         exp_timer = ?6, created = min(created, ?7)
+WHERE id = ?1
+  AND (priority, notifications, mute_until, exp_mode, exp_timer, created)
+   IS NOT (?2, ?3, ?4, ?5, ?6, min(created, ?7))
+)",
+                            *convo,
+                            entry.priority,
+                            static_cast<int>(entry.notifications),
+                            entry.mute_until,
+                            static_cast<int>(entry.exp_mode),
+                            static_cast<int64_t>(entry.exp_timer.count()),
+                            entry.created > 0 ? entry.created
+                                              : epoch_seconds(clock_now_ms())) > 0;
+
+            if (created)
+                added.push_back(id);
+            else if (renamed || new_contact || settings_changed)
+                touched.push_back(id);
+            if (created || settings_changed)
+                order_changed = true;
+        }
+
+        tx.commit();
+    }
+
+    for (const auto& id : added)
+        _emit_conversation_added(id);
+    for (const auto& id : touched)
+        _touch(id);
+    if (order_changed)
+        _emit_list_replaced();
+}
+
+void Client::_sync_contact(const ConversationId& id) {
+    if (id.type() != ConversationId::Type::dm ||
+        std::ranges::equal(id.session_id(), core.globals.session_id()))
+        return;
+
+    auto& contacts = core.configs.contacts();
+    auto hex = oxenc::to_hex(id.session_id());
+
+    auto c = core.database().conn();
+    auto row = c.prepared_maybe_get<
+            std::optional<std::string>,   // name
+            std::optional<std::string>,   // profile_pic_url
+            std::optional<sqlite::blob>,  // profile_pic_key
+            int64_t,                      // profile_updated
+            int64_t,                      // pro_flags
+            std::optional<std::string>,   // nickname
+            int,                          // approved
+            int,                          // approved_me
+            int>(                         // blocked
+            R"(
+        SELECT a.name, a.profile_pic_url, a.profile_pic_key, a.profile_updated, a.pro_flags,
+               ct.nickname, ct.approved, ct.approved_me, ct.blocked
+        FROM accounts a JOIN contacts ct ON ct.account = a.id
+        WHERE a.session_id = ?
+    )",
+            id.session_id());
+
+    // No contacts row means this account is not a contact, so the config should not say it is.
+    // Presence following the row is what makes removing a contact just "delete the row and sync",
+    // rather than a second place that has to remember to erase the entry too.
+    if (!row) {
+        contacts.erase(hex);
+        return;
+    }
+
+    auto [name, pic_url, pic_key, profile_updated, pro_flags, nickname, approved, approved_me,
+          blocked] = *row;
+
+    auto convo = c.prepared_maybe_get<int, int, int64_t, int, int64_t, int64_t>(
+            R"(
+        SELECT priority, notifications, mute_until, exp_mode, exp_timer, created
+        FROM conversations WHERE dm = (SELECT id FROM accounts WHERE session_id = ?)
+    )",
+            id.session_id());
+
+    auto entry = contacts.get_or_construct(hex);
+
+    entry.set_name(name.value_or(""));
+    entry.set_nickname(nickname.value_or(""));
+    if (pic_url && pic_key)
+        entry.profile_picture = {*pic_url, *pic_key};
+    else
+        entry.profile_picture.clear();
+    entry.profile_updated = as_sys_seconds(profile_updated);
+    entry.profile_flags = static_cast<ProProfileFlags>(pro_flags);
+    entry.approved = approved != 0;
+    entry.approved_me = approved_me != 0;
+    entry.blocked = blocked != 0;
+
+    if (convo) {
+        auto [priority, notifications, mute_until, exp_mode, exp_timer, created] = *convo;
+        entry.priority = priority;
+        entry.notifications = static_cast<config::notify_mode>(notifications);
+        entry.mute_until = mute_until;
+        entry.exp_mode = static_cast<config::expiration_mode>(exp_mode);
+        entry.exp_timer = std::chrono::seconds{exp_timer};
+        // The earliest anyone knows about wins, so that two devices disagreeing about when a
+        // conversation began settle on the earlier rather than alternating.
+        entry.created = entry.created > 0 ? std::min(entry.created, created) : created;
+    }
+
+    contacts.set(entry);
 }
 
 void Client::_reveal_note_to_self(const ConversationId& id) {

@@ -8,6 +8,7 @@
 #include <session/attachments.hpp>
 #include <session/client/sync_client.hpp>
 #include <session/clock.hpp>
+#include <session/config/contacts.hpp>
 #include <session/config/expiring.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/config/user_profile.hpp>
@@ -2003,6 +2004,112 @@ bool listed(SyncClient& c, const ConversationId& id) {
 }
 
 }  // namespace
+
+namespace {
+
+/// What another device pushed to its Contacts config, having set up one contact however the caller
+/// says.
+std::vector<std::vector<std::byte>> contacts_from_another_device(
+        SyncClient& c,
+        std::string_view session_id,
+        const std::function<void(config::contact_info&)>& change) {
+    auto seed = c.core.globals.account_seed();
+    config::Contacts theirs{seed.ed25519_secret(), std::nullopt};
+    auto entry = theirs.get_or_construct(std::string{session_id});
+    change(entry);
+    theirs.set(entry);
+    auto [seqno, messages, obsolete] = theirs.push();
+    return messages;
+}
+
+ConversationId dm_from_hex(std::string_view hex) {
+    auto raw = oxenc::from_hex(hex);
+    b33 sid;
+    std::memcpy(sid.data(), raw.data(), sid.size());
+    return ConversationId::dm(sid);
+}
+
+void merge_contacts(SyncClient& c, const std::vector<std::vector<std::byte>>& messages) {
+    std::vector<core::SwarmMessage> incoming;
+    for (size_t i = 0; i < messages.size(); i++) {
+        core::SwarmMessage m;
+        m.hash = fmt::format("contacthash{}", i);
+        m.data = messages[i];
+        incoming.push_back(std::move(m));
+    }
+    c.core.receive_messages(incoming, config::Namespace::Contacts, true);
+}
+
+}  // namespace
+
+TEST_CASE("Client: a merged contact reaches all three tables", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'a');
+    auto id = dm_from_hex(them);
+
+    auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) {
+        e.set_name("Padmé");
+        e.set_nickname("Pad");
+        e.approved = true;
+        e.approved_me = true;
+        e.priority = 3;
+        e.exp_mode = config::expiration_mode::after_read;
+        e.exp_timer = std::chrono::seconds{86400};
+    });
+    merge_contacts(*c.client, pushed);
+
+    // The conversation exists because the config says the contact does, not because anything has
+    // been said in it.
+    auto convo = c->conversation(id);
+    REQUIRE(convo);
+    CHECK(convo->priority == 3);
+
+    // Nickname wins over name for display, which is what the split is for.
+    CHECK(convo->display_name == "Pad");
+
+    auto conn = c->core.database().conn();
+    CHECK(conn.prepared_get<std::string>(
+                  "SELECT name FROM accounts WHERE session_id = ?", id.session_id()) == "Padmé");
+    auto [approved, approved_me, blocked] = conn.prepared_get<int, int, int>(
+            R"(SELECT approved, approved_me, blocked FROM contacts
+               WHERE account = (SELECT id FROM accounts WHERE session_id = ?))",
+            id.session_id());
+    CHECK(approved == 1);
+    CHECK(approved_me == 1);
+    CHECK(blocked == 0);
+}
+
+TEST_CASE("Client: re-deriving a contact changes nothing", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'b');
+    auto id = dm_from_hex(them);
+
+    auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) {
+        e.set_name("Leia");
+        e.set_nickname("Lei");
+        e.approved = true;
+        e.approved_me = true;
+        e.blocked = false;
+        e.priority = 7;
+        e.notifications = config::notify_mode::disabled;
+        e.mute_until = 1700000000;
+        e.exp_mode = config::expiration_mode::after_send;
+        e.exp_timer = std::chrono::seconds{600};
+        e.created = 1690000000;
+        e.profile_updated = std::chrono::sys_seconds{std::chrono::seconds{1695000000}};
+    });
+    merge_contacts(*c.client, pushed);
+
+    // The property that makes the mapping trustworthy: applying a config to the tables and then
+    // deriving a config back from those tables is the identity.  Anything lost, rounded or defaulted
+    // on the way through shows up here as a config that went dirty -- and a mapping that dirties on
+    // every pass would push a pointless update after every merge, forever.
+    auto& contacts = c->core.configs.contacts();
+    REQUIRE_FALSE(contacts.needs_push());
+    TestHelper::sync_contact(*c.client, id);
+    CHECK_FALSE(contacts.needs_push());
+    CHECK_FALSE(contacts.needs_dump());
+}
 
 TEST_CASE("Client: a new account starts with note to self hidden", "[client][configs]") {
     TempClient c;
