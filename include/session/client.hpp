@@ -561,6 +561,17 @@ class Client {
     // profile observed on a message that arrived out of order cannot overwrite a newer one.
     void _reconcile_contacts();
 
+    // Re-derives every contact we hold into the Contacts config.
+    //
+    // A no-op wherever the config already agrees, because assigning a config field its existing
+    // value does not dirty it -- so this only writes where the config was actually missing
+    // something.  That is what makes it safe to run before the deletion pass, and why it has to be:
+    // creating a contact commits the row and updates the config in memory, but the *dump* happens
+    // later, so a crash in between leaves a row that the config has never heard of.  Reconciled
+    // inward first, that row looks like a contact deleted elsewhere and is destroyed along with its
+    // history.  Derived outward first, it is simply published.
+    void _sync_all_contacts();
+
     // Writes what our tables say about one account back into the Contacts config.
     //
     // Re-derived from the rows rather than applied alongside each change, so the mapping lives in

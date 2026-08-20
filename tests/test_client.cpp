@@ -2022,6 +2022,22 @@ std::vector<std::vector<std::byte>> contacts_from_another_device(
     return messages;
 }
 
+/// A further push from a device that has seen ours: built from our own dump once ours has gone out,
+/// so it descends from our history rather than being a rival at the same seqno.  A rival merges to
+/// the union of the two, which is right but is never what a test about *removal* wants.
+std::vector<std::vector<std::byte>> contacts_update_from_another_device(
+        SyncClient& c, const std::function<void(config::Contacts&)>& change) {
+    auto& ours = c.core.configs.contacts();
+    auto [seqno, messages, obsolete] = ours.push();
+    ours.confirm_pushed(seqno, {"ourcontacts"});
+
+    auto seed = c.core.globals.account_seed();
+    config::Contacts theirs{seed.ed25519_secret(), ours.make_dump()};
+    change(theirs);
+    auto [their_seqno, their_messages, their_obsolete] = theirs.push();
+    return their_messages;
+}
+
 ConversationId dm_from_hex(std::string_view hex) {
     auto raw = oxenc::from_hex(hex);
     b33 sid;
@@ -2109,6 +2125,70 @@ TEST_CASE("Client: re-deriving a contact changes nothing", "[client][configs]") 
     TestHelper::sync_contact(*c.client, id);
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts.needs_dump());
+}
+
+TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][configs]") {
+    std::vector<ConversationId> gone;
+    callbacks cbs;
+    cbs.conversation_removed = [&](const ConversationId& id) { gone.push_back(id); };
+    TempClient c{cbs};
+
+    auto them = "05" + std::string(64, 'c');
+    auto id = dm_from_hex(them);
+
+    auto pushed = contacts_from_another_device(
+            *c.client, them, [](auto& e) { e.set_name("Anakin"); e.approved = true; });
+    merge_contacts(*c.client, pushed);
+    REQUIRE(c->conversation(id));
+
+    auto conn = c->core.database().conn();
+    auto account =
+            conn.prepared_get<int64_t>("SELECT id FROM accounts WHERE session_id = ?", them.size() ? id.session_id() : id.session_id());
+    conn.prepared_exec(
+            R"(INSERT INTO messages (conversation, sender, outgoing, timestamp, body)
+               VALUES ((SELECT id FROM conversations WHERE dm = ?1), ?1, 0, 1000, 'hi'))",
+            account);
+    REQUIRE(c->messages(id).size() == 1);
+
+    // Now the other device removes them entirely.  An absent entry can only mean the stronger
+    // thing, since hiding arrives as a negative priority instead.
+    auto emptied = contacts_update_from_another_device(
+            *c.client, [&](config::Contacts& theirs) { theirs.erase(them); });
+    merge_contacts(*c.client, emptied);
+
+    // Conversation and history both gone, and reported.
+    CHECK_FALSE(c->conversation(id));
+    CHECK(conn.prepared_get<int64_t>(
+                  "SELECT count(*) FROM messages WHERE sender = ?", account) == 0);
+    CHECK(std::ranges::find(gone, id) != gone.end());
+
+    // But not the account: we may have seen them in a group, and their profile renders that.
+    CHECK(conn.prepared_get<int64_t>(
+                  "SELECT count(*) FROM accounts WHERE session_id = ?", id.session_id()) == 1);
+    CHECK(conn.prepared_get<int64_t>(
+                  "SELECT count(*) FROM contacts WHERE account = ?", account) == 0);
+}
+
+TEST_CASE("Client: a contact whose dump was lost is published, not destroyed", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'e');
+    auto id = dm_from_hex(them);
+
+    auto pushed = contacts_from_another_device(
+            *c.client, them, [](auto& e) { e.set_name("Rey"); e.approved = true; });
+    merge_contacts(*c.client, pushed);
+    REQUIRE(c->conversation(id));
+
+    // Stand in for a crash between committing the row and writing the dump: the tables hold a
+    // contact the config has never heard of.  Reconciled inward first, that is indistinguishable
+    // from one deleted elsewhere and would be destroyed with its history.
+    REQUIRE(c->core.configs.contacts().erase(them));
+
+    c.reopen();
+
+    // Startup derives outward before reconciling inward, so it is published rather than deleted.
+    CHECK(c->conversation(id));
+    CHECK(c->core.configs.contacts().get(them).has_value());
 }
 
 TEST_CASE("Client: a new account starts with note to self hidden", "[client][configs]") {

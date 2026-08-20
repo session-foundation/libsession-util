@@ -769,6 +769,11 @@ void Client::_on_configs_changed(std::span<const config::Namespace> changed) {
 }
 
 void Client::_reconcile_all() {
+    // Outward before inward, and the order is load-bearing: reconciling inward can delete a contact
+    // the config does not mention, and a row whose dump was never written looks exactly like one
+    // deleted elsewhere.  Publishing what we hold first tells those two apart.
+    _sync_all_contacts();
+
     // Each config joins this as it gains a reconciler; the sweep is what makes adding one apply to
     // state that arrived before it existed, rather than only to the next change after it.
     _reconcile_user_profile();
@@ -781,11 +786,14 @@ void Client::_reconcile_contacts() {
 
     std::vector<ConversationId> touched;
     std::vector<ConversationId> added;
+    std::vector<ConversationId> removed;
     bool order_changed = false;
 
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
+
+        std::vector<b33> in_config;
 
         for (const auto& entry : contacts) {
             // Our own entry has no business being here -- our profile is UserProfile's, and we are
@@ -798,6 +806,8 @@ void Client::_reconcile_contacts() {
             std::memcpy(sid.data(), raw.data(), 33);
             if (std::ranges::equal(sid, me))
                 continue;
+
+            in_config.push_back(sid);
 
             auto id = ConversationId::dm(sid);
             auto account = identity_id(c, id);
@@ -889,6 +899,43 @@ WHERE id = ?1
                 order_changed = true;
         }
 
+        // A contact we hold that the merged config does not mention was removed on another device,
+        // and removing a contact takes the conversation and its history with it -- deliberately:
+        // someone who deletes a conversation means it deleted, not hidden on one device.  Merely
+        // *hiding* is a negative priority and arrives as an ordinary settings change above, so an
+        // absent entry can only mean the stronger thing.
+        //
+        // The account row stays: we may have seen them in a group or community, and their profile is
+        // needed to render that.  What is deleted is the relationship, not the person.
+        //
+        // Safe because the outward sweep runs first (see _reconcile_all): a contact of ours the
+        // config has never heard of gets published rather than reaching here.
+        std::vector<ConversationId> doomed;
+        for (auto sid : c.prepared_results<sqlite::blob_guts<b33>>(
+                     "SELECT a.session_id FROM contacts ct JOIN accounts a ON a.id = ct.account")) {
+            if (std::ranges::none_of(in_config, [&](const b33& kept) {
+                    return std::ranges::equal(kept, static_cast<const b33&>(sid));
+                }))
+                doomed.push_back(ConversationId::dm(sid));
+        }
+
+        for (const auto& id : doomed) {
+            auto account = c.prepared_get<int64_t>(
+                    "SELECT id FROM accounts WHERE session_id = ?", id.session_id());
+            c.prepared_exec("DELETE FROM contacts WHERE account = ?", account);
+
+            // Messages, their raw content and their attachments go with the conversation, by
+            // cascade.  The files those attachments name are the user's -- theirs to attach, or
+            // theirs to have saved -- so nothing is unlinked.
+            //
+            // That stops being the whole story once attachments are cached: a cached file *is*
+            // ours, and cascade will take the row naming it without any of our code running,
+            // leaving the file on disk with nothing left pointing at it.  Whatever adds that cache
+            // has to collect the paths here, before this delete, rather than trusting the cascade.
+            if (c.prepared_exec("DELETE FROM conversations WHERE dm = ?", account) > 0)
+                removed.push_back(id);
+        }
+
         tx.commit();
     }
 
@@ -896,8 +943,26 @@ WHERE id = ?1
         _emit_conversation_added(id);
     for (const auto& id : touched)
         _touch(id);
-    if (order_changed)
+    for (const auto& id : removed)
+        _emit([id](const callbacks& cbs) {
+            if (cbs.conversation_removed)
+                cbs.conversation_removed(id);
+        });
+    if (order_changed || !removed.empty())
         _emit_list_replaced();
+}
+
+void Client::_sync_all_contacts() {
+    std::vector<ConversationId> ids;
+    {
+        auto c = core.database().conn();
+        for (auto sid : c.prepared_results<sqlite::blob_guts<b33>>(
+                     "SELECT a.session_id FROM contacts ct JOIN accounts a ON a.id = ct.account"))
+            ids.push_back(ConversationId::dm(sid));
+    }
+    // Collected before syncing rather than while iterating: _sync_contact takes its own connection.
+    for (const auto& id : ids)
+        _sync_contact(id);
 }
 
 void Client::_sync_contact(const ConversationId& id) {
