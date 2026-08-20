@@ -18,6 +18,7 @@
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/session_network.hpp>
 #include <session/sqlite.hpp>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -1111,7 +1112,10 @@ void Client::_reconcile_contacts() {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
-        std::vector<b33> in_config;
+        // Ordered rather than a vector because the deletion pass below looks every stored contact up
+        // in it: scanning instead would make a routine merge quadratic in the size of the contact
+        // list, which is exactly the size that is allowed to be large.
+        std::set<b33> in_config;
 
         for (const auto& entry : contacts) {
             // Our own entry has no business being here -- our profile is UserProfile's, and we are
@@ -1125,7 +1129,7 @@ void Client::_reconcile_contacts() {
             if (std::ranges::equal(sid, me))
                 continue;
 
-            in_config.push_back(sid);
+            in_config.insert(sid);
 
             auto id = ConversationId::dm(sid);
             auto account = identity_id(c, id);
@@ -1262,12 +1266,9 @@ WHERE id = ?1
         // config has never heard of gets published rather than reaching here.
         std::vector<ConversationId> doomed;
         for (auto sid : c.prepared_results<sqlite::blob_guts<b33>>(
-                     "SELECT a.session_id FROM contacts ct JOIN accounts a ON a.id = ct.account")) {
-            if (std::ranges::none_of(in_config, [&](const b33& kept) {
-                    return std::ranges::equal(kept, static_cast<const b33&>(sid));
-                }))
+                     "SELECT a.session_id FROM contacts ct JOIN accounts a ON a.id = ct.account"))
+            if (!in_config.count(sid))
                 doomed.push_back(ConversationId::dm(sid));
-        }
 
         for (const auto& id : doomed) {
             auto account = c.prepared_get<int64_t>(
