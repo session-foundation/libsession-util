@@ -97,6 +97,15 @@ struct callbacks {
 
     /// An existing message changed — currently only its send state.
     std::function<void(const ConversationId&, const Message&)> message_updated;
+
+    /// Messages were deleted from a conversation, and anything displaying its history should read
+    /// it again.
+    ///
+    /// Unlike `conversation_list_replaced` this carries only the conversation and not the messages
+    /// themselves: a history is unbounded, and an application showing one page of it has no use for
+    /// the rest.  What deletes messages is a delete-before instruction, which can take any number
+    /// of them at once and is not otherwise describable as a sequence of removals.
+    std::function<void(const ConversationId&)> history_replaced;
 };
 
 }  // namespace session::client

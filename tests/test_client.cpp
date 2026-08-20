@@ -2045,6 +2045,22 @@ ConversationId dm_from_hex(std::string_view hex) {
     return ConversationId::dm(sid);
 }
 
+/// Puts a message into a DM at a chosen moment, which is what a test about deleting by timestamp
+/// needs and what send_message cannot give it.
+void insert_message(SyncClient& c, const ConversationId& id, int64_t timestamp, std::string body) {
+    auto conn = c.core.database().conn();
+    conn.prepared_exec(
+            R"(
+        INSERT INTO messages (conversation, sender, outgoing, timestamp, body)
+        VALUES ((SELECT c.id FROM conversations c JOIN accounts a ON a.id = c.dm
+                  WHERE a.session_id = ?1),
+                (SELECT id FROM accounts WHERE session_id = ?1), 0, ?2, ?3)
+    )",
+            id.session_id(),
+            timestamp,
+            body);
+}
+
 void merge_contacts(SyncClient& c, const std::vector<std::vector<std::byte>>& messages) {
     std::vector<core::SwarmMessage> incoming;
     for (size_t i = 0; i < messages.size(); i++) {
@@ -2142,8 +2158,8 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
     REQUIRE(c->conversation(id));
 
     auto conn = c->core.database().conn();
-    auto account =
-            conn.prepared_get<int64_t>("SELECT id FROM accounts WHERE session_id = ?", them.size() ? id.session_id() : id.session_id());
+    auto account = conn.prepared_get<int64_t>(
+            "SELECT id FROM accounts WHERE session_id = ?", id.session_id());
     conn.prepared_exec(
             R"(INSERT INTO messages (conversation, sender, outgoing, timestamp, body)
                VALUES ((SELECT id FROM conversations WHERE dm = ?1), ?1, 0, 1000, 'hi'))",
@@ -2349,4 +2365,171 @@ TEST_CASE("Client: reconciling twice does not disturb the list", "[client][confi
     REQUIRE(after);
     CHECK(after->last_activity == before->last_activity);
     CHECK(after->display_name == before->display_name);
+}
+
+TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '1');
+    auto id = dm_from_hex(them);
+
+    // Someone we have merely seen: an account row and nothing else, which is what an unanswered
+    // message request looks like.
+    {
+        auto conn = c->core.database().conn();
+        conn.prepared_exec("INSERT INTO accounts (session_id) VALUES (?)", id.session_id());
+    }
+    REQUIRE_FALSE(c->core.configs.contacts().get(them));
+
+    c->set_blocked(id, true);
+
+    // The block has to be synced and the entry is the only place it can live, so blocking makes
+    // one.  It does not approve them: refusing someone's messages is not accepting them.
+    auto entry = c->core.configs.contacts().get(them);
+    REQUIRE(entry);
+    CHECK(entry->blocked);
+    CHECK_FALSE(entry->approved);
+
+    c->set_blocked(id, false);
+    REQUIRE(c->core.configs.contacts().get(them));
+    CHECK_FALSE(c->core.configs.contacts().get(them)->blocked);
+}
+
+TEST_CASE("Client: clearing a conversation says when it was cleared", "[client][configs]") {
+    std::vector<ConversationId> reloaded;
+    callbacks cbs;
+    cbs.history_replaced = [&](const ConversationId& id) { reloaded.push_back(id); };
+    TempClient c{cbs};
+
+    auto them = "05" + std::string(64, '2');
+    auto id = dm_from_hex(them);
+    c->create_conversation(id);
+    insert_message(*c.client, id, 1000, "hi");
+    REQUIRE(c->messages(id).size() == 1);
+
+    auto before = std::chrono::floor<std::chrono::seconds>(clock_now_ms());
+    c->clear_messages(id);
+
+    CHECK(c->messages(id).empty());
+    CHECK(c->conversation(id));  // The conversation stays; only its history went.
+    CHECK(std::ranges::find(reloaded, id) != reloaded.end());
+
+    // And the moment is recorded rather than the deletion being local, so a device that has been
+    // offline through all of this deletes the same messages when it catches up.
+    auto entry = c->core.configs.contacts().get(them);
+    REQUIRE(entry);
+    CHECK(entry->delete_before >= before);
+}
+
+TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '3');
+    auto id = dm_from_hex(them);
+    c->create_conversation(id);
+    c->set_priority(id, 5);
+    insert_message(*c.client, id, 1000, "hi");
+    REQUIRE(listed(*c.client, id));
+
+    c->delete_conversation(id);
+
+    CHECK_FALSE(listed(*c.client, id));
+    CHECK(c->messages(id).empty());
+
+    auto entry = c->core.configs.contacts().get(them);
+    REQUIRE(entry);  // Still a contact, so a message from them brings the conversation back.
+    CHECK(entry->approved);
+    CHECK(entry->priority == -1);  // The pin it had is not among the things kept.
+    CHECK(entry->delete_before > std::chrono::sys_seconds{});
+}
+
+TEST_CASE("Client: hiding note to self keeps what is in it", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+    c->create_conversation(me);
+    insert_message(*c.client, me, 1000, "note");
+    REQUIRE(listed(*c.client, me));
+
+    c->delete_conversation(me, /*keep_messages=*/true);
+
+    CHECK_FALSE(listed(*c.client, me));
+    CHECK(c->messages(me).size() == 1);
+    CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
+
+    // No instruction to destroy anything, which is the whole difference between hiding a
+    // conversation and deleting one.
+    CHECK(c->core.configs.user_profile().get_nts_delete_before() == std::chrono::sys_seconds{});
+}
+
+TEST_CASE("Client: deleting a contact takes the entry that held the block", "[client][configs]") {
+    std::vector<ConversationId> gone;
+    callbacks cbs;
+    cbs.conversation_removed = [&](const ConversationId& id) { gone.push_back(id); };
+    TempClient c{cbs};
+
+    auto them = "05" + std::string(64, '4');
+    auto id = dm_from_hex(them);
+    c->create_conversation(id);
+    c->set_blocked(id, true);
+    insert_message(*c.client, id, 1000, "hi");
+
+    c->delete_contact(id);
+
+    CHECK_FALSE(c->conversation(id));
+    CHECK(std::ranges::find(gone, id) != gone.end());
+
+    // No entry means no delete-before instruction is owed: another device merging this drops the
+    // conversation and its history because the contact is gone, not because it was told to.  It
+    // also means the block is gone, since the entry was the only thing holding it.
+    CHECK_FALSE(c->core.configs.contacts().get(them));
+
+    auto conn = c->core.database().conn();
+    CHECK(conn.prepared_get<int64_t>("SELECT count(*) FROM messages") == 0);
+    CHECK(conn.prepared_get<int64_t>(
+                  "SELECT count(*) FROM accounts WHERE session_id = ?", id.session_id()) == 1);
+}
+
+TEST_CASE("Client: a delete-before from another device destroys history", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '5');
+    auto id = dm_from_hex(them);
+
+    auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) { e.approved = true; });
+    merge_contacts(*c.client, pushed);
+    REQUIRE(c->conversation(id));
+
+    insert_message(*c.client, id, 1'000'000, "old");
+    insert_message(*c.client, id, 3'000'000, "new");
+    REQUIRE(c->messages(id).size() == 2);
+
+    // Retroactive: what the instruction is about is the history that was there when someone chose
+    // to destroy it, not merely what arrives after it.
+    auto cleared = contacts_update_from_another_device(*c.client, [&](config::Contacts& theirs) {
+        auto e = theirs.get_or_construct(them);
+        e.delete_before = std::chrono::sys_seconds{2000s};
+        theirs.set(e);
+    });
+    merge_contacts(*c.client, cleared);
+
+    auto left = c->messages(id);
+    REQUIRE(left.size() == 1);
+    CHECK(left[0].body == "new");
+}
+
+TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '6');
+    auto id = dm_from_hex(them);
+    c->create_conversation(id);
+
+    // Another device cleared at a moment this one has not reached yet -- clock skew is enough for
+    // that.  Publishing our own, smaller value would tell it to un-delete what it destroyed.
+    auto& contacts = c->core.configs.contacts();
+    auto later = std::chrono::floor<std::chrono::seconds>(clock_now_ms()) + 1h;
+    auto entry = contacts.get_or_construct(them);
+    entry.delete_before = later;
+    contacts.set(entry);
+
+    c->clear_messages(id);
+
+    REQUIRE(contacts.get(them));
+    CHECK(contacts.get(them)->delete_before == later);
 }

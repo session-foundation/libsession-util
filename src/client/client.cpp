@@ -245,6 +245,56 @@ static ConvoRow ensure_conversation(
             created};
 }
 
+// Makes an account a contact if it is not one already, and says whether that changed anything.
+// Must be called inside the caller's transaction.
+//
+// Anything that records a fact about a relationship needs this first: the fact belongs in the
+// Contacts config, and a row here is what an entry there is made from, so there is nowhere to put
+// it otherwise.
+static bool ensure_contact(sqlite::Connection& c, int64_t account, bool approved) {
+    return c.prepared_exec(
+                   "INSERT OR IGNORE INTO contacts (account, approved) VALUES (?, ?)",
+                   account,
+                   approved ? 1 : 0) > 0;
+}
+
+// Carries out a delete-before instruction, and says whether anything went.  Must be called inside
+// the caller's transaction.
+//
+// The unread count is recomputed rather than decremented by what was deleted: what counts as unread
+// is the application's policy and is about to grow (mutes, requests, tombstones), so a second place
+// applying it is a second place to get it wrong.
+static bool delete_messages_before(sqlite::Connection& c, int64_t convo, sys_ms before) {
+    if (c.prepared_exec(
+                "DELETE FROM messages WHERE conversation = ?1 AND timestamp < ?2",
+                convo,
+                to_ms(before)) == 0)
+        return false;
+
+    c.prepared_exec(
+            R"(
+        UPDATE conversations SET unread_count = (
+            SELECT COUNT(*) FROM messages m
+            WHERE m.conversation = conversations.id AND m.outgoing = 0
+              AND m.timestamp > conversations.last_read)
+        WHERE id = ?
+    )",
+            convo);
+    return true;
+}
+
+// As above for a delete-attachments-before instruction, which takes the files but leaves the
+// messages that carried them.  Must be called inside the caller's transaction.
+static bool delete_attachments_before(sqlite::Connection& c, int64_t convo, sys_ms before) {
+    return c.prepared_exec(
+                   R"(
+        DELETE FROM message_attachments WHERE message IN
+            (SELECT id FROM messages WHERE conversation = ?1 AND timestamp < ?2)
+    )",
+                   convo,
+                   to_ms(before)) > 0;
+}
+
 // Returns the conversation row id, or nullopt if we have no such conversation.
 static std::optional<int64_t> find_conversation(sqlite::Connection& c, const ConversationId& id) {
     auto kind = kind_of(id.type());
@@ -369,6 +419,20 @@ void Client::_emit_conversation_added(const ConversationId& id) {
     });
 }
 
+void Client::_emit_conversation_removed(const ConversationId& id) {
+    _emit([id](const callbacks& cbs) {
+        if (cbs.conversation_removed)
+            cbs.conversation_removed(id);
+    });
+}
+
+void Client::_emit_history_replaced(const ConversationId& id) {
+    _emit([id](const callbacks& cbs) {
+        if (cbs.history_replaced)
+            cbs.history_replaced(id);
+    });
+}
+
 void Client::_emit_message(bool added, const ConversationId& id, int64_t message_id) {
     auto msg = _message(message_id);
     if (!msg)
@@ -429,13 +493,21 @@ void Client::_require_readable(const std::vector<OutgoingAttachment>& attachment
     }
 }
 
-void Client::_require_dm(const ConversationId& id) {
+void Client::_require_dm(std::string_view op, const ConversationId& id) {
     // Checked on the calling thread so caller error surfaces at the call site rather than inside
     // the loop, where the callback form would only be able to log it.
     if (id.type() != ConversationId::Type::dm)
         throw std::invalid_argument{
-                "send_message: only DM conversations are supported so far (got type {})"_format(
-                        static_cast<int>(id.type()))};
+                "{}: only DM conversations are supported so far (got type {})"_format(
+                        op, static_cast<int>(id.type()))};
+}
+
+void Client::_require_contact(std::string_view op, const ConversationId& id) {
+    _require_dm(op, id);
+    // Our own account is not a contact of ours -- there is no entry to block or to remove, and
+    // what note to self does have lives in UserProfile.
+    if (is_note_to_self(id))
+        throw std::invalid_argument{"{}: not applicable to your own account"_format(op)};
 }
 
 void Client::log_operation_failure(const std::exception& e) {
@@ -466,7 +538,7 @@ void Client::send_message(
         std::vector<OutgoingAttachment> attachments,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
         std::function<void(std::optional<std::string>, int64_t)> cb) {
-    _require_dm(id);
+    _require_dm("send_message", id);
     _require_readable(attachments);
 
     _async([this,
@@ -494,7 +566,7 @@ void Client::conversation(
 void Client::create_conversation(
         const ConversationId& id,
         std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
-    _require_dm(id);
+    _require_dm("create_conversation", id);
     _async([this, id] { return std::optional{_create_conversation(id)}; }, std::move(cb));
 }
 
@@ -515,6 +587,39 @@ void Client::set_priority(
         int priority,
         std::function<void(std::optional<std::string>)> cb) {
     _async([this, id, priority] { _set_priority(id, priority); }, std::move(cb));
+}
+
+void Client::set_blocked(
+        const ConversationId& id,
+        bool blocked,
+        std::function<void(std::optional<std::string>)> cb) {
+    _require_contact("set_blocked", id);
+    _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
+}
+
+void Client::clear_messages(
+        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
+    _require_dm("clear_messages", id);
+    _async([this, id] { _clear_messages(id); }, std::move(cb));
+}
+
+void Client::delete_conversation(
+        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
+    delete_conversation(id, false, std::move(cb));
+}
+
+void Client::delete_conversation(
+        const ConversationId& id,
+        bool keep_messages,
+        std::function<void(std::optional<std::string>)> cb) {
+    _require_dm("delete_conversation", id);
+    _async([this, id, keep_messages] { _delete_conversation(id, keep_messages); }, std::move(cb));
+}
+
+void Client::delete_contact(
+        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
+    _require_contact("delete_contact", id);
+    _async([this, id] { _delete_contact(id); }, std::move(cb));
 }
 
 void Client::messages(
@@ -547,7 +652,7 @@ void Client::send_message(
         const ConversationId& id,
         std::string_view body,
         std::function<void(std::optional<std::string>, int64_t)> cb) {
-    _require_dm(id);
+    _require_dm("send_message", id);
     _async([this, id, body = std::string{body}] { return _send_message(id, body); }, std::move(cb));
 }
 
@@ -670,13 +775,24 @@ std::optional<Conversation> Client::_conversation(const ConversationId& id) {
 }
 
 Conversation Client::_create_conversation(const ConversationId& id) {
-    bool created;
+    bool created, contacted = false;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
         created = ensure_conversation(c, id, clock_now_ms()).created;
+
+        // Opening a conversation with someone makes them an approved contact: choosing to write to
+        // them is what approving them is.  It is also the only way the conversation can be synced
+        // at all, since everything a one-to-one conversation carries lives in that entry.
+        //
+        // Deliberately not what an incoming message from a stranger does -- that is a message
+        // request, and stays one until we answer it.
+        if (id.type() == ConversationId::Type::dm && !is_note_to_self(id))
+            contacted = ensure_contact(c, identity_id(c, id), true);
         tx.commit();
     }
+    if (created || contacted)
+        _sync_conversation(id);
     if (created)
         _emit_conversation_added(id);
     return *_conversation(id);
@@ -744,8 +860,149 @@ void Client::_set_priority(const ConversationId& id, int priority) {
         tx.commit();
     }
 
-    if (changed > 0)
+    if (changed > 0) {
+        _sync_conversation(id);
         _emit_list_replaced();
+    }
+}
+
+void Client::_set_blocked(const ConversationId& id, bool blocked) {
+    bool changed = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+        auto account = identity_id(c, id);
+
+        // Blocking someone we have never made a contact of is the ordinary case rather than the
+        // exception -- a message request is exactly that -- so the row is created rather than
+        // required.  Not approved by it: refusing someone's messages is not accepting them.
+        changed = ensure_contact(c, account, false);
+        changed |= c.prepared_exec(
+                           "UPDATE contacts SET blocked = ?2"
+                           " WHERE account = ?1 AND blocked IS NOT ?2",
+                           account,
+                           blocked ? 1 : 0) > 0;
+        tx.commit();
+    }
+
+    if (!changed)
+        return;
+    _sync_contact(id);
+    _touch(id);
+}
+
+void Client::_clear_messages(const ConversationId& id) {
+    auto now = clock_now_ms();
+    bool emptied = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        emptied = delete_messages_before(c, *convo, now);
+        tx.commit();
+    }
+
+    // Published whether or not this device had anything to delete: the instruction is about what
+    // every device holds, and finding none here says nothing about the rest.
+    _set_delete_before(id, now);
+
+    if (emptied) {
+        _emit_history_replaced(id);
+        _touch(id);
+    }
+}
+
+void Client::_delete_conversation(const ConversationId& id, bool keep_messages) {
+    auto now = clock_now_ms();
+    bool emptied = false, hidden = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        if (!keep_messages)
+            emptied = delete_messages_before(c, *convo, now);
+
+        // Hidden rather than deleted, and that is the whole difference from delete_contact: what
+        // says the conversation exists is the config entry, which stays, so removing the row would
+        // only have it reinstated by the next reconciliation.  A pinned conversation loses its pin
+        // along the way, which is why this is not conditional on the priority being 0.
+        hidden = c.prepared_exec(
+                         "UPDATE conversations SET priority = -1 WHERE id = ? AND priority >= 0",
+                         *convo) > 0;
+        tx.commit();
+    }
+
+    if (!keep_messages)
+        _set_delete_before(id, now);
+    _sync_conversation(id);
+
+    if (emptied)
+        _emit_history_replaced(id);
+    if (hidden)
+        _emit_list_replaced();
+}
+
+void Client::_delete_contact(const ConversationId& id) {
+    bool removed = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto account = c.prepared_maybe_get<int64_t>(
+                "SELECT id FROM accounts WHERE session_id = ?", id.session_id());
+        if (!account)
+            return;
+
+        // The nickname, both approvals and the block are columns of the row being deleted, so
+        // there is nothing to reset first: they exist only for as long as the relationship does.
+        c.prepared_exec("DELETE FROM contacts WHERE account = ?", *account);
+
+        // Messages, their raw content and their attachments follow the conversation by cascade;
+        // the files those attachments name belong to the user and are not unlinked.  The account
+        // row stays -- see _reconcile_contacts, which deletes the same way for the same reasons.
+        removed = c.prepared_exec("DELETE FROM conversations WHERE dm = ?", *account) > 0;
+        tx.commit();
+    }
+
+    // No delete-before instruction here, and none is owed: the entry going from the config is
+    // itself the instruction, and a device merging that removes the conversation and its history.
+    _sync_contact(id);
+
+    if (removed) {
+        _emit_conversation_removed(id);
+        _emit_list_replaced();
+    }
+}
+
+void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
+    // The configs carry seconds.  Truncating rather than rounding is what keeps the instruction
+    // from reaching a message sent just after it: this device has already deleted to the
+    // millisecond, so the others delete the same set less any straggler within the same second.
+    auto secs = std::chrono::floor<std::chrono::seconds>(before);
+
+    // Never backwards, in either config: an instruction to destroy history is not something a
+    // later but smaller value is entitled to take back.
+    if (is_note_to_self(id)) {
+        auto& profile = core.configs.user_profile();
+        if (profile.get_nts_delete_before() < secs)
+            profile.set_nts_delete_before(secs);
+        return;
+    }
+
+    auto& contacts = core.configs.contacts();
+    auto entry = contacts.get(oxenc::to_hex(id.session_id()));
+    if (!entry || entry->delete_before >= secs)
+        return;
+    entry->delete_before = secs;
+    contacts.set(*entry);
 }
 
 void Client::_emit_list_replaced() {
@@ -787,6 +1044,7 @@ void Client::_reconcile_contacts() {
     std::vector<ConversationId> touched;
     std::vector<ConversationId> added;
     std::vector<ConversationId> removed;
+    std::vector<ConversationId> cleared;
     bool order_changed = false;
 
     {
@@ -891,9 +1149,22 @@ WHERE id = ?1
                             entry.created > 0 ? entry.created
                                               : epoch_seconds(clock_now_ms())) > 0;
 
+            // Retroactive by definition: what a delete-before instruction is about is the history
+            // that was there when someone chose to destroy it, so it is applied to what we hold and
+            // not only to what arrives afterwards.  Idempotent, so re-applying it on every merge
+            // costs a lookup and deletes nothing the second time.
+            bool history_changed = false;
+            if (entry.delete_before > std::chrono::sys_seconds{})
+                history_changed = delete_messages_before(c, *convo, sys_ms{entry.delete_before});
+            if (entry.delete_attach_before > std::chrono::sys_seconds{})
+                history_changed |= delete_attachments_before(
+                        c, *convo, sys_ms{entry.delete_attach_before});
+            if (history_changed)
+                cleared.push_back(id);
+
             if (created)
                 added.push_back(id);
-            else if (renamed || new_contact || settings_changed)
+            else if (renamed || new_contact || settings_changed || history_changed)
                 touched.push_back(id);
             if (created || settings_changed)
                 order_changed = true;
@@ -941,13 +1212,12 @@ WHERE id = ?1
 
     for (const auto& id : added)
         _emit_conversation_added(id);
+    for (const auto& id : cleared)
+        _emit_history_replaced(id);
     for (const auto& id : touched)
         _touch(id);
     for (const auto& id : removed)
-        _emit([id](const callbacks& cbs) {
-            if (cbs.conversation_removed)
-                cbs.conversation_removed(id);
-        });
+        _emit_conversation_removed(id);
     if (order_changed || !removed.empty())
         _emit_list_replaced();
 }
@@ -963,6 +1233,26 @@ void Client::_sync_all_contacts() {
     // Collected before syncing rather than while iterating: _sync_contact takes its own connection.
     for (const auto& id : ids)
         _sync_contact(id);
+}
+
+void Client::_sync_conversation(const ConversationId& id) {
+    if (id.type() != ConversationId::Type::dm)
+        return;  // Groups and communities land with UserGroups.
+
+    if (!is_note_to_self(id))
+        return _sync_contact(id);
+
+    auto c = core.database().conn();
+    auto priority = c.prepared_maybe_get<int>(
+            R"(
+        SELECT priority FROM conversations
+        WHERE dm = (SELECT id FROM accounts WHERE session_id = ?)
+    )",
+            id.session_id());
+
+    // No row means there is no note-to-self conversation, which is what a negative priority says
+    // in a config that has no entry to be absent -- see _reveal_note_to_self.
+    core.configs.user_profile().set_nts_priority(priority.value_or(-1));
 }
 
 void Client::_sync_contact(const ConversationId& id) {
@@ -1010,6 +1300,10 @@ void Client::_sync_contact(const ConversationId& id) {
     )",
             id.session_id());
 
+    // Built on top of whatever entry is already there, which is also how the delete-before
+    // instruction survives this: no row holds it -- it is an instruction about history rather than
+    // a property of the contact -- so there is nothing here to re-derive it from, and overwriting
+    // the entry wholesale would quietly revoke it.
     auto entry = contacts.get_or_construct(hex);
 
     entry.set_name(name.value_or(""));
@@ -1074,7 +1368,8 @@ void Client::_reconcile_user_profile() {
                          : static_cast<int>(config::expiration_mode::none);
     int64_t exp_timer = expiry ? expiry->count() : 0;
 
-    bool profile_changed = false, convo_changed = false, order_changed = false, created = false;
+    bool profile_changed = false, convo_changed = false, order_changed = false, created = false,
+         history_changed = false;
 
     {
         auto c = core.database().conn();
@@ -1131,6 +1426,15 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
                             *convo,
                             exp_mode,
                             exp_timer) > 0;
+
+            // Retroactive, and idempotent, for the reasons given in _reconcile_contacts.
+            auto delete_before = profile.get_nts_delete_before();
+            auto delete_attach_before = profile.get_nts_delete_attach_before();
+            if (delete_before > std::chrono::sys_seconds{})
+                history_changed = delete_messages_before(c, *convo, sys_ms{delete_before});
+            if (delete_attach_before > std::chrono::sys_seconds{})
+                history_changed |=
+                        delete_attachments_before(c, *convo, sys_ms{delete_attach_before});
         }
 
         tx.commit();
@@ -1138,8 +1442,10 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 
     if (created)
         _emit_conversation_added(me);
-    else if (profile_changed || convo_changed)
+    else if (profile_changed || convo_changed || history_changed)
         _touch(me);
+    if (history_changed)
+        _emit_history_replaced(me);
     if (order_changed)
         _emit_list_replaced();
 }

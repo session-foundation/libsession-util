@@ -39,7 +39,7 @@ class SyncClient : public Client {
     }
 
     Conversation create_conversation(const ConversationId& id) {
-        _require_dm(id);
+        _require_dm("create_conversation", id);
         return core.loop().call_get([&] { return _create_conversation(id); });
     }
 
@@ -49,6 +49,26 @@ class SyncClient : public Client {
 
     void set_priority(const ConversationId& id, int priority) {
         core.loop().call_get([&] { _set_priority(id, priority); });
+    }
+
+    void set_blocked(const ConversationId& id, bool blocked) {
+        _require_dm("set_blocked", id);
+        core.loop().call_get([&] { _set_blocked(id, blocked); });
+    }
+
+    void clear_messages(const ConversationId& id) {
+        _require_dm("clear_messages", id);
+        core.loop().call_get([&] { _clear_messages(id); });
+    }
+
+    void delete_conversation(const ConversationId& id, bool keep_messages = false) {
+        _require_dm("delete_conversation", id);
+        core.loop().call_get([&] { _delete_conversation(id, keep_messages); });
+    }
+
+    void delete_contact(const ConversationId& id) {
+        _require_dm("delete_contact", id);
+        core.loop().call_get([&] { _delete_contact(id); });
     }
 
     std::vector<Message> messages(
@@ -63,7 +83,7 @@ class SyncClient : public Client {
     }
 
     int64_t send_message(const ConversationId& id, std::string_view body) {
-        _require_dm(id);
+        _require_dm("send_message", id);
         return core.loop().call_get([&] { return _send_message(id, body); });
     }
 
@@ -74,7 +94,7 @@ class SyncClient : public Client {
             std::function<
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload = nullptr) {
-        _require_dm(id);
+        _require_dm("send_message", id);
         _require_readable(attachments);
         return core.loop().call_get(
                 [&] { return _send_message(id, body, attachments, std::move(on_upload)); });

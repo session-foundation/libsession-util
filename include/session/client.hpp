@@ -183,6 +183,57 @@ class Client {
     /// so what changed is the list, not a row in it.
     void set_priority(const ConversationId& id, int priority, failable_function<void()> cb);
 
+    // -- Blocking and deleting ---------------------------------------------------------------
+    //
+    // The four destructive things a client offers, named for what a user is choosing rather than
+    // for what happens underneath — "delete conversation" and "delete contact" differ by what they
+    // leave behind, not by how they delete.  They are composed here, and not left to a UI to
+    // assemble out of smaller pieces, because every Session client has to compose them the same
+    // way: which fields a deletion resets, and what it tells other devices, is part of what the
+    // operation *is*, and three clients each deriving it separately is three chances to diverge.
+    //
+    // What they have in common is that the deletion is *synced as an instruction*, not as a local
+    // act.  Clearing a conversation records the moment it was cleared, so every device deletes what
+    // it holds from before then — including messages this one never had, and messages that arrive
+    // afterwards but are older than the instruction.  A device that was offline for the whole thing
+    // catches up when it merges, rather than keeping a history its owner told it to destroy.
+
+    /// Blocks or unblocks an account.  Blocking is synced, so it takes effect on every device.
+    ///
+    /// Blocking someone we hold no contact entry for creates one, since being blocked is a fact
+    /// about a relationship and there is nowhere else to record it.  It does not approve them,
+    /// and unblocking does not undo anything else the block implied.
+    void set_blocked(const ConversationId& id, bool blocked, failable_function<void()> cb);
+
+    /// Deletes a conversation's messages, keeping the conversation itself and everything that
+    /// describes it — the contact, the nickname, the pin.
+    void clear_messages(const ConversationId& id, failable_function<void()> cb);
+
+    /// Removes a conversation from the list without forgetting who it is with: the contact entry
+    /// stays, so a nickname and an approval survive, and a new message from them brings the
+    /// conversation back.
+    ///
+    /// `keep_messages` distinguishes the two things a UI calls this for.  Deleting a conversation
+    /// destroys its history; hiding one — which is what "Hide" on Note to Self does — leaves the
+    /// history to come back with it.
+    void delete_conversation(const ConversationId& id, failable_function<void()> cb);
+    void delete_conversation(
+            const ConversationId& id, bool keep_messages, failable_function<void()> cb);
+
+    /// Deletes the contact along with the conversation and its history, everywhere.
+    ///
+    /// This is the strong one: the entry goes from the Contacts config, so every device drops the
+    /// conversation rather than merely hiding it, and what the entry held — the nickname, the
+    /// approval in both directions, the block — goes with it.  Deleting a blocked contact therefore
+    /// unblocks them; the block lived in the entry that was removed.
+    ///
+    /// What survives is the account itself, because we may still see them in a group or a
+    /// community and need their name to render it.  A message from them afterwards arrives as a
+    /// message request, exactly as one from a stranger would.
+    ///
+    /// Takes no `keep_messages`: there would be no conversation left to keep them in.
+    void delete_contact(const ConversationId& id, failable_function<void()> cb);
+
     /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
     /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
     /// not repeated.
@@ -427,6 +478,10 @@ class Client {
     Conversation _create_conversation(const ConversationId& id);
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
     void _set_priority(const ConversationId& id, int priority);
+    void _set_blocked(const ConversationId& id, bool blocked);
+    void _clear_messages(const ConversationId& id);
+    void _delete_conversation(const ConversationId& id, bool keep_messages);
+    void _delete_contact(const ConversationId& id);
     std::vector<Message> _messages(
             const ConversationId& id, int limit, std::optional<MessageCursor> before);
     std::optional<Message> _message(int64_t id);
@@ -503,7 +558,8 @@ class Client {
     void _dispatch(std::function<void()> work);
 
   protected:
-    void _require_dm(const ConversationId& id);
+    void _require_dm(std::string_view op, const ConversationId& id);
+    void _require_contact(std::string_view op, const ConversationId& id);
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
   private:
@@ -582,6 +638,19 @@ class Client {
     // Not for our own account: our profile is UserProfile's, and we are not a contact.
     void _sync_contact(const ConversationId& id);
 
+    // As above, for whichever config carries the conversation rather than for a contact
+    // specifically.  The dispatch is the point: something that has changed a conversation should
+    // not have to know that note to self lives in UserProfile while everybody else lives in
+    // Contacts.
+    void _sync_conversation(const ConversationId& id);
+
+    // Records a delete-before instruction in the config that carries this conversation, so that
+    // every device deletes the same history rather than only the one the user was looking at.
+    //
+    // Never moves the instruction backwards.  Two devices clearing at different moments merge to
+    // one value, and the one that destroys more is the one that was asked for.
+    void _set_delete_before(const ConversationId& id, sys_ms before);
+
     // Our own name and picture, and the note-to-self conversation's settings.
     //
     // This one runs the opposite way round to the others: UserProfile is authoritative and the
@@ -649,7 +718,9 @@ class Client {
     static void log_operation_failure(const std::exception& e);
 
     void _emit_conversation_added(const ConversationId& id);
+    void _emit_conversation_removed(const ConversationId& id);
     void _emit_list_replaced();
+    void _emit_history_replaced(const ConversationId& id);
     void _emit_message(bool added, const ConversationId& id, int64_t message_id);
 
     // Conversations whose settled state still has to be reported.  A conversation is marked here
