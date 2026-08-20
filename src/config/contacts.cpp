@@ -78,6 +78,8 @@ void contact_info::load(const dict& info_dict) {
     }
 
     profile_updated = ts_or_epoch(info_dict, "t");
+    delete_before = ts_or_epoch(info_dict, "d");
+    delete_attach_before = ts_or_epoch(info_dict, "D");
     approved = int_or_0(info_dict, "a");
     approved_me = int_or_0(info_dict, "A");
     blocked = int_or_0(info_dict, "b");
@@ -142,6 +144,8 @@ void contact_info::into(contacts_contact& c) const {
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
     c.created = to_epoch_seconds(created);
+    c.delete_before = epoch_seconds(delete_before);
+    c.delete_attach_before = epoch_seconds(delete_attach_before);
     c.profile_bitset = static_cast<uint64_t>(profile_flags);
 }
 
@@ -158,6 +162,8 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
                 reinterpret_cast<const std::byte*>(c.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(c.profile_updated);
+    delete_before = to_sys_seconds(c.delete_before);
+    delete_attach_before = to_sys_seconds(c.delete_attach_before);
     approved = c.approved;
     approved_me = c.approved_me;
     blocked = c.blocked;
@@ -208,6 +214,14 @@ void Contacts::set(const contact_info& contact) {
             contact.profile_picture.key);
 
     set_ts(info["t"], contact.profile_updated);
+    set_ts(info["d"], contact.delete_before);
+    // Deleting the messages takes their attachments with them, so an attachment instruction at or
+    // before that point says nothing further and is dropped rather than stored.
+    set_ts(
+            info["D"],
+            contact.delete_attach_before <= contact.delete_before
+                    ? std::chrono::sys_seconds{}
+                    : contact.delete_attach_before);
 
     set_flag(info["a"], contact.approved);
     set_flag(info["A"], contact.approved_me);

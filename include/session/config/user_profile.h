@@ -226,6 +226,52 @@ LIBSESSION_EXPORT int user_profile_get_nts_expiry(const config_object* conf);
 /// - `expiry` -- [in] Integer of the expiry timer in seconds
 LIBSESSION_EXPORT void user_profile_set_nts_expiry(config_object* conf, int expiry);
 
+/// API: user_profile/user_profile_get_nts_delete_before
+///
+/// Gets the "delete before" unix timestamp (seconds) for the "Note to Self" conversation: messages
+/// in it older than this are to be deleted, and arriving ones older than it dropped.  Returns 0 if
+/// no such instruction is set.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- the timestamp, or 0 if unset
+LIBSESSION_EXPORT int64_t user_profile_get_nts_delete_before(const config_object* conf);
+
+/// API: user_profile/user_profile_set_nts_delete_before
+///
+/// Sets the "delete before" unix timestamp (seconds) for the "Note to Self" conversation.  Pass 0
+/// (or a negative value) to clear it.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `before` -- [in] unix timestamp (seconds) before which messages are to be deleted
+LIBSESSION_EXPORT void user_profile_set_nts_delete_before(config_object* conf, int64_t before);
+
+/// API: user_profile/user_profile_get_nts_delete_attach_before
+///
+/// As `user_profile_get_nts_delete_before`, but covering the attachments alone: the messages
+/// themselves stay.  Returns 0 if no such instruction is set.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- the timestamp, or 0 if unset
+LIBSESSION_EXPORT int64_t user_profile_get_nts_delete_attach_before(const config_object* conf);
+
+/// API: user_profile/user_profile_set_nts_delete_attach_before
+///
+/// Sets the "delete attachments before" unix timestamp (seconds) for the "Note to Self"
+/// conversation.  Pass 0 (or a negative value) to clear it.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `before` -- [in] unix timestamp (seconds) before which attachments are to be deleted
+LIBSESSION_EXPORT void user_profile_set_nts_delete_attach_before(
+        config_object* conf, int64_t before);
+
 /// API: user_profile/user_profile_get_blinded_msgreqs
 ///
 /// Returns true if blinded message requests should be retrieved (from SOGS servers), false if they

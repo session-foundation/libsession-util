@@ -56,6 +56,12 @@ using namespace std::literals;
 ///     when `T > t`).
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
+/// d - "delete before" unix timestamp (seconds) for the "Note to Self" pseudo-conversation:
+///     messages in it older than this are to be deleted, and arriving ones older than it dropped.
+///     Omitted when 0.  Named to match the equivalent field in the contacts and group info configs;
+///     note to self needs its own because it has no contacts entry to carry one.
+/// D - "delete attachments before" unix timestamp (seconds) for "Note to Self": as above but for
+///     attachments alone, leaving the messages themselves.  Omitted when 0.
 class UserProfile : public ConfigBase {
   public:
     friend class UserProfileTester;
@@ -221,6 +227,53 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `timer` -- Default to 0 seconds, will set the expiry timer
     void set_nts_expiry(std::chrono::seconds timer = 0s);
+
+    /// API: user_profile/UserProfile::get_nts_delete_before
+    ///
+    /// Returns the "delete before" timestamp for the Note-to-self conversation: messages in it
+    /// older than this are to be deleted, and arriving ones older than it dropped.  This is what
+    /// makes clearing that conversation mean the same thing on every device -- the instruction is
+    /// recorded rather than inferred from when some config happened to be written.
+    ///
+    /// Note to self needs its own because it has no contacts entry to carry one.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` -- the timestamp, or the epoch if no such instruction is set
+    std::chrono::sys_seconds get_nts_delete_before() const;
+
+    /// API: user_profile/UserProfile::set_nts_delete_before
+    ///
+    /// Sets the Note-to-self "delete before" timestamp.  Pass the epoch (or a non-positive time) to
+    /// clear it.
+    ///
+    /// Inputs:
+    /// - `before` -- messages older than this are to be deleted
+    void set_nts_delete_before(std::chrono::sys_seconds before);
+
+    /// API: user_profile/UserProfile::get_nts_delete_attach_before
+    ///
+    /// As `get_nts_delete_before`, but covering the attachments alone: the messages themselves stay.
+    ///
+    /// Only ever holds a value that says something `get_nts_delete_before` does not: deleting a
+    /// message takes its attachments with it, so setting either of the pair clears this one when
+    /// the message instruction already covers it.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` -- the timestamp, or the epoch if no such instruction is set
+    std::chrono::sys_seconds get_nts_delete_attach_before() const;
+
+    /// API: user_profile/UserProfile::set_nts_delete_attach_before
+    ///
+    /// Sets the Note-to-self "delete attachments before" timestamp.  Pass the epoch (or a
+    /// non-positive time) to clear it.
+    ///
+    /// Inputs:
+    /// - `before` -- attachments older than this are to be deleted
+    void set_nts_delete_attach_before(std::chrono::sys_seconds before);
 
     /// API: user_profile/UserProfile::get_blinded_msgreqs
     ///

@@ -36,6 +36,13 @@ typedef struct contacts_contact {
 
     int64_t created;  // unix timestamp (seconds)
 
+    // Messages in this conversation older than these are to be deleted (and arriving ones older
+    // than them dropped); 0 for no such instruction.  `delete_attach_before` covers the attachments
+    // alone, leaving the messages.  Both unix timestamps in seconds, matching the group info
+    // config's fields of the same names.
+    int64_t delete_before;
+    int64_t delete_attach_before;
+
     uint64_t profile_bitset;  // Mask of SESSION_PROTOCOL_PRO_PROFILE_FEATURE_* bits
 
 } contacts_contact;

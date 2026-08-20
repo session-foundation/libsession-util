@@ -49,6 +49,11 @@ namespace session::config {
 ///         equivalent "j"oined field). Omitted if 0.
 ///     t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
 ///     f - session pro profile features bitset for this contact
+///     d - "delete before" unix timestamp (seconds): messages in this conversation older than this
+///         are to be deleted, and arriving ones older than it are to be dropped.  Omitted if 0.
+///         Named to match the group info config's equivalent field.
+///     D - "delete attachments before" unix timestamp (seconds): as above but for attachments
+///         alone, leaving the messages themselves.  Omitted if 0.
 ///
 /// b - dict of blinded contacts.  This is a nested dict where the outer keys are the BASE_URL of
 ///     the community the blinded contact originated from and the outer value is a dict containing:
@@ -95,6 +100,20 @@ struct contact_info {
     expiration_mode exp_mode = expiration_mode::none;  // The expiry time; none if not expiring.
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
+
+    /// Messages in this conversation older than this are to be deleted, and arriving ones older
+    /// than it dropped.  This is what makes clearing a conversation, and deleting one, mean the same
+    /// thing on every device: the instruction is recorded rather than inferred from when some
+    /// config happened to be written.  Epoch (the default) means no such instruction.
+    std::chrono::sys_seconds delete_before{};
+
+    /// As above, but only the attachments: the messages themselves stay.  Attachments are most of
+    /// what there is to reclaim, so they are worth being able to drop on their own.
+    ///
+    /// Only stored while it says something `delete_before` does not: deleting a message takes its
+    /// attachments with it, so a value at or before `delete_before` is dropped when the contact is
+    /// stored rather than kept as a redundant instruction.
+    std::chrono::sys_seconds delete_attach_before{};
 
     ProProfileFlags profile_flags = ProProfileFlags::None;
 

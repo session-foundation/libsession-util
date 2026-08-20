@@ -320,6 +320,33 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     user_profile_set_nts_expiry(conf2, 86400);
     CHECK(user_profile_get_nts_expiry(conf2) == 86400);
 
+    // Note-to-self's own delete-before pair: it needs them here because it has no contacts entry to
+    // carry them, unlike every other conversation.
+    CHECK(user_profile_get_nts_delete_before(conf2) == 0);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 0);
+    user_profile_set_nts_delete_before(conf2, 1700000000);
+    user_profile_set_nts_delete_attach_before(conf2, 1700000500);
+    CHECK(user_profile_get_nts_delete_before(conf2) == 1700000000);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 1700000500);
+    // Zero clears, rather than meaning "the epoch".
+    user_profile_set_nts_delete_before(conf2, 0);
+    CHECK(user_profile_get_nts_delete_before(conf2) == 0);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 1700000500);
+
+    // Deleting the messages takes their attachments too, so an attachment instruction the message
+    // one already covers is dropped rather than kept saying nothing.
+    user_profile_set_nts_delete_before(conf2, 1700000500);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 0);
+
+    // And from the other side: one that arrives already covered is not recorded at all.
+    user_profile_set_nts_delete_attach_before(conf2, 1700000400);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 0);
+
+    // A later one still means something, and is kept.
+    user_profile_set_nts_delete_attach_before(conf2, 1700000900);
+    CHECK(user_profile_get_nts_delete_attach_before(conf2) == 1700000900);
+    CHECK(user_profile_get_nts_delete_before(conf2) == 1700000500);
+
     CHECK(user_profile_get_blinded_msgreqs(conf2) == -1);
     user_profile_set_blinded_msgreqs(conf2, 0);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 0);

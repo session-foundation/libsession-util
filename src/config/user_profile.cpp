@@ -118,6 +118,33 @@ std::optional<std::chrono::seconds> UserProfile::get_nts_expiry() const {
     return std::nullopt;
 }
 
+void UserProfile::set_nts_delete_before(std::chrono::sys_seconds before) {
+    set_ts(data["d"], before);
+
+    // Deleting the messages takes their attachments with them, so an attachment instruction at or
+    // before this point no longer says anything and is cleared rather than left to linger.
+    if (get_nts_delete_attach_before() <= before)
+        set_ts(data["D"], std::chrono::sys_seconds{});
+}
+
+std::chrono::sys_seconds UserProfile::get_nts_delete_before() const {
+    if (auto* d = data["d"].integer(); d && *d > 0)
+        return as_sys_seconds(*d);
+    return {};
+}
+
+void UserProfile::set_nts_delete_attach_before(std::chrono::sys_seconds before) {
+    // The same redundancy from the other side: an attachment instruction already covered by the
+    // message one adds nothing, so it is not recorded.
+    set_ts(data["D"], before <= get_nts_delete_before() ? std::chrono::sys_seconds{} : before);
+}
+
+std::chrono::sys_seconds UserProfile::get_nts_delete_attach_before() const {
+    if (auto* d = data["D"].integer(); d && *d > 0)
+        return as_sys_seconds(*d);
+    return {};
+}
+
 void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
     std::optional<bool> current_value;
     if (data["M"].exists())
@@ -495,6 +522,23 @@ LIBSESSION_C_API int user_profile_get_nts_expiry(const config_object* conf) {
 
 LIBSESSION_C_API void user_profile_set_nts_expiry(config_object* conf, int expiry) {
     unbox<UserProfile>(conf)->set_nts_expiry(std::max(0, expiry) * 1s);
+}
+
+LIBSESSION_C_API int64_t user_profile_get_nts_delete_before(const config_object* conf) {
+    return epoch_seconds(unbox<UserProfile>(conf)->get_nts_delete_before());
+}
+
+LIBSESSION_C_API void user_profile_set_nts_delete_before(config_object* conf, int64_t before) {
+    unbox<UserProfile>(conf)->set_nts_delete_before(to_sys_seconds(before));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_nts_delete_attach_before(const config_object* conf) {
+    return epoch_seconds(unbox<UserProfile>(conf)->get_nts_delete_attach_before());
+}
+
+LIBSESSION_C_API void user_profile_set_nts_delete_attach_before(
+        config_object* conf, int64_t before) {
+    unbox<UserProfile>(conf)->set_nts_delete_attach_before(to_sys_seconds(before));
 }
 
 LIBSESSION_C_API int user_profile_get_blinded_msgreqs(const config_object* conf) {

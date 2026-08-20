@@ -56,6 +56,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK_FALSE(c.profile_picture);
     CHECK(c.created == 0);
     CHECK(c.notifications == session::config::notify_mode::defaulted);
+    CHECK(c.delete_before == std::chrono::sys_seconds{});
+    CHECK(c.delete_attach_before == std::chrono::sys_seconds{});
     CHECK(c.mute_until == 0);
 
     CHECK_FALSE(contacts.needs_push());
@@ -70,6 +72,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     c.created = created_ts * 1'000;
     c.notifications = session::config::notify_mode::all;
     c.mute_until = (now + 1800) * 1'000'000;
+    c.delete_before = std::chrono::sys_seconds{std::chrono::seconds{now - 100}};
+    c.delete_attach_before = std::chrono::sys_seconds{std::chrono::seconds{now - 50}};
 
     contacts.set(c);
 
@@ -82,6 +86,10 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(contacts.get(definitely_real_id)->approved_me);
     CHECK_FALSE(contacts.get(definitely_real_id)->profile_picture);
     CHECK_FALSE(contacts.get(definitely_real_id)->blocked);
+    CHECK(contacts.get(definitely_real_id)->delete_before.time_since_epoch() ==
+          std::chrono::seconds{now - 100});
+    CHECK(contacts.get(definitely_real_id)->delete_attach_before.time_since_epoch() ==
+          std::chrono::seconds{now - 50});
     CHECK(contacts.get(definitely_real_id)->session_id == definitely_real_id);
 
     CHECK(contacts.needs_push());
