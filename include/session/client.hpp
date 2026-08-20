@@ -138,11 +138,20 @@ class Client {
     // Argument validation happens on the calling thread, before anything is dispatched, so misuse
     // still throws where the mistake is, rather than arriving later as an error argument.
 
-    /// All conversations, most recently active first.
+    /// The conversation list: pinned first, then most recently active.
     ///
-    /// Currently that means every conversation.  Once message requests exist this returns only
-    /// approved ones, with the rest reached through their own accessor.
+    /// Message requests are not in it — see `message_requests()` — and neither are hidden
+    /// conversations.
     void conversations(failable_function<void(std::vector<Conversation>)> cb);
+
+    /// The message requests: accounts that have written to us and that we have never written to,
+    /// most recently active first.
+    ///
+    /// Disjoint from `conversations()`, and the same objects otherwise — a request has history, a
+    /// name and an unread count, and `Conversation::request` is true on every one of these.  It
+    /// stops being a request when we answer it, since writing to someone is what approving them
+    /// is; there is no separate accept, and no way back short of deleting the contact.
+    void message_requests(failable_function<void(std::vector<Conversation>)> cb);
 
     /// A single conversation, or nullopt if it does not exist locally.
     void conversation(
@@ -474,6 +483,7 @@ class Client {
   protected:
     std::span<const std::byte> _self_or_none();
     std::vector<Conversation> _conversations();
+    std::vector<Conversation> _message_requests();
     std::optional<Conversation> _conversation(const ConversationId& id);
     Conversation _create_conversation(const ConversationId& id);
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
@@ -719,7 +729,7 @@ class Client {
 
     void _emit_conversation_added(const ConversationId& id);
     void _emit_conversation_removed(const ConversationId& id);
-    void _emit_list_replaced();
+    void _emit_lists_replaced();
     void _emit_history_replaced(const ConversationId& id);
     void _emit_message(bool added, const ConversationId& id, int64_t message_id);
 

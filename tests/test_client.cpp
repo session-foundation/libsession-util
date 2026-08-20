@@ -91,6 +91,26 @@ SenderKeys self_keys(Client& c) {
     return k;
 }
 
+/// Marks an account as approved, which is what having written to them would have done.
+///
+/// A stranger's first message is a message request, so a test that is about anything else -- the
+/// ordering of the list, what a priority does, what a handler is told -- has to say that this is an
+/// ordinary conversation, or the list it is asking about is empty.
+void approve(Client& c, const b33& sid) {
+    c.core.loop().call_get([&] {
+        auto conn = c.core.database().conn();
+        conn.prepared_exec("INSERT OR IGNORE INTO accounts (session_id) VALUES (?)", sid);
+        conn.prepared_exec(
+                R"(
+            INSERT INTO contacts (account, approved)
+            VALUES ((SELECT id FROM accounts WHERE session_id = ?), 1)
+            ON CONFLICT (account) DO UPDATE SET approved = 1
+        )",
+                sid);
+        return 0;
+    });
+}
+
 /// Builds, encrypts and delivers a v1 DM into `to` as if it had arrived from the swarm.
 void deliver(
         Client& to,
@@ -134,7 +154,7 @@ struct Recorder {
     std::vector<std::string> order;
     std::vector<Conversation> added, updated;
     std::vector<ConversationId> removed;
-    std::vector<std::vector<Conversation>> replaced;
+    std::vector<std::vector<Conversation>> replaced, requests_replaced;
     std::vector<std::pair<ConversationId, Message>> msg_added, msg_updated;
 
     callbacks handlers() {
@@ -158,6 +178,11 @@ struct Recorder {
                         [this](std::vector<Conversation> l) {
                             order.push_back("replaced");
                             replaced.push_back(std::move(l));
+                        },
+                .request_list_replaced =
+                        [this](std::vector<Conversation> l) {
+                            order.push_back("requests");
+                            requests_replaced.push_back(std::move(l));
                         },
                 .message_added =
                         [this](const ConversationId& id, const Message& m) {
@@ -272,6 +297,7 @@ TEST_CASE("Client: applies its migrations under the client owner", "[client][sch
 TEST_CASE("Client: a received DM creates a conversation and a message", "[client][receive]") {
     TempClient c;
     SenderKeys sender;
+    approve(*c, sender.session_id);
 
     deliver(*c, sender, "hello there", from_epoch_ms(5000), "hash1", "Obi-Wan");
 
@@ -391,6 +417,7 @@ TEST_CASE("Client: note to self is reported, not left to the caller", "[client][
 TEST_CASE("Client: syncTarget from another sender is ignored", "[client][receive]") {
     TempClient c;
     SenderKeys peer, elsewhere;
+    approve(*c, peer.session_id);
 
     deliver(*c, peer, "not yours to file", from_epoch_ms(5000), "h1", "", elsewhere.session_id);
 
@@ -517,6 +544,8 @@ TEST_CASE("Client: non-conversation content does not create a conversation", "[c
 TEST_CASE("Client: conversations are ordered by most recent activity", "[client][convos]") {
     TempClient c;
     SenderKeys alice, bob;
+    approve(*c, alice.session_id);
+    approve(*c, bob.session_id);
 
     deliver(*c, alice, "first", from_epoch_ms(1000), "a1");
     deliver(*c, bob, "second", from_epoch_ms(2000), "b1");
@@ -957,6 +986,8 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
 TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
     TempClient c;
     SenderKeys a, b, d;
+    for (const auto& k : {a, b, d})
+        approve(*c, k.session_id);
 
     // Three conversations, most recent first: d, b, a.
     deliver(*c, a, "first", from_epoch_ms(1000), "h1");
@@ -1008,6 +1039,8 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     SenderKeys a, b;
     Recorder r;
     TempClient c{r.handlers()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
 
     deliver(*c, a, "first", from_epoch_ms(1000), "h1");
     deliver(*c, b, "second", from_epoch_ms(2000), "h2");
@@ -1017,8 +1050,9 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     c->set_priority(ConversationId::dm(a.session_id), 3);
 
     // Reported as a replacement, not as an update to the one conversation whose priority changed:
-    // what moved is the list.
-    CHECK(r.order == std::vector<std::string>{"replaced"});
+    // what moved is the list.  Both lists are replaced together, because hiding takes a
+    // conversation out of whichever one it was in and the caller does not have to work out which.
+    CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 2);
     CHECK(r.replaced[0][0].id == ConversationId::dm(a.session_id));
@@ -1028,7 +1062,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     r.order.clear();
     r.replaced.clear();
     c->set_priority(ConversationId::dm(a.session_id), -1);
-    CHECK(r.order == std::vector<std::string>{"replaced"});
+    CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 1);
     CHECK(r.replaced[0][0].id == ConversationId::dm(b.session_id));
@@ -1692,6 +1726,7 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
 TEST_CASE("Client: an asynchronous call reports that it succeeded", "[client][callbacks]") {
     TempClient c;
     SenderKeys sender;
+    approve(*c, sender.session_id);
     deliver(*c, sender, "hello", from_epoch_ms(1000), "h1");
     sync(*c);
 
@@ -2512,6 +2547,146 @@ TEST_CASE("Client: a delete-before from another device destroys history", "[clie
     auto left = c->messages(id);
     REQUIRE(left.size() == 1);
     CHECK(left[0].body == "new");
+}
+
+TEST_CASE("Client: a stranger's message is a request, not a conversation", "[client][requests]") {
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys sender;
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "hi, remember me?", from_epoch_ms(5000), "h1", "Jar Jar");
+    sync(*c);
+
+    CHECK(c->conversations().empty());
+    auto requests = c->message_requests();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests[0].id == id);
+    CHECK(requests[0].request);
+    CHECK(requests[0].display_name == "Jar Jar");
+    CHECK(requests[0].unread == 1);
+
+    // A conversation in every other respect, including being announced as one -- what differs is
+    // which list it belongs to, and `request` is what says so.
+    REQUIRE(r.added.size() == 1);
+    CHECK(r.added[0].request);
+    REQUIRE(c->conversation(id));
+    CHECK(c->conversation(id)->request);
+    CHECK(c->messages(id).size() == 1);
+
+    // And it is synced, so a request answered on one device is not still waiting on another.  Their
+    // writing to us is what says they approved us; nothing yet says we approved them.
+    auto entry = c->core.configs.contacts().get(oxenc::to_hex(sender.session_id));
+    REQUIRE(entry);
+    CHECK(entry->approved_me);
+    CHECK_FALSE(entry->approved);
+}
+
+TEST_CASE("Client: answering a request accepts it", "[client][requests]") {
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys sender;
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "hello?", from_epoch_ms(5000), "h1");
+    sync(*c);
+    REQUIRE(c->message_requests().size() == 1);
+    r.order.clear();
+
+    // There is no separate accept: writing to someone is what approving them is.
+    c->send_message(id, "hello yourself");
+    sync(*c);
+
+    CHECK(c->message_requests().empty());
+    REQUIRE(c->conversations().size() == 1);
+    CHECK_FALSE(c->conversations()[0].request);
+    CHECK(c->core.configs.contacts().get(oxenc::to_hex(sender.session_id))->approved);
+
+    // It left one list and joined the other, which is neither an addition nor a removal to either,
+    // so both are replaced.
+    CHECK(std::ranges::count(r.order, "replaced") == 1);
+    CHECK(std::ranges::count(r.order, "requests") == 1);
+}
+
+TEST_CASE("Client: a linked device's answer accepts the request", "[client][requests]") {
+    TempClient c;
+    SenderKeys sender;
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "hello?", from_epoch_ms(5000), "h1");
+    REQUIRE(c->message_requests().size() == 1);
+
+    // Our own message coming back off our own swarm because another device sent it.  syncTarget
+    // says who it was addressed to, and sending to them is what approved them.
+    deliver(*c,
+            self_keys(*c),
+            "answered elsewhere",
+            from_epoch_ms(6000),
+            "h2",
+            "",
+            sender.session_id);
+
+    CHECK(c->message_requests().empty());
+    REQUIRE(c->conversations().size() == 1);
+    CHECK(c->conversations()[0].id == id);
+}
+
+TEST_CASE("Client: note to self is never a message request", "[client][requests]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    c->send_message(me, "a note");
+    sync(*c);
+
+    CHECK(c->message_requests().empty());
+    REQUIRE(c->conversation(me));
+    CHECK_FALSE(c->conversation(me)->request);
+}
+
+TEST_CASE("Client: a blocked account's messages are refused", "[client][requests]") {
+    TempClient c;
+    SenderKeys sender;
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "first", from_epoch_ms(5000), "h1");
+    REQUIRE(c->messages(id).size() == 1);
+
+    c->set_blocked(id, true);
+    deliver(*c, sender, "and again", from_epoch_ms(6000), "h2");
+
+    // Refused on arrival rather than hidden when drawing, so nothing they send becomes history or
+    // an unread count.
+    CHECK(c->messages(id).size() == 1);
+    CHECK(c->conversation(id)->unread == 1);
+
+    c->set_blocked(id, false);
+    deliver(*c, sender, "still there?", from_epoch_ms(7000), "h3");
+    CHECK(c->messages(id).size() == 2);
+}
+
+TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, '7');
+    auto id = dm_from_hex(them);
+
+    c->create_conversation(id);
+    REQUIRE(c->core.configs.contacts().get(them));
+    REQUIRE(c->core.configs.contacts().get(them)->approved);
+
+    // Another client clearing both flags on its way to deleting the contact, merged without the
+    // deletion that was to follow.  Copied verbatim this would file the conversation back under
+    // message requests -- and there is no message anyone could send to put it back.
+    auto unapproved = contacts_update_from_another_device(*c.client, [&](config::Contacts& theirs) {
+        auto e = theirs.get_or_construct(them);
+        e.approved = false;
+        e.approved_me = false;
+        theirs.set(e);
+    });
+    merge_contacts(*c.client, unapproved);
+
+    CHECK(c->message_requests().empty());
+    REQUIRE(c->conversation(id));
+    CHECK_FALSE(c->conversation(id)->request);
 }
 
 TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {

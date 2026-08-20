@@ -258,6 +258,25 @@ static bool ensure_contact(sqlite::Connection& c, int64_t account, bool approved
                    approved ? 1 : 0) > 0;
 }
 
+// Records that we have approved whoever an outgoing message is addressed to, and says whether that
+// changed anything.  Must be called inside the caller's transaction.
+//
+// Writing to someone is what approving them is -- there is no separate accept -- so answering a
+// message request is what takes it out of the requests list.  Never for note to self, which is not
+// a contact and cannot be a request.
+static bool approve_recipient(
+        sqlite::Connection& c, const ConversationId& id, std::span<const std::byte> self) {
+    if (std::ranges::equal(id.session_id(), self))
+        return false;
+    auto account = identity_id(c, id);
+    auto made = ensure_contact(c, account, true);
+    auto flagged =
+            c.prepared_exec(
+                    "UPDATE contacts SET approved = 1 WHERE account = ? AND NOT approved", account) >
+            0;
+    return made || flagged;
+}
+
 // Carries out a delete-before instruction, and says whether anything went.  Must be called inside
 // the caller's transaction.
 //
@@ -557,6 +576,11 @@ void Client::conversations(
     _async([this] { return _conversations(); }, std::move(cb));
 }
 
+void Client::message_requests(
+        std::function<void(std::optional<std::string>, std::vector<Conversation>)> cb) {
+    _async([this] { return _message_requests(); }, std::move(cb));
+}
+
 void Client::conversation(
         const ConversationId& id,
         std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
@@ -703,9 +727,18 @@ static const auto CONVO_COLUMNS = R"(
            coalesce(ct.nickname, a.name), c.last_activity,
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
-           c.unread_count, c.priority
+           c.unread_count, c.priority, coalesce(ct.approved, 0)
     {}
 )"_format(SUBJECT_JOIN);
+
+// Which conversations are message requests, as a fragment both list queries need: a DM with someone
+// we have never written to.  No entry at all counts, which is the usual case -- a stranger's first
+// message creates the row that says they have approved us and nothing that says we approved them.
+//
+// Note to self is exempt because it cannot be a request; we are not our own contact, and the entry
+// that would carry the approval is one that has no business existing.
+static constexpr auto IS_REQUEST =
+        "(c.dm IS NOT NULL AND coalesce(ct.approved, 0) = 0 AND a.session_id IS NOT ?1)"sv;
 
 // `self` is our own session ID, for flagging the Note to Self conversation; it is not part of the
 // query because the row does not know whose database it is in.  Empty when there is no account
@@ -717,7 +750,7 @@ static std::vector<Conversation> query_conversations(
         const std::string& query,
         const Bind&... bind) {
     std::vector<Conversation> out;
-    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority] :
+    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -728,7 +761,9 @@ static std::vector<Conversation> query_conversations(
                  int64_t,
                  std::string,
                  int,
-                 int>(query, bind...))
+                 int,
+                 int>(query, bind...)) {
+        bool me = sid && std::ranges::equal(static_cast<const b33&>(*sid), self);
         out.push_back(
                 Conversation{
                         .id = subject_to_id(convo, sid, gid, url, room),
@@ -737,8 +772,9 @@ static std::vector<Conversation> query_conversations(
                         .last_activity = from_epoch_ms(activity),
                         .unread = unread,
                         .priority = priority,
-                        .note_to_self =
-                                sid && std::ranges::equal(static_cast<const b33&>(*sid), self)});
+                        .request = sid && !me && !approved,
+                        .note_to_self = me});
+    }
     return out;
 }
 
@@ -753,13 +789,30 @@ std::span<const std::byte> Client::_self_or_none() {
 
 std::vector<Conversation> Client::_conversations() {
     auto c = core.database().conn();
+    auto self = _self_or_none();
     return query_conversations(
             c,
-            _self_or_none(),
+            self,
             // Hidden (negative priority) conversations are not part of the list at all; pinned ones
             // lead it, and equal priorities form a block that sorts among itself by recency.
-            "{} WHERE c.priority >= 0 ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
-                    CONVO_COLUMNS));
+            "{} WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
+                    CONVO_COLUMNS, IS_REQUEST),
+            self);
+}
+
+std::vector<Conversation> Client::_message_requests() {
+    auto c = core.database().conn();
+    auto self = _self_or_none();
+    // No priority ordering: a request cannot be pinned -- pinning is a property of the config entry
+    // and there is nothing there to pin until it is approved -- so recency is the only order there
+    // is.  Hidden ones are still omitted, since hiding is the one thing another device *can* say
+    // about a request it does not want to see.
+    return query_conversations(
+            c,
+            self,
+            "{} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
+                    CONVO_COLUMNS, IS_REQUEST),
+            self);
 }
 
 std::optional<Conversation> Client::_conversation(const ConversationId& id) {
@@ -862,7 +915,7 @@ void Client::_set_priority(const ConversationId& id, int priority) {
 
     if (changed > 0) {
         _sync_conversation(id);
-        _emit_list_replaced();
+        _emit_lists_replaced();
     }
 }
 
@@ -947,7 +1000,7 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
     if (emptied)
         _emit_history_replaced(id);
     if (hidden)
-        _emit_list_replaced();
+        _emit_lists_replaced();
 }
 
 void Client::_delete_contact(const ConversationId& id) {
@@ -978,7 +1031,7 @@ void Client::_delete_contact(const ConversationId& id) {
 
     if (removed) {
         _emit_conversation_removed(id);
-        _emit_list_replaced();
+        _emit_lists_replaced();
     }
 }
 
@@ -1005,11 +1058,18 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
     contacts.set(*entry);
 }
 
-void Client::_emit_list_replaced() {
+// Both lists, always, and deliberately not one or the other: what moves a conversation between them
+// is approval, what removes it from either is hiding or deletion, and a caller that had to work out
+// which of those it just did would eventually get it wrong.  A replacement is idempotent, so the
+// cost of sending one nobody needed is a query.
+void Client::_emit_lists_replaced() {
     auto convos = _conversations();
-    _emit([convos = std::move(convos)](const callbacks& cbs) {
+    auto requests = _message_requests();
+    _emit([convos = std::move(convos), requests = std::move(requests)](const callbacks& cbs) {
         if (cbs.conversation_list_replaced)
             cbs.conversation_list_replaced(convos);
+        if (cbs.request_list_replaced)
+            cbs.request_list_replaced(requests);
     });
 }
 
@@ -1045,7 +1105,7 @@ void Client::_reconcile_contacts() {
     std::vector<ConversationId> added;
     std::vector<ConversationId> removed;
     std::vector<ConversationId> cleared;
-    bool order_changed = false;
+    bool order_changed = false, requests_changed = false;
 
     {
         auto c = core.database().conn();
@@ -1102,13 +1162,30 @@ WHERE id = ?1
                     account,
                     static_cast<int64_t>(entry.profile_flags));
 
+            // Read before the upsert rather than derived from it: what moves a conversation between
+            // the two lists is this one column, and the upsert reports only that *something* in the
+            // row changed.
+            bool was_request =
+                    !c.prepared_get<int>(
+                            "SELECT coalesce((SELECT approved FROM contacts WHERE account = ?), 0)",
+                            account);
+
             // Existence here *is* being a contact, so this is an upsert rather than an update: the
             // row appearing is the fact being recorded.
+            //
+            // Approval only ever goes up, in either direction, because neither has a reverse: what
+            // sets it is a message having been sent, and no later config can make that not have
+            // happened.  Copying the value verbatim would let an un-approval reach us -- other
+            // clients clear both flags on their way to deleting a contact, and a device that merged
+            // the clearing but not the deletion would otherwise file the conversation back under
+            // message requests.
             bool new_contact = c.prepared_exec(
                                        R"(
 INSERT INTO contacts (account, nickname, approved, approved_me, blocked) VALUES (?1, ?2, ?3, ?4, ?5)
-ON CONFLICT (account) DO UPDATE SET nickname = ?2, approved = ?3, approved_me = ?4, blocked = ?5
-WHERE (nickname, approved, approved_me, blocked) IS NOT (?2, ?3, ?4, ?5)
+ON CONFLICT (account) DO UPDATE
+    SET nickname = ?2, approved = max(approved, ?3), approved_me = max(approved_me, ?4), blocked = ?5
+WHERE (nickname, approved, approved_me, blocked)
+   IS NOT (?2, max(approved, ?3), max(approved_me, ?4), ?5)
 )",
                                        account,
                                        entry.nickname.empty()
@@ -1168,6 +1245,8 @@ WHERE id = ?1
                 touched.push_back(id);
             if (created || settings_changed)
                 order_changed = true;
+            if (was_request && entry.approved)
+                requests_changed = true;
         }
 
         // A contact we hold that the merged config does not mention was removed on another device,
@@ -1218,8 +1297,8 @@ WHERE id = ?1
         _touch(id);
     for (const auto& id : removed)
         _emit_conversation_removed(id);
-    if (order_changed || !removed.empty())
-        _emit_list_replaced();
+    if (order_changed || requests_changed || !removed.empty())
+        _emit_lists_replaced();
 }
 
 void Client::_sync_all_contacts() {
@@ -1447,7 +1526,7 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
     if (history_changed)
         _emit_history_replaced(me);
     if (order_changed)
-        _emit_list_replaced();
+        _emit_lists_replaced();
 }
 
 // -- Messages ---------------------------------------------------------------------------------
@@ -1643,7 +1722,7 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     // twice, and both would come back.  So there is no separate sync send to have a state for.
     bool to_self = std::ranges::equal(id.session_id(), self);
 
-    bool created;
+    bool created, approved;
     int64_t client_id;
     {
         auto c = core.database().conn();
@@ -1673,9 +1752,14 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
         c.prepared_exec(
                 "INSERT INTO message_raw_content (message, content) VALUES (?, ?)", client_id, raw);
+        approved = approve_recipient(c, id, self);
         tx.commit();
     }
 
+    if (approved) {
+        _sync_contact(id);
+        _emit_lists_replaced();
+    }
     if (created)
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
@@ -1803,7 +1887,7 @@ int64_t Client::_send_message(
     auto serialised = content.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
 
-    bool created;
+    bool created, approved;
     int64_t client_id;
     {
         auto c = core.database().conn();
@@ -1851,9 +1935,14 @@ int64_t Client::_send_message(
                     a.height ? std::optional<int64_t>{*a.height} : std::nullopt);
         }
 
+        approved = approve_recipient(c, id, self);
         tx.commit();
     }
 
+    if (approved) {
+        _sync_contact(id);
+        _emit_lists_replaced();
+    }
     if (created)
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
@@ -2717,25 +2806,54 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
 
     auto msgid = msgid_of(content);
 
-    bool created = false, inserted = false, renamed = false;
+    bool created = false, inserted = false, renamed = false, contact_changed = false,
+         approved_them = false;
     int64_t client_id = 0;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
-        // Every incoming DM materialises a visible conversation.  Session's actual behaviour gates
-        // this: a message from an account you have not approved belongs in the message requests
-        // list, and only becomes an ordinary conversation once you approve it.
-        //
-        // Worth knowing before implementing that: the gate is not "do not create the conversation".
-        // The message still needs somewhere to live, and a request is shown as a real conversation
-        // once opened -- so it is classification, not suppression.  Approval state belongs on the
-        // accounts row, reconciled from the Contacts config; conversations() then filters on it and
-        // a separate accessor lists the requests.  Unread splits the same way, Session counting
-        // request unreads separately from the conversation badge.
+        // A blocked account is refused here rather than filtered when drawing, so that nothing it
+        // sends becomes history, an unread count or a notification.  Only what *they* sent: our own
+        // copy of a conversation we later blocked is still ours.
+        if (!outgoing && c.prepared_get<int64_t>(
+                                 R"(
+            SELECT count(*) FROM contacts ct JOIN accounts a ON a.id = ct.account
+            WHERE a.session_id = ? AND ct.blocked
+        )",
+                                 msg.sender_session_id) > 0)
+            return;
+
         auto convo = ensure_conversation(c, convo_id, ts);
         created = convo.created;
         auto sender = account_id(c, msg.sender_session_id);
+
+        // Approval is recorded by messages flowing rather than by anyone setting it: sending to
+        // someone approves them, and receiving from someone means they approved us -- you cannot
+        // write to an account you have not accepted.  So the two flags are a side effect here, and
+        // an unapproved contact with a message in it *is* a message request.
+        //
+        // `convo_with` and not the sender: a copy of our own outgoing message, arriving from our
+        // own swarm, is us approving whoever it was addressed to.
+        //
+        // Note to self is left alone -- we are not our own contact, and our own entry has no
+        // business in the Contacts config.
+        if (!std::ranges::equal(convo_with, core.globals.session_id())) {
+            auto with = account_id(c, convo_with);
+            auto made = ensure_contact(c, with, outgoing);
+            auto flagged = c.prepared_exec(
+                                   outgoing ? "UPDATE contacts SET approved = 1"
+                                              " WHERE account = ? AND NOT approved"
+                                            : "UPDATE contacts SET approved_me = 1"
+                                              " WHERE account = ? AND NOT approved_me",
+                                   with) > 0;
+            contact_changed = made || flagged;
+
+            // Only our own approval moves a conversation between the lists.  Learning that *they*
+            // approved *us* changes what we know about them and nothing about where they belong,
+            // and a request appearing for the first time is reported as the conversation it is.
+            approved_them = outgoing && contact_changed;
+        }
 
         // Delivery is at-least-once -- the swarm cursor advances per batch, so a crash mid-batch
         // re-delivers it -- and either unique index is enough to recognise the redelivery.
@@ -2801,6 +2919,8 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         tx.commit();
     }
 
+    if (contact_changed || renamed)
+        _sync_contact(convo_id);
     if (created)
         _emit_conversation_added(convo_id);
     if (inserted) {
@@ -2809,6 +2929,11 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     }
     if (inserted || renamed)
         _touch(convo_id);
+
+    // Approval moves a conversation between the two lists, so both changed and neither changed in a
+    // way that naming one row would describe.
+    if (approved_them)
+        _emit_lists_replaced();
 }
 
 void Client::_on_send_status(

@@ -41,6 +41,21 @@ struct Conversation {
     /// top while still letting the most recently active of them lead.
     int priority = 0;
 
+    /// True while this is a message request rather than a conversation: someone we have never
+    /// written to has written to us.
+    ///
+    /// Approval is not something anyone sets — it is recorded by messages flowing.  Writing to
+    /// someone approves them, so answering a request is what accepts it, and there is no way back:
+    /// what un-requests a conversation is deleting the contact, not clearing a flag.
+    ///
+    /// Requests are conversations in every other respect — they have history, an unread count and a
+    /// name — which is why this is a property of one rather than a separate kind.  What differs is
+    /// which list it belongs to: `conversations()` omits them and `message_requests()` returns only
+    /// them, so this is never true on anything the former returned.
+    ///
+    /// Never true for note to self, and (for now) never true for a group or community.
+    bool request = false;
+
     /// True for the conversation with our own account — Session's "Note to Self".  It is an
     /// ordinary DM rather than a kind of its own, so this is the only thing distinguishing it, and
     /// it is reported here so that displaying it differently does not require the caller to know

@@ -92,6 +92,15 @@ struct callbacks {
     /// delta would.
     std::function<void(std::vector<Conversation>)> conversation_list_replaced;
 
+    /// The message requests changed, carrying the whole list of them, for the same reasons and with
+    /// the same guarantees as the above.
+    ///
+    /// The two lists are disjoint and a conversation moves between them, so approving one fires
+    /// both: it left the requests and joined the conversations.  `conversation_added` and the rest
+    /// are shared between them — a request is a conversation in every respect except which list it
+    /// belongs to — and `Conversation::request` is what says which one a given handler is about.
+    std::function<void(std::vector<Conversation>)> request_list_replaced;
+
     /// A message was added, whether received or sent from here.
     std::function<void(const ConversationId&, const Message&)> message_added;
 
