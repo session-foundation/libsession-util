@@ -861,7 +861,8 @@ DecodedEnvelope decode_envelope(
             } else {
                 // Parse the proof from protobufs
                 const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-                // A proof that is present but the wrong shape is corruption, not forward-compat: hard error.
+                // A proof that is present but the wrong shape is corruption, not forward-compat:
+                // hard error.
                 size_t proof_errors = 0;
                 proof_errors +=
                         !proto_proof.has_revocationtag() ||
@@ -1028,7 +1029,8 @@ DecodedCommunityMessage decode_for_community(
         } else {
             // Parse the proof from protobufs
             const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-            // A proof that is present but the wrong shape is corruption, not forward-compat: hard error.
+            // A proof that is present but the wrong shape is corruption, not forward-compat: hard
+            // error.
             size_t proof_errors = 0;
             proof_errors += !proto_proof.has_revocationtag() ||
                             proto_proof.revocationtag().size() != proof.revocation_tag.max_size();
