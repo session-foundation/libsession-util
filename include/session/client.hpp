@@ -523,6 +523,19 @@ class Client {
     // by an amount nothing recorded -- so anything a previous pass missed is picked up by the next.
     void _on_configs_changed(std::span<const config::Namespace> changed);
 
+    // Reconciles every config, whether or not anything reported a change.
+    //
+    // A change notification only arrives for state that changes *after* someone is listening, which
+    // leaves three ways for the tables to fall behind with nothing to announce it: a config merged
+    // by a version that did not yet know how to reconcile it, a crash between merging and
+    // reconciling, and a dump restored from an older state.  In each the database is behind by an
+    // amount nothing recorded, and no further notification is owed -- a contact list that has
+    // stopped changing would stay unreconciled indefinitely.
+    //
+    // Safe to run when nothing has changed, because reconciliation compares rather than replays: it
+    // costs a pass over the configs and writes nothing.
+    void _reconcile_all();
+
     // Records that a note-to-self conversation now exists, by moving its priority off hidden.
     //
     // For a contact, the presence of an entry in the Contacts config is what says the conversation

@@ -2115,6 +2115,30 @@ TEST_CASE("Client: a note-to-self timer waits for the conversation", "[client][c
     CHECK(timer == 600);
 }
 
+TEST_CASE("Client: a restart reconciles what nothing announced", "[client][configs]") {
+    TempClient c;
+    auto me = self_convo(*c.client);
+
+    auto pushed = profile_from_another_device(*c.client, [](auto& p) {
+        p.set_name("Leia");
+        p.set_nts_priority(0);
+    });
+    merge_profile(*c.client, pushed);
+    REQUIRE(c->conversation(me)->display_name == "Leia");
+
+    // Put the database behind the config behind its back, which is what a crash between merging and
+    // reconciling leaves -- or a config merged by a version that could not yet reconcile it.  In
+    // neither case is a further notification owed, so nothing would ever come back for it.
+    c->core.database().conn().prepared_exec(
+            "UPDATE accounts SET name = NULL WHERE session_id = ?", c->core.globals.session_id());
+    REQUIRE(c->conversation(me)->display_name.empty());
+
+    c.reopen();
+
+    // Starting up reconciles regardless of whether anything changed, so it is repaired.
+    CHECK(c->conversation(me)->display_name == "Leia");
+}
+
 TEST_CASE("Client: reconciling twice does not disturb the list", "[client][configs]") {
     TempClient c;
     auto me = self_convo(*c.client);

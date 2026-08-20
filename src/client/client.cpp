@@ -319,6 +319,13 @@ void Client::_init() {
             "UPDATE messages SET sync_send_state = ? WHERE sync_send_state = ?",
             static_cast<int>(SendState::failed),
             static_cast<int>(SendState::uploading));
+
+    // Guarded because a Core opened with defer_account has no account yet, and the configs are
+    // encrypted to its key.  Nothing is missed by skipping it: an account that does not exist has
+    // no configs to have fallen behind, and whatever arrives once it does comes through a merge,
+    // which reports itself.
+    if (core.globals.have_account())
+        _reconcile_all();
 }
 
 // -- Change notification ----------------------------------------------------------------------
@@ -754,6 +761,12 @@ void Client::_on_configs_changed(std::span<const config::Namespace> changed) {
             default: break;  // The rest land with the configs that model them.
         }
     }
+}
+
+void Client::_reconcile_all() {
+    // Each config joins this as it gains a reconciler; the sweep is what makes adding one apply to
+    // state that arrived before it existed, rather than only to the next change after it.
+    _reconcile_user_profile();
 }
 
 void Client::_reveal_note_to_self(const ConversationId& id) {
