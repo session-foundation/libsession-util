@@ -438,10 +438,6 @@ class Client {
     // answer, because each handler carries the whole of the new state rather than a delta, so
     // applying one twice changes nothing.
 
-  protected:
-    // Reachable by SyncClient, which dispatches onto the loop exactly as the callback forms do.
-    // Everything here assumes it is already on that thread.
-
   private:
     // Declared above `core`, which is declared last: see the note there.
     // Shared rather than held, so that a handler queued to another thread stays valid if the
@@ -488,6 +484,9 @@ class Client {
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
+    //
+    // Protected rather than private because SyncClient is built out of them, dispatching onto the
+    // loop exactly as the callback forms do.
   protected:
     std::span<const std::byte> _self_or_none();
     std::vector<Conversation> _conversations();
