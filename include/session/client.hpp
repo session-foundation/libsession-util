@@ -197,6 +197,13 @@ class Client {
     void open_dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
     DM open_dm(const ConversationId& id, wait_t);
 
+    /// True if this is our own account's session ID.
+    ///
+    /// Touches no database and is not dispatched, so it is callable from any thread: it compares
+    /// against our own ID, which is fixed once the account exists.  False rather than throwing when
+    /// there is no account yet — with no identity, nothing can be us.
+    bool is_me(std::span<const std::byte, 33> session_id);
+
     /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
     /// answer as `Conversation::note_to_self`, for a caller holding only an id.
     ///

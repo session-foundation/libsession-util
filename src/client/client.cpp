@@ -266,9 +266,8 @@ static bool ensure_contact(sqlite::Connection& c, int64_t account, bool approved
 // Writing to someone is what approving them is -- there is no separate accept -- so answering a
 // message request is what takes it out of the requests list.  Never for note to self, which is not
 // a contact and cannot be a request.
-static bool approve_recipient(
-        sqlite::Connection& c, const ConversationId& id, std::span<const std::byte> self) {
-    if (std::ranges::equal(id.session_id(), self))
+static bool approve_recipient(sqlite::Connection& c, const ConversationId& id, Client& client) {
+    if (client.is_me(id.session_id()))
         return false;
     auto account = identity_id(c, id);
     auto made = ensure_contact(c, account, true);
@@ -537,9 +536,12 @@ void Client::log_operation_failure(const std::exception& e) {
 
 // Not dispatched onto the loop: reads nothing but the session ID, which cannot change underneath
 // it.  See the declaration.
+bool Client::is_me(std::span<const std::byte, 33> session_id) {
+    return std::ranges::equal(session_id, _self_or_none());
+}
+
 bool Client::is_note_to_self(const ConversationId& id) {
-    return id.type() == ConversationId::Type::dm &&
-           std::ranges::equal(id.session_id(), _self_or_none());
+    return id.type() == ConversationId::Type::dm && is_me(id.session_id());
 }
 
 void Client::retry_send(
@@ -760,16 +762,9 @@ static const auto CONVO_COLUMNS = R"(
 static constexpr auto IS_REQUEST =
         "(c.dm IS NOT NULL AND coalesce(ct.approved, 0) = 0 AND a.session_id IS NOT ?1)"sv;
 
-// `self` is our own session ID, for flagging the Note to Self conversation; it is not part of the
-// query because the row does not know whose database it is in.  Empty when there is no account
-// yet, under which circumstance nothing can be a conversation with ourselves.
 template <typename... Bind>
 static std::vector<AnyConversation> query_conversations(
-        Client& client,
-        sqlite::Connection& c,
-        std::span<const std::byte> self,
-        const std::string& query,
-        const Bind&... bind) {
+        Client& client, sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<AnyConversation> out;
     for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved,
                approved_me, marked_unread] :
@@ -802,7 +797,7 @@ static std::vector<AnyConversation> query_conversations(
         else if (url && room)
             out.emplace_back(Community{std::move(base)});
         else {
-            bool me = std::ranges::equal(static_cast<const b33&>(*sid), self);
+            bool me = client.is_me(*sid);
             DM dm{std::move(base)};
             dm.request = !me && !approved;
             dm.awaiting_approval = !me && !approved_me;
@@ -824,21 +819,18 @@ std::span<const std::byte> Client::_self_or_none() {
 
 std::vector<AnyConversation> Client::_conversations() {
     auto c = core.database().conn();
-    auto self = _self_or_none();
     return query_conversations(
             *this,
             c,
-            self,
             // Hidden (negative priority) conversations are not part of the list at all; pinned ones
             // lead it, and equal priorities form a block that sorts among itself by recency.
             "{} WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
                     CONVO_COLUMNS, IS_REQUEST),
-            self);
+            _self_or_none());
 }
 
 std::vector<AnyConversation> Client::_message_requests() {
     auto c = core.database().conn();
-    auto self = _self_or_none();
     // No priority ordering: a request cannot be pinned -- pinning is a property of the config entry
     // and there is nothing there to pin until it is approved -- so recency is the only order there
     // is.  Hidden ones are still omitted, since hiding is the one thing another device *can* say
@@ -846,10 +838,9 @@ std::vector<AnyConversation> Client::_message_requests() {
     return query_conversations(
             *this,
             c,
-            self,
             "{} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
                     CONVO_COLUMNS, IS_REQUEST),
-            self);
+            _self_or_none());
 }
 
 std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
@@ -858,7 +849,7 @@ std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     if (!convo)
         return std::nullopt;
     auto found = query_conversations(
-            *this, c, _self_or_none(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
+            *this, c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -1212,7 +1203,7 @@ void Client::_reconcile_contacts() {
                 continue;
             b33 sid;
             std::memcpy(sid.data(), raw.data(), 33);
-            if (std::ranges::equal(sid, me))
+            if (is_me(sid))
                 continue;
 
             in_config.insert(sid);
@@ -1548,7 +1539,7 @@ void Client::_sync_conversation(const ConversationId& id) {
 
 void Client::_sync_contact(const ConversationId& id) {
     if (id.type() != ConversationId::Type::dm ||
-        std::ranges::equal(id.session_id(), core.globals.session_id()))
+        is_me(id.session_id()))
         return;
 
     auto& contacts = core.configs.contacts();
@@ -1626,7 +1617,7 @@ void Client::_sync_contact(const ConversationId& id) {
 
 void Client::_reveal_note_to_self(const ConversationId& id) {
     if (id.type() != ConversationId::Type::dm ||
-        !std::ranges::equal(id.session_id(), core.globals.session_id()))
+        !is_me(id.session_id()))
         return;
 
     auto& profile = core.configs.user_profile();
@@ -1932,7 +1923,7 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
     // Note to self is one swarm, not two: sending both copies there would deposit the same message
     // twice, and both would come back.  So there is no separate sync send to have a state for.
-    bool to_self = std::ranges::equal(id.session_id(), self);
+    bool to_self = is_me(id.session_id());
 
     bool created, approved;
     int64_t client_id;
@@ -1964,7 +1955,7 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
 
         c.prepared_exec(
                 "INSERT INTO message_raw_content (message, content) VALUES (?, ?)", client_id, raw);
-        approved = approve_recipient(c, id, self);
+        approved = approve_recipient(c, id, *this);
         tx.commit();
     }
 
@@ -2081,7 +2072,7 @@ int64_t Client::_send_message(
 
     auto now = clock_now_ms();
     auto self = core.globals.session_id();
-    bool to_self = std::ranges::equal(id.session_id(), self);
+    bool to_self = is_me(id.session_id());
 
     // Stored with the body alone for now.  What finally goes to the swarms also names the uploaded
     // files, which nothing knows yet -- that is what the uploads are for -- so the content is
@@ -2147,7 +2138,7 @@ int64_t Client::_send_message(
                     a.height ? std::optional<int64_t>{*a.height} : std::nullopt);
         }
 
-        approved = approve_recipient(c, id, self);
+        approved = approve_recipient(c, id, *this);
         tx.commit();
     }
 
@@ -2693,7 +2684,7 @@ bool Client::_saved_by_recipient(int64_t message_id) {
     auto [outgoing, with] = *row;
     if (!outgoing)
         return true;
-    return with && std::ranges::equal(static_cast<const b33&>(*with), _self_or_none());
+    return with && is_me(*with);
 }
 
 void Client::_record_saved(int64_t message_id, std::optional<size_t> index, sys_ms when) {
@@ -2864,7 +2855,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
         }
     }
 
-    bool to_self = std::ranges::equal(convo_id->session_id(), self);
+    bool to_self = is_me(convo_id->session_id());
 
     SessionProtos::Content synced = content;
     synced.mutable_datamessage()->set_synctarget(oxenc::to_hex(convo_id->session_id()));
@@ -3010,7 +3001,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     // syncTarget is only honoured on a self-send.  Session's other clients honour it on any
     // incoming message, which lets a peer file their message into a conversation they are not part
     // of; there is no case where a message from someone else needs it, so this does not.
-    bool outgoing = std::ranges::equal(msg.sender_session_id, core.globals.session_id());
+    bool outgoing = is_me(msg.sender_session_id);
 
     b33 convo_with = msg.sender_session_id;
     if (outgoing && data.has_synctarget()) {
@@ -3076,7 +3067,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         //
         // Note to self is left alone -- we are not our own contact, and our own entry has no
         // business in the Contacts config.
-        if (!std::ranges::equal(convo_with, core.globals.session_id())) {
+        if (!is_me(convo_with)) {
             auto with = account_id(c, convo_with);
             auto made = ensure_contact(c, with, outgoing);
             auto flagged = c.prepared_exec(
