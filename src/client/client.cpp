@@ -396,8 +396,13 @@ void Client::_init() {
     // encrypted to its key.  Nothing is missed by skipping it: an account that does not exist has
     // no configs to have fallen behind, and whatever arrives once it does comes through a merge,
     // which reports itself.
+    //
+    // On the loop, because reconciling dirties conversations and `_dirty` is guarded by nothing but
+    // that every writer is the loop thread.  We are the constructing thread here, and the loop is
+    // already running by the time a Client is built: the first `_touch` schedules `_flush_pending`,
+    // which steals `_dirty` out from under the reconcile still filling it.
     if (core.globals.have_account())
-        _reconcile_all();
+        loop.call_get([this] { _reconcile_all(); });
 }
 
 // -- Change notification ----------------------------------------------------------------------
