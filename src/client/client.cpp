@@ -2391,32 +2391,45 @@ bool Client::_retry_send(
     return true;
 }
 
-// Where a download is written until it is known to be whole.  A save that dies partway leaves this
-// rather than something that looks like the file the user asked for.
+// Opens the file a download is written to until it is known to be whole, and returns the name it
+// claimed.  A save that dies partway leaves this rather than something that looks like the file the
+// user asked for.
 //
-// `.sessiondl` rather than the conventional `.part` because this destroys whatever is already there:
-// somebody's own `report.pdf.part`, from a browser or another downloader, is a plausible file to
-// find next to `report.pdf`, and one named after us is not.  Numbered when even that is taken, which
-// is what lets two saves of the same file into one directory proceed at once.
+// `.sessiondl` rather than the conventional `.part` because opening it destroys whatever is already
+// there: somebody's own `report.pdf.part`, from a browser or another downloader, is a plausible file
+// to find next to `report.pdf`, and one named after us is not.  Numbered when even that is taken,
+// which is what lets two saves of the same file into one directory proceed at once.
 //
-// The check and the open that follows are not one step, so two saves choosing a name in the same
-// instant can still collide.  That is a narrower window than a fixed name, which collided every
-// time.
-static std::filesystem::path partial_path(const std::filesystem::path& dest) {
-    std::error_code ec;
-    auto base = dest;
-    base += ".sessiondl";
-    if (!std::filesystem::exists(base, ec))
-        return base;
+// Claiming the name *is* the open, given `std::ios::noreplace` -- C++23, so not here yet, since this
+// builds at C++20 and the macro is guarded on the language version rather than on the library.  With
+// it the open fails when the file exists and two saves cannot pick the same name however they are
+// timed.  Without it the check and the open are two steps, so they still can; that is a much
+// narrower window than the fixed name it replaces, which collided every time, and the loser of the
+// race gets a failed save rather than anyone losing a file of their own.  Building at C++23 closes
+// it with no other change.
+static std::filesystem::path open_partial(std::ofstream& out, const std::filesystem::path& dest) {
+#ifdef __cpp_lib_ios_noreplace
+    constexpr auto mode = std::ios::binary | std::ios::noreplace;
+#else
+    constexpr auto mode = std::ios::binary | std::ios::trunc;
+#endif
 
-    for (int n = 1; n < 1000; n++) {
+    for (int n = 0; n < 1000; n++) {
         auto p = dest;
-        p += ".sessiondl{}"_format(n);
-        if (!std::filesystem::exists(p, ec))
+        p += n == 0 ? ".sessiondl"s : ".sessiondl{}"_format(n);
+
+#ifndef __cpp_lib_ios_noreplace
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec))
+            continue;
+#endif
+
+        out.open(p, mode);
+        if (out)
             return p;
+        out.clear();
     }
-    throw std::runtime_error{
-            "Cannot find a free scratch name beside {}"_format(dest.string())};
+    throw std::runtime_error{"Cannot write a scratch file beside {}"_format(dest.string())};
 }
 
 // `name (2).pdf`, not `name.pdf (2)`: only the first still opens on a double-click, and it is what
@@ -2534,10 +2547,7 @@ void Client::_save_attachment(
     };
     auto state = std::make_shared<SaveState>();
     state->dest = std::move(dest);
-    state->partial = partial_path(state->dest);
-    state->out.open(state->partial, std::ios::binary | std::ios::trunc);
-    if (!state->out)
-        throw std::runtime_error{"Cannot write {}"_format(state->partial.string())};
+    state->partial = open_partial(state->out, state->dest);
 
     if (stream) {
         std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
