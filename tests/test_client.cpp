@@ -1421,6 +1421,21 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
         CHECK(c->message(msg_id, wait)->attachments[0].saved_at.has_value());
     }
 
+    // The account's own answer refuses the notification even when the caller asked for it, so a
+    // client that never grew a setting for this still honours one made on another device.
+    {
+        c->core.configs.user_profile().set_notify_media_saved(false);
+        auto loud = dir / "still-quiet.bin";
+        auto waiter = save(loud, true);
+        REQUIRE(serve_downloads(*net, ciphertext) == 1);
+        REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+        CHECK_FALSE(waiter.get().has_value());
+        CHECK(std::filesystem::exists(loud));
+        sync(*c);
+        CHECK(stores(*net).empty());
+        c->core.configs.user_profile().set_notify_media_saved(true);
+    }
+
     // A file that fails to authenticate is a failure, not a corrupt file on disk: the ciphertext is
     // written to a temporary name and only renamed once it has been decrypted whole.
     {

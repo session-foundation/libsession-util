@@ -321,11 +321,14 @@ class Client {
     /// and anything else is the failure's status code.
     ///
     /// `notify_sender` tells the person who sent it that we saved their file, which is what
-    /// Session's other clients do and so what a recipient expects.  Passing false keeps the save to
-    /// ourselves -- worth offering as a setting, since whether fetching someone's photo should be
-    /// reported back to them is a privacy decision rather than a technical one.  Only ever sent for
-    /// a message we received: saving from our own message notifies nobody, and neither does a
-    /// failed save.
+    /// Session's other clients do and so what a recipient expects.  Passing false keeps this
+    /// particular save to ourselves.  Only ever sent for a message we received: saving from our own
+    /// message notifies nobody, and neither does a failed save.
+    ///
+    /// The account's own preference — `UserProfile::get_notify_media_saved`, which follows it
+    /// between devices — can refuse the notification but cannot require one.  So a client that has
+    /// not grown a setting for this still honours one made elsewhere, and a caller that passes
+    /// false is not overruled.
     ///
     /// Which of Session's two attachment encryptions applies is read from the url, so a caller
     /// neither chooses nor needs to know: current clients still send the legacy scheme, and files we

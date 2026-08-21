@@ -313,6 +313,46 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
 
+/// API: user_profile/user_profile_get_notify_media_saved
+///
+/// Returns true if we tell somebody when we save a file they sent us.  True is the default, and what
+/// an account that has never set this returns: Session's clients report it, so it is what a sender
+/// expects.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_get_notify_media_saved(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `bool` -- true to tell the sender
+LIBSESSION_EXPORT bool user_profile_get_notify_media_saved(const config_object* conf);
+
+/// API: user_profile/user_profile_set_notify_media_saved
+///
+/// Sets the above.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_notify_media_saved(
+///     [in]    config_object*      conf,
+///     [in]    bool                notify
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `notify` -- [in] false to stop telling senders that we saved their files
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_notify_media_saved(config_object* conf, bool notify);
+
 /// API: user_profile/user_profile_get_profile_updated
 ///
 /// Returns the timestamp that the user last updated their profile information; or `0` if it's

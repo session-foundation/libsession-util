@@ -569,6 +569,48 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
 }
 
+TEST_CASE("UserProfile media-saved notifications", "[config][user_profile]") {
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    session::config::UserProfile profile{seed, std::nullopt};
+
+    // The default is to tell them, and it costs nothing to carry: an account that has never touched
+    // this has no key for it, which is the whole reason the key is stored the other way up.
+    CHECK(profile.get_notify_media_saved());
+    CHECK_FALSE(profile.needs_push());
+
+    profile.set_notify_media_saved(false);
+    CHECK_FALSE(profile.get_notify_media_saved());
+    CHECK(profile.needs_push());
+
+    // Setting it back removes the key rather than storing a 0.
+    profile.set_notify_media_saved(true);
+    CHECK(profile.get_notify_media_saved());
+
+    // Whether the key is really gone is not something the accessor can tell us, since absent and
+    // false answer the same; a config built from the dump carries only what was stored.
+    auto [seqno, push, obs] = profile.push();
+    profile.confirm_pushed(seqno, {"fakehash"});
+    session::config::UserProfile reloaded{seed, profile.make_dump()};
+    CHECK(reloaded.get_notify_media_saved());
+    reloaded.set_notify_media_saved(true);
+    CHECK_FALSE(reloaded.needs_push());
+}
+
+TEST_CASE("UserProfile media-saved does not age the profile", "[config][user_profile]") {
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    session::config::UserProfile profile{seed, std::nullopt};
+
+    profile.set_name("Leela");
+    auto stamped = profile.get_profile_updated();
+    REQUIRE(stamped > std::chrono::sys_seconds{});
+
+    // `t`/`T` say when the *profile* last changed, and a client uses that to decide whose name and
+    // picture win.  This is not the profile, so advancing it would claim ours is fresher than it is
+    // and could make a stale name beat a newer one from another device.
+    profile.set_notify_media_saved(false);
+    CHECK(profile.get_profile_updated() == stamped);
+}
+
 TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;

@@ -60,6 +60,10 @@ using namespace std::literals;
 ///     messages in it older than this are to be deleted, and arriving ones older than it dropped.
 ///     Omitted when 0.  Named to match the equivalent field in the contacts and group info configs;
 ///     note to self needs its own because it has no contacts entry to carry one.
+/// x - set to 1 to suppress the notification that tells someone we saved a file they sent.  Omitted
+///     when we do send them, which is the default and what nearly every account will carry -- hence
+///     a key that is absent rather than a value that is false, so the common case costs nothing in
+///     every push.  Note this is the *negative*: present means do not tell them.
 /// D - "delete attachments before" unix timestamp (seconds) for "Note to Self": as above but for
 ///     attachments alone, leaving the messages themselves.  Omitted when 0.
 class UserProfile : public ConfigBase {
@@ -303,6 +307,36 @@ class UserProfile : public ConfigBase {
     ///   not, and `std::nullopt` to drop the setting from the config (and thus use the client's
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
+
+    /// API: user_profile/UserProfile::get_notify_media_saved
+    ///
+    /// Whether to tell somebody that we saved a file they sent us.  True by default, and for an
+    /// account that has never set it either way: Session's clients report it, so it is what a
+    /// sender expects.
+    ///
+    /// Whether that notification should be sent is a privacy decision rather than a technical one,
+    /// and it belongs to the person rather than to the device they happen to be holding — which is
+    /// why it lives here, where it follows the account, and not in a device-local config.
+    ///
+    /// A plain bool rather than the tri-state `get_blinded_msgreqs` uses: "never asked" and
+    /// "explicitly wants the default" are the same instruction, and keeping them apart would only
+    /// matter if the default were ever to flip — which would be a decision taken across every
+    /// client at once, where having accounts that never expressed a preference move with it is
+    /// exactly what you would want.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` -- true to tell the sender, which is the default.
+    bool get_notify_media_saved() const;
+
+    /// API: user_profile/UserProfile::set_notify_media_saved
+    ///
+    /// Sets the above.
+    ///
+    /// Inputs:
+    /// - `notify` -- false to stop telling senders that we saved their files.
+    void set_notify_media_saved(bool notify);
 
     /// API: user_profile/UserProfile::get_profile_updated
     ///

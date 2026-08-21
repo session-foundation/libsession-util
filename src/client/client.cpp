@@ -2675,7 +2675,13 @@ void Client::_save_attachment(
         loop.call([this, message_id, index, notify_sender] {
             if (_saved_by_recipient(message_id))
                 _record_saved(message_id, index, clock_now_ms());
-            if (notify_sender)
+
+            // The account's own answer overrides the caller's, and only downwards.  Somebody who
+            // has said not to report their saves has said it for every client on the account, and a
+            // client that forgot to ask -- or never grew the setting -- would otherwise report them
+            // anyway.  A caller passing false is still respected: this can refuse a notification,
+            // never require one.
+            if (notify_sender && core.configs.user_profile().get_notify_media_saved())
                 _notify_media_saved(message_id, index);
         });
     };

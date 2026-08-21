@@ -168,6 +168,16 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
     return std::nullopt;
 }
 
+// `x` is inverted -- it means *do not* notify -- so that the default is an absent key rather than a
+// value in every push.
+bool UserProfile::get_notify_media_saved() const {
+    return data["x"].integer_or(0) == 0;
+}
+
+void UserProfile::set_notify_media_saved(bool notify) {
+    set_flag(data["x"], !notify);
+}
+
 std::chrono::sys_seconds UserProfile::get_profile_updated() const {
     if (auto t = data["t"].sys_seconds()) {
         if (auto T = data["T"].sys_seconds(); T && *T > *t)
@@ -552,6 +562,14 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
     if (enabled >= 0)
         val = static_cast<bool>(enabled);
     unbox<UserProfile>(conf)->set_blinded_msgreqs(std::move(val));
+}
+
+LIBSESSION_C_API bool user_profile_get_notify_media_saved(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_notify_media_saved();
+}
+
+LIBSESSION_C_API void user_profile_set_notify_media_saved(config_object* conf, bool notify) {
+    unbox<UserProfile>(conf)->set_notify_media_saved(notify);
 }
 
 LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
