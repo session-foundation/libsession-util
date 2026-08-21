@@ -5,7 +5,15 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
-    test_client.cpp
+    test_client/attachments.cpp
+    test_client/configs.cpp
+    test_client/conversation_api.cpp
+    test_client/ids_and_schema.cpp
+    test_client/interop_and_threading.cpp
+    test_client/receiving.cpp
+    test_client/requests.cpp
+    test_client/sending.cpp
+    test_client/volatile.cpp
     test_core_configs.cpp
     test_core_devices.cpp
     test_core_globals.cpp
