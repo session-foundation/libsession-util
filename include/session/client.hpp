@@ -296,12 +296,24 @@ class Client {
     /// and what they are called, and stops there: whether a file is worth the bandwidth is the
     /// application's decision, and on a metered connection it is the user's.
     ///
-    /// `dest` is the caller's choice and is not remembered.  Where a file went is the application's
-    /// business — it chose the location and can move it afterwards — so nothing here would stay
-    /// true.  Saving the same attachment twice to two places is therefore fine and means what it
-    /// says.  The file is written whole or not at all: it lands at a temporary name beside `dest`
-    /// and is renamed only once it has been decrypted and verified, so an interrupted save leaves
-    /// no half-file that looks finished.
+    /// `dest` is where the caller *asked* for it, and is not remembered.  Where a file went is the
+    /// application's business — it chose the location and can move it afterwards — so nothing here
+    /// would stay true.  Saving the same attachment twice to two places is therefore fine and means
+    /// what it says.  The file is written whole or not at all: it lands at a temporary name beside
+    /// `dest` and is renamed only once it has been decrypted and verified, so an interrupted save
+    /// leaves no half-file that looks finished.
+    ///
+    /// **`cb` reports where it actually went**, which is not always `dest`.  Whether `dest` was free
+    /// is something the caller decided when it asked its user; the rename happens when the download
+    /// finishes, which may be minutes later, and anything that has appeared there in between is a
+    /// file nobody agreed to lose.  So by default the finished file takes the next free `name (2)`
+    /// instead — before the extension, since only that still opens on a double-click.
+    ///
+    /// A caller whose user has *already* been shown what is there and said replace it passes
+    /// `replace` and gets `dest` whatever has happened since.  That is not the same decision and
+    /// must not be guessed at: renaming an approved overwrite would leave the file it was meant to
+    /// replace sitting there, which discards the answer the user gave rather than protecting a
+    /// stranger's file.
     ///
     /// `on_progress` reports as `send_message`'s `on_upload` does and is indexed the same way, so
     /// a display built for sending works unchanged in the other direction: `result` unset means
@@ -332,8 +344,9 @@ class Client {
             std::function<
                     void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
                     on_progress,
-            failable_function<void()> cb,
-            bool notify_sender = true);
+            failable_function<void(std::filesystem::path saved_to)> cb,
+            bool notify_sender = true,
+            bool replace = false);
 
     /// Sets, replaces or removes the dispatcher every handler is delivered through, which a caller
     /// whose loop does not exist yet when the Client is built needs: an application typically opens
@@ -471,8 +484,9 @@ class Client {
             size_t index,
             std::filesystem::path dest,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-            failable_function<void()> cb,
-            bool notify_sender);
+            failable_function<void(std::filesystem::path saved_to)> cb,
+            bool notify_sender,
+            bool replace);
 
     // Tells a message's sender that we saved one of its attachments.  Fire and forget: nothing
     // waits on it and a failure is logged rather than reported, since it is a courtesy to them

@@ -1319,7 +1319,9 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
             [&](size_t i, int64_t d, int64_t tot, std::optional<int> r) {
                 reports.emplace_back(i, d, tot, r);
             },
-            [&](std::optional<std::string> err) { done.set_value(std::move(err)); });
+            [&](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
 
     // Nothing is fetched until asked, and asking produces exactly one download.
     sync(*c);
@@ -1396,7 +1398,9 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
         auto waiter = done->get_future();
         c->Client::save_attachment(
                 msg_id, 0, dest, nullptr,
-                [done](std::optional<std::string> err) { done->set_value(std::move(err)); },
+                [done](std::optional<std::string> err, std::filesystem::path) {
+                    done->set_value(std::move(err));
+                },
                 notify);
         sync(*c);
         return waiter;
@@ -1480,7 +1484,9 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     auto waiter = done.get_future();
     c->Client::save_attachment(
             msg->id, 0, dest, nullptr,
-            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+            [&done](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
     sync(*c);
 
     // Served from what the upload left behind, found by the id in the url the send generated.
@@ -1498,6 +1504,115 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     // Stamped, even though the message is outgoing: this conversation is with ourselves, so the
     // recipient saving it and us saving it are the same event.
     CHECK(c->message(id, wait)->attachments[0].saved_at.has_value());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: a save does not destroy files it was not asked to touch",
+          "[client][attachments]") {
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_clobber", 7);
+    std::filesystem::create_directories(dir);
+    auto source = dir / "sent.bin";
+    std::vector<std::byte> contents(1024, std::byte{0x11});
+    {
+        std::ofstream out{source, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    }
+    auto id = c->send_message(
+            ConversationId::dm(me), "here", {OutgoingAttachment{.path = source}}, wait);
+    sync(*c);
+    REQUIRE(accept_stores(*net) == 1);
+
+    auto dest = dir / "report.pdf";
+
+    // Two files the caller never mentioned: somebody's own scratch file from another downloader,
+    // and something that appeared at the destination after the caller checked it was free.
+    auto their_part = dir / "report.pdf.part";
+    {
+        std::ofstream out{their_part};
+        out << "theirs";
+    }
+    {
+        std::ofstream out{dest};
+        out << "appeared since";
+    }
+
+    std::promise<std::pair<std::optional<std::string>, std::filesystem::path>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            id, 0, dest, nullptr,
+            [&done](std::optional<std::string> err, std::filesystem::path where) {
+                done.set_value({std::move(err), std::move(where)});
+            });
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    auto [err, saved_to] = waiter.get();
+    REQUIRE_FALSE(err.has_value());
+
+    // Neither file was touched, and the caller is told where its own went.
+    CHECK(std::filesystem::exists(their_part));
+    CHECK(std::filesystem::file_size(their_part) == 6);
+    CHECK(std::filesystem::file_size(dest) == 14);
+    CHECK(saved_to == dir / "report (1).pdf");
+    CHECK(std::filesystem::file_size(saved_to) == contents.size());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: an approved replacement is not renamed out of the way",
+          "[client][attachments]") {
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_replace", 7);
+    std::filesystem::create_directories(dir);
+    auto source = dir / "sent.bin";
+    std::vector<std::byte> contents(1024, std::byte{0x22});
+    {
+        std::ofstream out{source, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    }
+    auto id = c->send_message(
+            ConversationId::dm(me), "here", {OutgoingAttachment{.path = source}}, wait);
+    sync(*c);
+    REQUIRE(accept_stores(*net) == 1);
+
+    auto dest = dir / "report.pdf";
+    {
+        std::ofstream out{dest};
+        out << "the one the user chose to replace";
+    }
+
+    std::promise<std::filesystem::path> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            id, 0, dest, nullptr,
+            [&done](std::optional<std::string>, std::filesystem::path where) {
+                done.set_value(std::move(where));
+            },
+            /*notify_sender=*/true,
+            /*replace=*/true);
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+
+    // Renaming here would be worse than clobbering: the file the user agreed to replace would still
+    // be sitting there, and their answer would have been thrown away.
+    CHECK(waiter.get() == dest);
+    CHECK(std::filesystem::file_size(dest) == contents.size());
+    CHECK_FALSE(std::filesystem::exists(dir / "report (1).pdf"));
 
     std::filesystem::remove_all(dir);
 }
@@ -1533,7 +1648,9 @@ TEST_CASE("Client: saving what we sent someone else does not claim they saved it
     auto waiter = done.get_future();
     c->Client::save_attachment(
             id, 0, dest, nullptr,
-            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+            [&done](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
@@ -1711,7 +1828,9 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
     auto waiter = done.get_future();
     c->Client::save_attachment(
             msgs[0].id, 0, dest, nullptr,
-            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+            [&done](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
     sync(*c);
 
     REQUIRE(serve_downloads(*net, LEGACY_BLOB) == 1);

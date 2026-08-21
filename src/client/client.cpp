@@ -706,8 +706,9 @@ void Client::save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void()> cb,
-        bool notify_sender) {
+        failable_function<void(std::filesystem::path)> cb,
+        bool notify_sender,
+        bool replace) {
 
     // Checked on the calling thread so a caller's own mistake surfaces at the call site, where they
     // still have a stack to make sense of it.
@@ -727,13 +728,20 @@ void Client::save_attachment(
                dest = std::move(dest),
                on_progress = std::move(on_progress),
                cb,
-               notify_sender]() mutable {
+               notify_sender,
+               replace]() mutable {
         try {
             _save_attachment(
-                    message_id, index, std::move(dest), std::move(on_progress), cb, notify_sender);
+                    message_id,
+                    index,
+                    std::move(dest),
+                    std::move(on_progress),
+                    cb,
+                    notify_sender,
+                    replace);
         } catch (const std::exception& e) {
             log_operation_failure(e);
-            _report(cb, std::optional{std::string{e.what()}});
+            _report(cb, std::optional{std::string{e.what()}}, std::filesystem::path{});
         }
     });
 }
@@ -2385,10 +2393,62 @@ bool Client::_retry_send(
 
 // Where a download is written until it is known to be whole.  A save that dies partway leaves this
 // rather than something that looks like the file the user asked for.
+//
+// `.sessiondl` rather than the conventional `.part` because this destroys whatever is already there:
+// somebody's own `report.pdf.part`, from a browser or another downloader, is a plausible file to
+// find next to `report.pdf`, and one named after us is not.  Numbered when even that is taken, which
+// is what lets two saves of the same file into one directory proceed at once.
+//
+// The check and the open that follows are not one step, so two saves choosing a name in the same
+// instant can still collide.  That is a narrower window than a fixed name, which collided every
+// time.
 static std::filesystem::path partial_path(const std::filesystem::path& dest) {
-    auto p = dest;
-    p += ".part";
-    return p;
+    std::error_code ec;
+    auto base = dest;
+    base += ".sessiondl";
+    if (!std::filesystem::exists(base, ec))
+        return base;
+
+    for (int n = 1; n < 1000; n++) {
+        auto p = dest;
+        p += ".sessiondl{}"_format(n);
+        if (!std::filesystem::exists(p, ec))
+            return p;
+    }
+    throw std::runtime_error{
+            "Cannot find a free scratch name beside {}"_format(dest.string())};
+}
+
+// `name (2).pdf`, not `name.pdf (2)`: only the first still opens on a double-click, and it is what
+// browsers and both desktop file managers produce.
+static std::filesystem::path numbered(const std::filesystem::path& dest, int n) {
+    auto out = dest;
+    out.replace_filename(
+            "{} ({}){}"_format(dest.stem().string(), n, dest.extension().string()));
+    return out;
+}
+
+// The name to give the finished file.  `dest` unless something has appeared there since the caller
+// last looked, which is the whole point: whether it was free was decided when the *prompt* was
+// answered, and the rename happens when the download finishes, which may be minutes later.
+//
+// A caller that already had its user approve a replacement passes `replace` and gets `dest`
+// regardless.  Renaming in that case would be worse than the bug it avoids: the approved overwrite
+// would land beside the file it was meant to replace, and the answer the user gave would be
+// silently discarded.
+static std::filesystem::path final_path(const std::filesystem::path& dest, bool replace) {
+    if (replace)
+        return dest;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(dest, ec))
+        return dest;
+    for (int n = 1; n < 1000; n++) {
+        auto p = numbered(dest, n);
+        if (!std::filesystem::exists(p, ec))
+            return p;
+    }
+    throw std::runtime_error{"Cannot find a free name beside {}"_format(dest.string())};
 }
 
 void Client::_save_attachment(
@@ -2396,8 +2456,9 @@ void Client::_save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void()> cb,
-        bool notify_sender) {
+        failable_function<void(std::filesystem::path)> cb,
+        bool notify_sender,
+        bool replace) {
 
     std::optional<std::string> url;
     std::vector<std::byte> key, digest;
@@ -2464,7 +2525,7 @@ void Client::_save_attachment(
     // it decrypts and so never holds the file; the legacy case has to accumulate, because its MAC
     // and digest cover the whole ciphertext and neither can be checked until all of it is here.
     struct SaveState {
-        std::filesystem::path dest, partial;
+        std::filesystem::path dest, partial, saved_to;
         std::ofstream out;
         std::vector<std::byte> buffered;
         std::optional<attachment::Decryptor> decryptor;
@@ -2535,6 +2596,7 @@ void Client::_save_attachment(
                        message_id,
                        index,
                        notify_sender,
+                       replace,
                        cb = std::move(cb),
                        key = std::move(key),
                        digest = std::move(digest),
@@ -2545,7 +2607,7 @@ void Client::_save_attachment(
             std::error_code ec;
             std::filesystem::remove(state->partial, ec);
             report(0, 0, code);
-            _report(cb, std::optional{std::move(why)});
+            _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
         };
 
         if (auto* err = std::get_if<int16_t>(&result))
@@ -2578,14 +2640,17 @@ void Client::_save_attachment(
             if (!state->out)
                 throw std::runtime_error{"writing {} failed"_format(state->partial.string())};
 
-            // Only now does it get the name the caller asked for.
-            std::filesystem::rename(state->partial, state->dest);
+            // Only now does it get a name a user would recognise -- and only now can it be known
+            // whether the one they asked for is still free, which is why the choice is here rather
+            // than where the caller made it.
+            state->saved_to = final_path(state->dest, replace);
+            std::filesystem::rename(state->partial, state->saved_to);
         } catch (const std::exception& e) {
             return fail(e.what(), ATTACHMENT_UNREADABLE);
         }
 
         report(state->received, state->received, 0);
-        _report(cb, std::optional<std::string>{});
+        _report(cb, std::optional<std::string>{}, state->saved_to);
 
         // Both of these say the same thing -- that the recipient now has the file -- one to
         // ourselves and one to the sender, and neither is true until it is on disk under its final
