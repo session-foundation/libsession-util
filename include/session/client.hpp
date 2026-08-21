@@ -142,7 +142,7 @@ class Client {
     ///
     /// Message requests are not in it — see `message_requests()` — and neither are hidden
     /// conversations.
-    void conversations(failable_function<void(std::vector<Conversation>)> cb);
+    void conversations(failable_function<void(std::vector<AnyConversation>)> cb);
 
     /// The message requests: accounts that have written to us and that we have never written to,
     /// most recently active first.
@@ -151,16 +151,16 @@ class Client {
     /// name and an unread count, and `Conversation::request` is true on every one of these.  It
     /// stops being a request when we answer it, since writing to someone is what approving them
     /// is; there is no separate accept, and no way back short of deleting the contact.
-    void message_requests(failable_function<void(std::vector<Conversation>)> cb);
+    void message_requests(failable_function<void(std::vector<AnyConversation>)> cb);
 
     /// A single conversation, or nullopt if it does not exist locally.
     void conversation(
-            const ConversationId& id, failable_function<void(std::optional<Conversation>)> cb);
+            const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
 
     /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
     /// does this implicitly; this is for opening an empty conversation with someone first.
     void create_conversation(
-            const ConversationId& id, failable_function<void(std::optional<Conversation>)> cb);
+            const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
 
     /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
     /// answer as `Conversation::note_to_self`, for a caller holding only an id.
@@ -489,10 +489,10 @@ class Client {
     // loop exactly as the callback forms do.
   protected:
     std::span<const std::byte> _self_or_none();
-    std::vector<Conversation> _conversations();
-    std::vector<Conversation> _message_requests();
-    std::optional<Conversation> _conversation(const ConversationId& id);
-    Conversation _create_conversation(const ConversationId& id);
+    std::vector<AnyConversation> _conversations();
+    std::vector<AnyConversation> _message_requests();
+    std::optional<AnyConversation> _conversation(const ConversationId& id);
+    AnyConversation _create_conversation(const ConversationId& id);
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
     void _set_priority(const ConversationId& id, int priority);
     void _set_marked_unread(const ConversationId& id, bool unread);

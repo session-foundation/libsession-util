@@ -74,13 +74,13 @@ using failable_function = typename detail::failable_function<Sig>::type;
 /// only part of it is fine, holding only part of it is not.
 struct callbacks {
     /// A conversation now exists that did not before.
-    std::function<void(const Conversation&)> conversation_added;
+    std::function<void(const AnyConversation&)> conversation_added;
 
     /// A conversation's contents changed: a new or edited message, a name, an unread count, its
     /// last activity.  Fired once with the conversation's settled state rather than once per
     /// underlying change, so a poll that delivers fifty messages to one conversation fires this
     /// once.
-    std::function<void(const Conversation&)> conversation_updated;
+    std::function<void(const AnyConversation&)> conversation_updated;
 
     /// A conversation is gone and should be dropped from the list.
     std::function<void(const ConversationId&)> conversation_removed;
@@ -90,7 +90,7 @@ struct callbacks {
     /// from another device can repin, reveal and hide arbitrarily many conversations at once, and
     /// because a replacement cannot leave the application subtly out of step the way a missed
     /// delta would.
-    std::function<void(std::vector<Conversation>)> conversation_list_replaced;
+    std::function<void(std::vector<AnyConversation>)> conversation_list_replaced;
 
     /// The message requests changed, carrying the whole list of them, for the same reasons and with
     /// the same guarantees as the above.
@@ -99,7 +99,7 @@ struct callbacks {
     /// both: it left the requests and joined the conversations.  `conversation_added` and the rest
     /// are shared between them — a request is a conversation in every respect except which list it
     /// belongs to — and `Conversation::request` is what says which one a given handler is about.
-    std::function<void(std::vector<Conversation>)> request_list_replaced;
+    std::function<void(std::vector<AnyConversation>)> request_list_replaced;
 
     /// A message was added, whether received or sent from here.
     std::function<void(const ConversationId&, const Message&)> message_added;

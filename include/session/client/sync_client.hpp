@@ -30,19 +30,19 @@ class SyncClient : public Client {
   public:
     using Client::Client;
 
-    std::vector<Conversation> conversations() {
+    std::vector<AnyConversation> conversations() {
         return core.loop().call_get([this] { return _conversations(); });
     }
 
-    std::vector<Conversation> message_requests() {
+    std::vector<AnyConversation> message_requests() {
         return core.loop().call_get([this] { return _message_requests(); });
     }
 
-    std::optional<Conversation> conversation(const ConversationId& id) {
+    std::optional<AnyConversation> conversation(const ConversationId& id) {
         return core.loop().call_get([&] { return _conversation(id); });
     }
 
-    Conversation create_conversation(const ConversationId& id) {
+    AnyConversation create_conversation(const ConversationId& id) {
         _require_dm("create_conversation", id);
         return core.loop().call_get([&] { return _create_conversation(id); });
     }

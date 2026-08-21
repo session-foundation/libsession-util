@@ -574,24 +574,24 @@ void Client::send_message(
 // Callback forms: dispatch and return, delivering the result on the loop thread.
 
 void Client::conversations(
-        std::function<void(std::optional<std::string>, std::vector<Conversation>)> cb) {
+        std::function<void(std::optional<std::string>, std::vector<AnyConversation>)> cb) {
     _async([this] { return _conversations(); }, std::move(cb));
 }
 
 void Client::message_requests(
-        std::function<void(std::optional<std::string>, std::vector<Conversation>)> cb) {
+        std::function<void(std::optional<std::string>, std::vector<AnyConversation>)> cb) {
     _async([this] { return _message_requests(); }, std::move(cb));
 }
 
 void Client::conversation(
         const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
+        std::function<void(std::optional<std::string>, std::optional<AnyConversation>)> cb) {
     _async([this, id] { return _conversation(id); }, std::move(cb));
 }
 
 void Client::create_conversation(
         const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<Conversation>)> cb) {
+        std::function<void(std::optional<std::string>, std::optional<AnyConversation>)> cb) {
     _require_dm("create_conversation", id);
     _async([this, id] { return std::optional{_create_conversation(id)}; }, std::move(cb));
 }
@@ -754,12 +754,12 @@ static constexpr auto IS_REQUEST =
 // query because the row does not know whose database it is in.  Empty when there is no account
 // yet, under which circumstance nothing can be a conversation with ourselves.
 template <typename... Bind>
-static std::vector<Conversation> query_conversations(
+static std::vector<AnyConversation> query_conversations(
         sqlite::Connection& c,
         std::span<const std::byte> self,
         const std::string& query,
         const Bind&... bind) {
-    std::vector<Conversation> out;
+    std::vector<AnyConversation> out;
     for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved,
                approved_me, marked_unread] :
          c.prepared_results<
@@ -776,19 +776,29 @@ static std::vector<Conversation> query_conversations(
                  int,
                  int,
                  int>(query, bind...)) {
-        bool me = sid && std::ranges::equal(static_cast<const b33&>(*sid), self);
-        out.push_back(
-                Conversation{
-                        .id = subject_to_id(convo, sid, gid, url, room),
-                        .display_name = name.value_or(""),
-                        .last_message = std::move(preview),
-                        .last_activity = from_epoch_ms(activity),
-                        .unread = unread,
-                        .marked_unread = marked_unread != 0,
-                        .priority = priority,
-                        .request = sid && !me && !approved,
-                        .awaiting_approval = sid && !me && !approved_me,
-                        .note_to_self = me});
+        Conversation base{
+                .id = subject_to_id(convo, sid, gid, url, room),
+                .display_name = name.value_or(""),
+                .last_message = std::move(preview),
+                .last_activity = from_epoch_ms(activity),
+                .unread = unread,
+                .marked_unread = marked_unread != 0,
+                .priority = priority};
+
+        // The same branch that decided which identity the row joined to decides which kind it is:
+        // exactly one of them is set, which is what the table's CHECK constraint enforces.
+        if (gid)
+            out.push_back(Group{std::move(base)});
+        else if (url && room)
+            out.push_back(Community{std::move(base)});
+        else {
+            bool me = std::ranges::equal(static_cast<const b33&>(*sid), self);
+            DM dm{std::move(base)};
+            dm.request = !me && !approved;
+            dm.awaiting_approval = !me && !approved_me;
+            dm.note_to_self = me;
+            out.push_back(std::move(dm));
+        }
     }
     return out;
 }
@@ -802,7 +812,7 @@ std::span<const std::byte> Client::_self_or_none() {
     return core.globals.session_id();
 }
 
-std::vector<Conversation> Client::_conversations() {
+std::vector<AnyConversation> Client::_conversations() {
     auto c = core.database().conn();
     auto self = _self_or_none();
     return query_conversations(
@@ -815,7 +825,7 @@ std::vector<Conversation> Client::_conversations() {
             self);
 }
 
-std::vector<Conversation> Client::_message_requests() {
+std::vector<AnyConversation> Client::_message_requests() {
     auto c = core.database().conn();
     auto self = _self_or_none();
     // No priority ordering: a request cannot be pinned -- pinning is a property of the config entry
@@ -830,7 +840,7 @@ std::vector<Conversation> Client::_message_requests() {
             self);
 }
 
-std::optional<Conversation> Client::_conversation(const ConversationId& id) {
+std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     auto c = core.database().conn();
     auto convo = find_conversation(c, id);
     if (!convo)
@@ -842,7 +852,7 @@ std::optional<Conversation> Client::_conversation(const ConversationId& id) {
     return std::move(found.front());
 }
 
-Conversation Client::_create_conversation(const ConversationId& id) {
+AnyConversation Client::_create_conversation(const ConversationId& id) {
     bool created, contacted = false;
     {
         auto c = core.database().conn();
