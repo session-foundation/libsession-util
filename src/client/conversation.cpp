@@ -98,6 +98,11 @@ void Conversation::send_message(
             std::move(cb));
 }
 int64_t Conversation::send_message(
+        std::string_view body, std::vector<OutgoingAttachment> attachments, wait_t) {
+    return send_message(body, std::move(attachments), nullptr, wait);
+}
+
+int64_t Conversation::send_message(
         std::string_view body,
         std::vector<OutgoingAttachment> attachments,
         upload_progress on_upload,

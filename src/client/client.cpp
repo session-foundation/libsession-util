@@ -553,6 +553,17 @@ void Client::retry_send(
             std::move(cb));
 }
 
+bool Client::retry_send(
+        int64_t message_id, Conversation::upload_progress on_upload, wait_t) {
+    return loop.call_get([this, message_id, on_upload = std::move(on_upload)] {
+        return _retry_send(message_id, on_upload);
+    });
+}
+
+bool Client::retry_send(int64_t message_id, wait_t) {
+    return retry_send(message_id, nullptr, wait);
+}
+
 void Client::send_message(
         const ConversationId& id,
         std::string_view body,
@@ -613,6 +624,14 @@ std::optional<Message> Client::message(int64_t id, wait_t) {
 int64_t Client::send_message(const ConversationId& id, std::string_view body, wait_t) {
     _require_dm("send_message", id);
     return loop.call_get([this, id, body] { return _send_message(id, body); });
+}
+
+int64_t Client::send_message(
+        const ConversationId& id,
+        std::string_view body,
+        std::vector<OutgoingAttachment> attachments,
+        wait_t) {
+    return send_message(id, body, std::move(attachments), nullptr, wait);
 }
 
 int64_t Client::send_message(

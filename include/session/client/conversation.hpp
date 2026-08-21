@@ -190,6 +190,8 @@ class Conversation {
             std::vector<OutgoingAttachment> attachments,
             upload_progress on_upload,
             wait_t);
+    int64_t send_message(
+            std::string_view body, std::vector<OutgoingAttachment> attachments, wait_t);
 
     // -- Destroying ---------------------------------------------------------------------------
     //

@@ -127,7 +127,7 @@ class Client {
     //
     // Each returns immediately and invokes `cb` when the work is done -- through the dispatcher if
     // one was given, so on the application's own thread.  A caller that would rather block on the
-    // answer than be handed it uses SyncClient.
+    // answer than be handed it passes `wait` in place of the handler and takes the return value.
     //
     // **Every `cb` is invoked exactly once**, unless the Client is destroyed before its work runs.
     // That is what its leading `error` argument is for: unset when the call succeeded, and
@@ -252,6 +252,11 @@ class Client {
             std::vector<OutgoingAttachment> attachments,
             Conversation::upload_progress on_upload,
             wait_t);
+    int64_t send_message(
+            const ConversationId& id,
+            std::string_view body,
+            std::vector<OutgoingAttachment> attachments,
+            wait_t);
 
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
@@ -274,6 +279,9 @@ class Client {
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
             failable_function<void(bool started)> cb);
+    bool retry_send(
+            int64_t message_id, Conversation::upload_progress on_upload, wait_t);
+    bool retry_send(int64_t message_id, wait_t);
 
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
     ///
@@ -405,9 +413,6 @@ class Client {
     // above are dispatches onto that thread and nothing else; these are where the database is
     // touched, and are also what Client's own handlers call, since those already run there.
     //
-    // Protected rather than private because SyncClient is built out of them, dispatching onto the
-    // loop exactly as the callback forms do.
-  protected:
     std::span<const std::byte> _self_or_none();
     std::vector<AnyConversation> _conversations();
     std::vector<AnyConversation> _message_requests();
@@ -492,15 +497,12 @@ class Client {
 
     // Runs `work` on the loop thread, logging rather than propagating anything it throws: an
     // exception escaping there has no caller to reach and would take the loop with it.
-  private:
     void _dispatch(std::function<void()> work);
 
-  protected:
     void _require_dm(std::string_view op, const ConversationId& id);
     void _require_contact(std::string_view op, const ConversationId& id);
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
-  private:
     core::callbacks _core_callbacks();
     void _init();
 
