@@ -117,7 +117,11 @@ class Keys : public ConfigSig {
     /// back.  It is not secret — the same bytes sit on the swarm — so this is a plain vector
     /// rather than a `sodium_vector`.
     ///
-    /// Kept in lockstep with `active_msgs_` by `remove_expired()`; nothing else may add to it.
+    /// Invariant: every key here is also a hash in `active_msgs_`.  Entries are added only while
+    /// loading -- `load_key_message()` (via `insert_key()`, or directly for a message that carried
+    /// no key for us) and `load_dump()` when restoring -- and removed only by `prune_key_msgs()`,
+    /// which derives the survivors from `active_msgs_`.  Nothing outside those load paths may add
+    /// to it.
     std::map<std::string, std::vector<unsigned char>> key_msgs_;
 
     sodium_cleared<std::array<unsigned char, 32>> pending_key_;
