@@ -140,6 +140,7 @@ add_subdirectory(mnemonics)
 # design: core neither knows nor links this.
 add_libsession_util_library(client
     client/client.cpp
+    client/conversation.cpp
     client/conversation_id.cpp
 )
 add_subdirectory(client/schema)

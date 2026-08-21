@@ -583,97 +583,88 @@ void Client::message_requests(
     _async([this] { return _message_requests(); }, std::move(cb));
 }
 
+void Client::set_blocked(
+        const ConversationId& id, bool blocked, std::function<void(std::optional<std::string>)> cb) {
+    _require_contact("set_blocked", id);
+    _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
+}
+
+void Client::set_blocked(const ConversationId& id, bool blocked, wait_t) {
+    _require_contact("set_blocked", id);
+    loop.call_get([this, id, blocked] { _set_blocked(id, blocked); });
+}
+
+std::vector<AnyConversation> Client::conversations(wait_t) {
+    return loop.call_get([this] { return _conversations(); });
+}
+
+std::vector<AnyConversation> Client::message_requests(wait_t) {
+    return loop.call_get([this] { return _message_requests(); });
+}
+
+std::optional<AnyConversation> Client::conversation(const ConversationId& id, wait_t) {
+    return loop.call_get([this, id] { return _conversation(id); });
+}
+
+std::optional<Message> Client::message(int64_t id, wait_t) {
+    return loop.call_get([this, id] { return _message(id); });
+}
+
+int64_t Client::send_message(const ConversationId& id, std::string_view body, wait_t) {
+    _require_dm("send_message", id);
+    return loop.call_get([this, id, body] { return _send_message(id, body); });
+}
+
+int64_t Client::send_message(
+        const ConversationId& id,
+        std::string_view body,
+        std::vector<OutgoingAttachment> attachments,
+        Conversation::upload_progress on_upload,
+        wait_t) {
+    _require_dm("send_message", id);
+    _require_readable(attachments);
+    return loop.call_get([&] {
+        return _send_message(id, body, attachments, std::move(on_upload));
+    });
+}
+
 void Client::conversation(
         const ConversationId& id,
         std::function<void(std::optional<std::string>, std::optional<AnyConversation>)> cb) {
     _async([this, id] { return _conversation(id); }, std::move(cb));
 }
 
-void Client::create_conversation(
+// A DM asked for by kind: the same lookup, then narrowed.  Nullopt covers both "no such
+// conversation" and, since _require_dm has already refused a group or community id, nothing else.
+static std::optional<DM> as_dm(std::optional<AnyConversation> convo) {
+    if (!convo)
+        return std::nullopt;
+    if (auto* dm = convo->dm())
+        return *dm;
+    return std::nullopt;
+}
+
+void Client::dm(const ConversationId& id, std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
+    _require_dm("dm", id);
+    _async([this, id] { return as_dm(_conversation(id)); }, std::move(cb));
+}
+
+std::optional<DM> Client::dm(const ConversationId& id, wait_t) {
+    _require_dm("dm", id);
+    return loop.call_get([this, id] { return as_dm(_conversation(id)); });
+}
+
+void Client::open_dm(
         const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<AnyConversation>)> cb) {
-    _require_dm("create_conversation", id);
-    _async([this, id] { return std::optional{_create_conversation(id)}; }, std::move(cb));
+        std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
+    _require_dm("open_dm", id);
+    _async([this, id] { return as_dm(std::optional<AnyConversation>{_create_conversation(id)}); },
+           std::move(cb));
 }
 
-void Client::mark_read(
-        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
-    mark_read(id, std::nullopt, std::move(cb));
-}
-
-void Client::mark_read(
-        const ConversationId& id,
-        std::optional<sys_ms> up_to,
-        std::function<void(std::optional<std::string>)> cb) {
-    _async([this, id, up_to] { _mark_read(id, up_to); }, std::move(cb));
-}
-
-void Client::set_priority(
-        const ConversationId& id,
-        int priority,
-        std::function<void(std::optional<std::string>)> cb) {
-    _async([this, id, priority] { _set_priority(id, priority); }, std::move(cb));
-}
-
-void Client::set_marked_unread(
-        const ConversationId& id,
-        bool unread,
-        std::function<void(std::optional<std::string>)> cb) {
-    _async([this, id, unread] { _set_marked_unread(id, unread); }, std::move(cb));
-}
-
-void Client::set_blocked(
-        const ConversationId& id,
-        bool blocked,
-        std::function<void(std::optional<std::string>)> cb) {
-    _require_contact("set_blocked", id);
-    _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
-}
-
-void Client::clear_messages(
-        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
-    _require_dm("clear_messages", id);
-    _async([this, id] { _clear_messages(id); }, std::move(cb));
-}
-
-void Client::delete_conversation(
-        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
-    delete_conversation(id, false, std::move(cb));
-}
-
-void Client::delete_conversation(
-        const ConversationId& id,
-        bool keep_messages,
-        std::function<void(std::optional<std::string>)> cb) {
-    _require_dm("delete_conversation", id);
-    _async([this, id, keep_messages] { _delete_conversation(id, keep_messages); }, std::move(cb));
-}
-
-void Client::delete_contact(
-        const ConversationId& id, std::function<void(std::optional<std::string>)> cb) {
-    _require_contact("delete_contact", id);
-    _async([this, id] { _delete_contact(id); }, std::move(cb));
-}
-
-void Client::messages(
-        const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
-    messages(id, 50, std::nullopt, std::move(cb));
-}
-
-void Client::messages(
-        const ConversationId& id,
-        int limit,
-        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
-    messages(id, limit, std::nullopt, std::move(cb));
-}
-
-void Client::messages(
-        const ConversationId& id,
-        int limit,
-        std::optional<MessageCursor> before,
-        std::function<void(std::optional<std::string>, std::vector<Message>)> cb) {
-    _async([this, id, limit, before] { return _messages(id, limit, before); }, std::move(cb));
+DM Client::open_dm(const ConversationId& id, wait_t) {
+    _require_dm("open_dm", id);
+    return loop.call_get([this, id] { return *as_dm(std::optional<AnyConversation>{_create_conversation(id)}); });
 }
 
 void Client::message(
@@ -755,6 +746,7 @@ static constexpr auto IS_REQUEST =
 // yet, under which circumstance nothing can be a conversation with ourselves.
 template <typename... Bind>
 static std::vector<AnyConversation> query_conversations(
+        Client& client,
         sqlite::Connection& c,
         std::span<const std::byte> self,
         const std::string& query,
@@ -776,28 +768,27 @@ static std::vector<AnyConversation> query_conversations(
                  int,
                  int,
                  int>(query, bind...)) {
-        Conversation base{
-                .id = subject_to_id(convo, sid, gid, url, room),
-                .display_name = name.value_or(""),
-                .last_message = std::move(preview),
-                .last_activity = from_epoch_ms(activity),
-                .unread = unread,
-                .marked_unread = marked_unread != 0,
-                .priority = priority};
+        Conversation base{client, subject_to_id(convo, sid, gid, url, room)};
+        base.display_name = name.value_or("");
+        base.last_message = std::move(preview);
+        base.last_activity = from_epoch_ms(activity);
+        base.unread = unread;
+        base.marked_unread = marked_unread != 0;
+        base.priority = priority;
 
         // The same branch that decided which identity the row joined to decides which kind it is:
         // exactly one of them is set, which is what the table's CHECK constraint enforces.
         if (gid)
-            out.push_back(Group{std::move(base)});
+            out.emplace_back(Group{std::move(base)});
         else if (url && room)
-            out.push_back(Community{std::move(base)});
+            out.emplace_back(Community{std::move(base)});
         else {
             bool me = std::ranges::equal(static_cast<const b33&>(*sid), self);
             DM dm{std::move(base)};
             dm.request = !me && !approved;
             dm.awaiting_approval = !me && !approved_me;
             dm.note_to_self = me;
-            out.push_back(std::move(dm));
+            out.emplace_back(std::move(dm));
         }
     }
     return out;
@@ -816,6 +807,7 @@ std::vector<AnyConversation> Client::_conversations() {
     auto c = core.database().conn();
     auto self = _self_or_none();
     return query_conversations(
+            *this,
             c,
             self,
             // Hidden (negative priority) conversations are not part of the list at all; pinned ones
@@ -833,6 +825,7 @@ std::vector<AnyConversation> Client::_message_requests() {
     // is.  Hidden ones are still omitted, since hiding is the one thing another device *can* say
     // about a request it does not want to see.
     return query_conversations(
+            *this,
             c,
             self,
             "{} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
@@ -846,7 +839,7 @@ std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     if (!convo)
         return std::nullopt;
     auto found = query_conversations(
-            c, _self_or_none(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
+            *this, c, _self_or_none(), "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());

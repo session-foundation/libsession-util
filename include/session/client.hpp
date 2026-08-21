@@ -74,6 +74,11 @@ using namespace std::literals;
 class Client {
     friend class session::TestHelper;  // for unit tests
 
+    // A conversation *is* part of Client's interface, split off rather than added to: what these
+    // call is the same private machinery the methods here do.
+    friend class Conversation;
+    friend class DM;
+
   public:
     /// Constructs a Client and, internally, the Core it sits on.  Takes exactly the options
     /// `core::Core` takes (database encryption, predefined_seed, callbacks, …) and forwards them.
@@ -143,6 +148,7 @@ class Client {
     /// Message requests are not in it — see `message_requests()` — and neither are hidden
     /// conversations.
     void conversations(failable_function<void(std::vector<AnyConversation>)> cb);
+    std::vector<AnyConversation> conversations(wait_t);
 
     /// The message requests: accounts that have written to us and that we have never written to,
     /// most recently active first.
@@ -152,15 +158,44 @@ class Client {
     /// stops being a request when we answer it, since writing to someone is what approving them
     /// is; there is no separate accept, and no way back short of deleting the contact.
     void message_requests(failable_function<void(std::vector<AnyConversation>)> cb);
+    std::vector<AnyConversation> message_requests(wait_t);
 
-    /// A single conversation, or nullopt if it does not exist locally.
+    /// One conversation, or nullopt if we have no such conversation.
+    ///
+    /// What you get back carries the operations as well as the values — see `Conversation` — so
+    /// this is how a caller holding only an id reaches everything that can be done to it.
+    ///
+    ///     client.conversation(id, [](auto err, auto convo) {
+    ///         if (convo) convo->mark_read(cb);
+    ///     });
+    ///
+    /// `dm()` is the same question asked of a kind you already know, so that what comes back is a
+    /// `DM` and needs no narrowing.
+    ///
+    /// @throws std::invalid_argument, from `dm()`, if the id is not a one-to-one conversation.
     void conversation(
             const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
+    void dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
+    std::optional<AnyConversation> conversation(const ConversationId& id, wait_t);
+    std::optional<DM> dm(const ConversationId& id, wait_t);
 
-    /// Creates the conversation if it does not exist and returns it.  Sending to a conversation
-    /// does this implicitly; this is for opening an empty conversation with someone first.
-    void create_conversation(
-            const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
+    /// The conversation with someone, made if it was not there already — "open a chat with this
+    /// account", which is the one thing `conversation()` cannot express.
+    ///
+    /// Cannot answer "no such conversation": that is the difference from `dm()`, and it is why the
+    /// waiting form hands back a `DM` rather than an optional.  Opening one that already exists
+    /// changes nothing and simply gives it to you.
+    ///
+    /// The handler form still carries an optional, because a call that has been dispatched can
+    /// still fail — a disk error — and has nowhere to throw.  It is unset only when `error` is set,
+    /// never because the conversation was missing.
+    ///
+    /// Only DMs so far, and so only this one; groups and communities are joined and created rather
+    /// than opened, and will say so in their own words when they arrive.
+    ///
+    /// @throws std::invalid_argument if the id is not a one-to-one conversation.
+    void open_dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
+    DM open_dm(const ConversationId& id, wait_t);
 
     /// True if `id` is the conversation with our own account — Session's "Note to Self".  Same
     /// answer as `Conversation::note_to_self`, for a caller holding only an id.
@@ -173,166 +208,51 @@ class Client {
     /// conversation with ourselves.
     bool is_note_to_self(const ConversationId& id);
 
-    /// Marks incoming messages up to and including `up_to` as read, moving the unread watermark
-    /// forward.  Passing nullopt marks everything currently stored as read — which is not the same
-    /// as parking the watermark at infinity: a message that arrives afterwards is still unread,
-    /// even if its timestamp is older than the one we just read to.
-    ///
-    /// Never moves the watermark backwards.
-    void mark_read(const ConversationId& id, failable_function<void()> cb);
-    void mark_read(
-            const ConversationId& id, std::optional<sys_ms> up_to, failable_function<void()> cb);
-
-    /// Sets a conversation's pinning: 0 unpinned, positive pinned with higher values first,
-    /// negative hidden.  The value is the one the Contacts and UserGroups configs carry, so this is
-    /// also where a config update from another device lands once that reconciliation exists.
-    ///
-    /// Reported to subscribers as `conversation_list_replaced`, not as an update to the one
-    /// conversation, because hiding removes a conversation from the list and unhiding returns it —
-    /// so what changed is the list, not a row in it.
-    void set_priority(const ConversationId& id, int priority, failable_function<void()> cb);
-
-    /// Marks a conversation unread, or clears that — the deliberate "I want to come back to this"
-    /// rather than a count of messages.  Synced, so it follows you between devices.
-    ///
-    /// Independent of `unread`, which counts messages: this survives having read all of them, and
-    /// that is the point of it.  Reading the conversation clears it, since that is the thing it was
-    /// asking you to come back and do.
-    void set_marked_unread(const ConversationId& id, bool unread, failable_function<void()> cb);
-
-    // -- Blocking and deleting ---------------------------------------------------------------
-    //
-    // The four destructive things a client offers, named for what a user is choosing rather than
-    // for what happens underneath — "delete conversation" and "delete contact" differ by what they
-    // leave behind, not by how they delete.  They are composed here, and not left to a UI to
-    // assemble out of smaller pieces, because every Session client has to compose them the same
-    // way: which fields a deletion resets, and what it tells other devices, is part of what the
-    // operation *is*, and three clients each deriving it separately is three chances to diverge.
-    //
-    // What they have in common is that the deletion is *synced as an instruction*, not as a local
-    // act.  Clearing a conversation records the moment it was cleared, so every device deletes what
-    // it holds from before then — including messages this one never had, and messages that arrive
-    // afterwards but are older than the instruction.  A device that was offline for the whole thing
-    // catches up when it merges, rather than keeping a history its owner told it to destroy.
-
-    /// Blocks or unblocks an account.  Blocking is synced, so it takes effect on every device.
-    ///
-    /// Blocking someone we hold no contact entry for creates one, since being blocked is a fact
-    /// about a relationship and there is nowhere else to record it.  It does not approve them,
-    /// and unblocking does not undo anything else the block implied.
-    void set_blocked(const ConversationId& id, bool blocked, failable_function<void()> cb);
-
-    /// Deletes a conversation's messages, keeping the conversation itself and everything that
-    /// describes it — the contact, the nickname, the pin.
-    void clear_messages(const ConversationId& id, failable_function<void()> cb);
-
-    /// Removes a conversation from the list without forgetting who it is with: the contact entry
-    /// stays, so a nickname and an approval survive, and a new message from them brings the
-    /// conversation back.
-    ///
-    /// `keep_messages` distinguishes the two things a UI calls this for.  Deleting a conversation
-    /// destroys its history; hiding one — which is what "Hide" on Note to Self does — leaves the
-    /// history to come back with it.
-    void delete_conversation(const ConversationId& id, failable_function<void()> cb);
-    void delete_conversation(
-            const ConversationId& id, bool keep_messages, failable_function<void()> cb);
-
-    /// Deletes the contact along with the conversation and its history, everywhere.
-    ///
-    /// This is the strong one: the entry goes from the Contacts config, so every device drops the
-    /// conversation rather than merely hiding it, and what the entry held — the nickname, the
-    /// approval in both directions, the block — goes with it.  Deleting a blocked contact therefore
-    /// unblocks them; the block lived in the entry that was removed.
-    ///
-    /// What survives is the account itself, because we may still see them in a group or a
-    /// community and need their name to render it.  A message from them afterwards arrives as a
-    /// message request, exactly as one from a stranger would.
-    ///
-    /// Takes no `keep_messages`: there would be no conversation left to keep them in.
-    void delete_contact(const ConversationId& id, failable_function<void()> cb);
-
-    /// A window of a conversation's history, newest first.  Pass the `cursor()` of the last
-    /// message of a page as `before` to fetch the next (older) page; the message at the cursor is
-    /// not repeated.
-    void messages(const ConversationId& id, failable_function<void(std::vector<Message>)> cb);
-    void messages(
-            const ConversationId& id, int limit, failable_function<void(std::vector<Message>)> cb);
-    void messages(
-            const ConversationId& id,
-            int limit,
-            std::optional<MessageCursor> before,
-            failable_function<void(std::vector<Message>)> cb);
-
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
     void message(int64_t id, failable_function<void(std::optional<Message>)> cb);
+    std::optional<Message> message(int64_t id, wait_t);
 
-    /// Sends a text message, storing it immediately and dispatching it via Core.
+    /// Blocks or unblocks an account named by id.
     ///
-    /// Yields the Client message id of the stored row, which is what subsequent
-    /// ChangeType::message_updated signals carry as delivery progresses.  Creates the conversation
-    /// if it does not already exist.
+    /// The same operation as `DM::set_blocked`, and forwards to it; it is here as well because
+    /// blocking is a fact about a *relationship* rather than about a conversation, and there is not
+    /// always a conversation to hang it off — blocking someone whose name you found in a group has
+    /// nothing to open first, and opening one would be the wrong thing to do about it.
+    ///
+    /// @throws std::invalid_argument if the id is not a one-to-one conversation, or is our own.
+    void set_blocked(const ConversationId& id, bool blocked, failable_function<void()> cb);
+    void set_blocked(const ConversationId& id, bool blocked, wait_t);
+
+    /// Sends to a conversation named by id, creating it if it does not exist.
+    ///
+    /// The same operation as `Conversation::send_message`, and forwards to it; it is here as well
+    /// because this is the one thing that cannot require a conversation to already exist — messaging
+    /// an account you have never spoken to is how the conversation begins.  With one in hand, send
+    /// through it and skip the lookup.
+    ///
+    /// See `Conversation::send_message` for what the arguments mean and what `on_upload` reports.
     ///
     /// @throws std::invalid_argument if the conversation is not a DM (groups and communities are
-    /// not implemented yet); thrown on the calling thread, before anything is dispatched.
+    /// not implemented yet), or if an attachment cannot be read; thrown on the calling thread,
+    /// before anything is stored or dispatched.
     void send_message(
             const ConversationId& id,
             std::string_view body,
             failable_function<void(int64_t message_id)> cb);
-
-    /// Sends a message carrying files, which turns sending into two stages: each attachment is
-    /// encrypted and uploaded to the file server, and only then is the message — now able to name
-    /// where those files live — dispatched to the swarms.
-    ///
-    /// Returns as soon as the row is stored, as the plain overload does, so the message is
-    /// displayable immediately; it sits in SendState::uploading until the uploads finish and moves
-    /// on to the ordinary send states from there.  An upload that fails fails the message, leaving
-    /// it in SendState::failed with nothing sent.
-    ///
-    /// `on_upload` follows one attachment, identified by `index`, its position in `attachments`:
-    ///
-    /// - `result` unset — under way.  `sent`/`total` are encrypted bytes.  The first such report
-    ///   for an attachment is always 0/0 and means it has started rather than that it has sent
-    ///   nothing: it comes before the transfer is established, which is what tells an attachment
-    ///   being worked on from one still waiting its turn.  The size is not known until then, so a
-    ///   progress bar is sized from the first report carrying a non-zero total.
-    /// - `result == 0` — done, and the file server gave us an id for it.  Note this is the only
-    ///   thing that means done: `sent == total` merely means the last byte was acknowledged, and
-    ///   the server's decision to accept the file arrives after that.
-    /// - anything else — that attachment failed, with the file server's status code or one of the
-    ///   network layer's own negative codes.  The message fails as a whole, but this is reported
-    ///   per attachment, so a list of them can mark the one that broke rather than all of them.
-    ///
-    /// Reports for one attachment arrive in order — progress, then exactly one result — but
-    /// reports for different attachments may interleave, and a failure does not stop the others
-    /// being reported.  An attachment that never produces a result was not attempted, or had not
-    /// finished when the message failed; either way that is not something to read as success.
-    ///
-    /// It is taken here rather than through `callbacks` because it belongs to this call: those
-    /// handlers report what the network did to us, whereas this reports how something we asked for
-    /// is going, and a caller passing it here can bind whatever it wants to update without matching
-    /// an id back to it.
-    ///
-    /// Progress fires as often as the transfer reports, which on a fast upload is often; coalescing
-    /// is the caller's to do, since dropping intermediate values loses nothing.  Like the
-    /// `callbacks` handlers it runs on Core's event loop, so it must not block or throw — and note
-    /// it can fire before this function returns, so it must not depend on anything the caller sets
-    /// up afterwards.
-    ///
-    /// The files are read at this point, not when they were attached, so they must still exist.
-    /// Nothing about them is stored: what persists is the message, whose content names the uploaded
-    /// copies.  Re-sending a failed message therefore uploads again.
-    ///
-    /// @throws std::invalid_argument if the conversation is not a DM, or if any attachment's file
-    /// cannot be opened or exceeds the file server's limit; thrown on the calling thread, before
-    /// anything is stored or dispatched.
     void send_message(
             const ConversationId& id,
             std::string_view body,
             std::vector<OutgoingAttachment> attachments,
-            std::function<
-                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
-                    on_upload,
+            Conversation::upload_progress on_upload,
             failable_function<void(int64_t message_id)> cb);
+    int64_t send_message(const ConversationId& id, std::string_view body, wait_t);
+    int64_t send_message(
+            const ConversationId& id,
+            std::string_view body,
+            std::vector<OutgoingAttachment> attachments,
+            Conversation::upload_progress on_upload,
+            wait_t);
+
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
     /// reached the file server are left alone and only the ones that did not are uploaded, because
