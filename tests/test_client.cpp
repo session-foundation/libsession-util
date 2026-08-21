@@ -2614,6 +2614,42 @@ TEST_CASE("Client: a conversation knows which kind it is", "[client][convos]") {
     CHECK(convo->unread() == 0);
 }
 
+TEST_CASE("Client: a handler-form operation outlives the conversation it came from",
+          "[client][convos]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    approve(*c, them.session_id);
+    deliver(*c, them, "hi", from_epoch_ms(5000), "h1");
+    REQUIRE(c->conversation(id, wait)->unread() == 1);
+
+    // The natural way to write any of these is on something that has already gone by the time the
+    // work runs: a temporary, a handler's parameter, or a list element whose list got replaced.  So
+    // the operation must not reach back into the object -- and only the handler form can get this
+    // wrong, since the waiting form runs before it returns.
+    std::optional<std::string> error = "not called";
+    {
+        auto convo = c->conversation(id, wait);
+        REQUIRE(convo);
+        convo->mark_read([&](auto err) { error = std::move(err); });
+    }  // convo destroyed here, before the loop has run the work
+    sync(*c);
+
+    CHECK_FALSE(error.has_value());
+    CHECK(c->conversation(id, wait)->unread() == 0);
+
+    // And on an outright temporary, which is how it reads at a call site.
+    std::optional<std::string> paged = "not called";
+    size_t got = 0;
+    c->conversation(id, wait)->messages(50, [&](auto err, auto msgs) {
+        paged = std::move(err);
+        got = msgs.size();
+    });
+    sync(*c);
+    CHECK_FALSE(paged.has_value());
+    CHECK(got == 1);
+}
+
 TEST_CASE("Client: every conversation kind starts with its base", "[client][convos]") {
     // What makes reading a common field off AnyConversation free: each alternative holds its
     // `Conversation` at offset zero, so every arm of the variant's dispatch computes the same
