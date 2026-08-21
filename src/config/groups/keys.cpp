@@ -1222,9 +1222,15 @@ void Keys::remove_expired() {
         // the group we apparently don't have access to.
         active_msgs_.clear();
 
-    // Retained message bytes follow the hashes exactly, for both of the above branches.  This is
-    // what bounds the size of `key_msgs_` (and hence of the dump) to the same KEY_EXPIRY window as
-    // the keys themselves; without it an expired generation's bytes would live forever on disk.
+    // Retained message bytes follow the hashes exactly, for both of the above branches, so they
+    // expire on the same schedule as the keys; without this an expired generation's bytes would sit
+    // on disk forever.
+    //
+    // Note what that does and does not bound: it bounds the WINDOW, not the size within it.  Every
+    // rekey and every supplemental inside KEY_EXPIRY is held verbatim, and a full rekey message is
+    // 177 + 48*N bytes for N members rounded up to a multiple of MESSAGE_KEY_MULTIPLE (see the
+    // arithmetic in keys.hpp), so a large group that rekeys often can carry a sizeable dump.
+    // Bounded and predictable, not necessarily small.
     prune_key_msgs();
 }
 
