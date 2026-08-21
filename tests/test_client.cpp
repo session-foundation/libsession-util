@@ -310,7 +310,7 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
     CHECK(convos[0].last_activity() == from_epoch_ms(5000));
     CHECK(convos[0].unread() == 1);
 
-    auto msgs = c->messages(convos[0].id());
+    auto msgs = c->conversation(convos[0].id())->messages(wait);
     REQUIRE(msgs.size() == 1);
     CHECK(msgs[0].body == "hello there");
     CHECK_FALSE(msgs[0].outgoing);
@@ -343,7 +343,7 @@ TEST_CASE(
     CHECK(convos[0].id() == ConversationId::dm(peer.session_id));
     CHECK(convos[0].unread() == 0);
 
-    auto msgs = c->messages(convos[0].id());
+    auto msgs = c->conversation(convos[0].id())->messages(wait);
     REQUIRE(msgs.size() == 1);
     CHECK(msgs[0].body == "sent from my phone");
     CHECK(msgs[0].outgoing);
@@ -367,7 +367,7 @@ TEST_CASE("Client: a message to ourselves is a conversation with ourselves", "[c
     CHECK(convos[0].dm()->note_to_self);
     CHECK(c->is_note_to_self(convos[0].id()));
 
-    auto msgs = c->messages(convos[0].id());
+    auto msgs = c->conversation(convos[0].id())->messages(wait);
     REQUIRE(msgs.size() == 2);
     CHECK(msgs[0].outgoing);
     CHECK(msgs[1].outgoing);
@@ -384,26 +384,33 @@ TEST_CASE("Client: reads answer emptily before an account exists", "[client][con
     auto convo = ConversationId::dm(sid);
 
     CHECK(c->conversations().empty());
+    CHECK(c->message_requests().empty());
     CHECK_FALSE(c->conversation(convo).has_value());
-    CHECK(c->messages(convo).empty());
+    CHECK_FALSE(c->dm(convo).has_value());
     CHECK_FALSE(c->message(1).has_value());
     CHECK_FALSE(c->is_note_to_self(convo));
-    CHECK_NOTHROW(c->mark_read(convo));
+
+    // There used to be assertions here that reading a *nonexistent* conversation's messages came
+    // back empty and that marking one read did not throw.  There is nothing left to assert: the
+    // operations live on the conversation, so with no conversation there is nothing to call them
+    // on, and the nullopt above is the whole answer.
 }
 
 TEST_CASE("Client: note to self is reported, not left to the caller", "[client][convos]") {
     TempClient c;
     SenderKeys peer;
 
-    auto self = c->create_conversation(ConversationId::dm(own_sid(*c)));
-    CHECK(self.dm()->note_to_self);
-    CHECK(c->conversation(self.id())->dm()->note_to_self);
-    CHECK(c->is_note_to_self(self.id()));
+    // open_dm hands back a DM rather than an AnyConversation, so the flag is a plain field: asking
+    // for the kind is what removes the narrowing.
+    auto self = c->open_dm(ConversationId::dm(own_sid(*c)));
+    CHECK(self.note_to_self);
+    CHECK(c->conversation(self.id)->dm()->note_to_self);
+    CHECK(c->is_note_to_self(self.id));
 
-    auto other = c->create_conversation(ConversationId::dm(peer.session_id));
-    CHECK_FALSE(other.dm()->note_to_self);
-    CHECK_FALSE(c->conversation(other.id())->dm()->note_to_self);
-    CHECK_FALSE(c->is_note_to_self(other.id()));
+    auto other = c->open_dm(ConversationId::dm(peer.session_id));
+    CHECK_FALSE(other.note_to_self);
+    CHECK_FALSE(c->conversation(other.id)->dm()->note_to_self);
+    CHECK_FALSE(c->is_note_to_self(other.id));
 
     // A group or community is never note-to-self, whatever its id happens to be.
     constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -426,7 +433,7 @@ TEST_CASE("Client: syncTarget from another sender is ignored", "[client][receive
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(peer.session_id));
 
-    auto msgs = c->messages(convos[0].id());
+    auto msgs = c->conversation(convos[0].id())->messages(wait);
     REQUIRE(msgs.size() == 1);
     CHECK_FALSE(msgs[0].outgoing);
 }
@@ -439,12 +446,12 @@ TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][rece
     deliver(*c, sender, "only once", from_epoch_ms(5000), "dup");
 
     auto convo = ConversationId::dm(sender.session_id);
-    CHECK(c->messages(convo).size() == 1);
+    CHECK(c->conversation(convo)->messages(wait).size() == 1);
     CHECK(c->conversation(convo)->unread() == 1);
 
     // A genuinely different message from the same sender still lands.
     deliver(*c, sender, "and again", from_epoch_ms(6000), "notdup");
-    CHECK(c->messages(convo).size() == 2);
+    CHECK(c->conversation(convo)->messages(wait).size() == 2);
 }
 
 TEST_CASE(
@@ -459,20 +466,20 @@ TEST_CASE(
     deliver(*c, sender, "said once", from_epoch_ms(5000), "first_hash", "", std::nullopt, nullptr, 7);
     deliver(*c, sender, "said once", from_epoch_ms(5000), "second_hash", "", std::nullopt, nullptr, 7);
 
-    CHECK(c->messages(convo).size() == 1);
+    CHECK(c->conversation(convo)->messages(wait).size() == 1);
     CHECK(c->conversation(convo)->unread() == 1);
 
     // Same millisecond, different message: the case the timestamp alone cannot tell apart, and the
     // whole reason the id exists.  Identical body, so nothing but the id distinguishes them.
     deliver(*c, sender, "said once", from_epoch_ms(5000), "third_hash", "", std::nullopt, nullptr, 8);
-    CHECK(c->messages(convo).size() == 2);
+    CHECK(c->conversation(convo)->messages(wait).size() == 2);
 
     // A sender too old to set one has no identity beyond its timestamp, so two arrivals under
     // different swarm hashes cannot be told from one message stored twice.  Both land: a visible
     // duplicate is the failure we chose over silently dropping a real message.
     deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_a");
     deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_b");
-    CHECK(c->messages(convo).size() == 4);
+    CHECK(c->conversation(convo)->messages(wait).size() == 4);
 }
 
 TEST_CASE("Client: display name is unset rather than empty until known", "[client][convos]") {
@@ -573,14 +580,14 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
     CHECK(c->conversation(convo)->unread() == 3);
 
-    c->mark_read(convo, from_epoch_ms(2000));
+    c->conversation(convo)->mark_read(from_epoch_ms(2000), wait);
     CHECK(c->conversation(convo)->unread() == 1);
 
     // The watermark never moves backwards.
-    c->mark_read(convo, from_epoch_ms(1000));
+    c->conversation(convo)->mark_read(from_epoch_ms(1000), wait);
     CHECK(c->conversation(convo)->unread() == 1);
 
-    c->mark_read(convo);
+    c->conversation(convo)->mark_read(wait);
     CHECK(c->conversation(convo)->unread() == 0);
 
     // A new arrival after a full read is unread again: "read everything" must not mean "read
@@ -589,15 +596,14 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     CHECK(c->conversation(convo)->unread() == 1);
 
     // Even one that arrives late, bearing a timestamp older than what we already read to.
-    c->mark_read(convo);
+    c->conversation(convo)->mark_read(wait);
     deliver(*c, sender, "late", from_epoch_ms(3500), "h5");
     CHECK(c->conversation(convo)->unread() == 0);  // known limitation of a timestamp watermark
 
     // Marking read on a conversation with nothing to read is a no-op, not an error.
     auto empty = ConversationId::dm(
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b);
-    c->create_conversation(empty);
-    CHECK_NOTHROW(c->mark_read(empty));
+    CHECK_NOTHROW(c->open_dm(empty).mark_read(wait));
     CHECK(c->conversation(empty)->unread() == 0);
 }
 
@@ -640,7 +646,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
     }
 
     SECTION("marking read moves unread without touching the total") {
-        c->mark_read(convo, from_epoch_ms(2000));
+        c->conversation(convo)->mark_read(from_epoch_ms(2000), wait);
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
         CHECK(n == actual_n);
         CHECK(unread == actual_unread);
@@ -649,7 +655,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
     }
 
     SECTION("count tracks deletes made behind the application's back") {
-        auto id = c->messages(convo).front().id;
+        auto id = c->conversation(convo)->messages(wait).front().id;
         conn.prepared_exec("DELETE FROM messages WHERE id = ?", id);
 
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
@@ -661,7 +667,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
         CHECK(unread == 3);
         CHECK(actual_unread == 2);
 
-        c->mark_read(convo, from_epoch_ms(1000));
+        c->conversation(convo)->mark_read(from_epoch_ms(1000), wait);
         auto [n2, unread2, actual_n2, actual_unread2] = counts(alice.session_id);
         CHECK(unread2 == actual_unread2);
     }
@@ -671,7 +677,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
                 "SELECT c.id FROM conversations c JOIN accounts a ON a.id = c.dm"
                 " WHERE a.session_id = ?",
                 bob.session_id);
-        auto id = c->messages(convo).front().id;
+        auto id = c->conversation(convo)->messages(wait).front().id;
         conn.prepared_exec("UPDATE messages SET conversation = ? WHERE id = ?", convo_row, id);
 
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
@@ -691,14 +697,15 @@ TEST_CASE("Client: explicit conversation creation", "[client][convos]") {
 
     CHECK_FALSE(c->conversation(convo).has_value());
 
-    auto created = c->create_conversation(convo);
-    CHECK(created.id() == convo);
-    CHECK(created.unread() == 0);
-    CHECK(created.last_message().empty());
+    auto created = c->open_dm(convo);
+    CHECK(created.id == convo);
+    CHECK(created.unread == 0);
+    CHECK(created.last_message.empty());
     CHECK(c->conversations().size() == 1);
 
-    // Creating an existing conversation is not an error and does not duplicate it.
-    c->create_conversation(convo);
+    // Opening one that already exists is not an error and does not duplicate it -- which is why
+    // this is `open` and not `create`.
+    c->open_dm(convo);
     CHECK(c->conversations().size() == 1);
 }
 
@@ -712,22 +719,22 @@ TEST_CASE("Client: message history pages backwards by cursor", "[client][message
     for (int i = 1; i <= 10; i++)
         deliver(*c, sender, "msg{}"_format(i), from_epoch_ms(i * 1000), "h{}"_format(i));
 
-    auto page1 = c->messages(convo, 4);
+    auto page1 = c->conversation(convo)->messages(4, wait);
     REQUIRE(page1.size() == 4);
     CHECK(page1[0].body == "msg10");
     CHECK(page1[3].body == "msg7");
 
-    auto page2 = c->messages(convo, 4, page1.back().cursor());
+    auto page2 = c->conversation(convo)->messages(4, page1.back().cursor(), wait);
     REQUIRE(page2.size() == 4);
     CHECK(page2[0].body == "msg6");
     CHECK(page2[3].body == "msg3");
 
-    auto page3 = c->messages(convo, 4, page2.back().cursor());
+    auto page3 = c->conversation(convo)->messages(4, page2.back().cursor(), wait);
     REQUIRE(page3.size() == 2);
     CHECK(page3[0].body == "msg2");
     CHECK(page3[1].body == "msg1");
 
-    CHECK(c->messages(convo, 4, page3.back().cursor()).empty());
+    CHECK(c->conversation(convo)->messages(4, page3.back().cursor(), wait).empty());
 }
 
 TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages]") {
@@ -743,7 +750,7 @@ TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages
     std::vector<std::string> seen;
     std::optional<MessageCursor> cursor;
     while (true) {
-        auto page = c->messages(convo, 1, cursor);
+        auto page = c->conversation(convo)->messages(1, cursor, wait);
         if (page.empty())
             break;
         seen.push_back(page[0].body);
@@ -950,7 +957,7 @@ TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
     // The exception is caught and logged rather than escaping into Core's event loop, and the
     // message is stored regardless: a broken listener must not cost us data.
     CHECK_NOTHROW(deliver(*c, sender, "still fine", from_epoch_ms(1000), "h1"));
-    CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
+    CHECK(c->conversation(ConversationId::dm(sender.session_id))->messages(wait).size() == 1);
 }
 
 TEST_CASE("Client: send status changes are reported as message_updated", "[client][signals]") {
@@ -1009,21 +1016,21 @@ TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
     CHECK(ids() == std::vector{idd, idb, ida});
 
     // Higher priority sorts first, regardless of recency.
-    c->set_priority(ida, 1);
+    c->conversation(ida)->set_priority(1, wait);
     CHECK(ids() == std::vector{ida, idd, idb});
     CHECK(c->conversation(ida)->priority() == 1);
 
     // A bigger number outranks a smaller one.
-    c->set_priority(idb, 5);
+    c->conversation(idb)->set_priority(5, wait);
     CHECK(ids() == std::vector{idb, ida, idd});
 
     // Equal priorities form a block that sorts among itself by recency: b is pinned alongside a but
     // is the more recently active of the two, so it leads.  d stays below both, unpinned.
-    c->set_priority(ida, 5);
+    c->conversation(ida)->set_priority(5, wait);
     CHECK(ids() == std::vector{idb, ida, idd});
 
     // Negative is hidden: gone from the list entirely rather than sorted last.
-    c->set_priority(idb, -1);
+    c->conversation(idb)->set_priority(-1, wait);
     CHECK(ids() == std::vector{ida, idd});
 
     // Still reachable by name, though: hidden is a statement about the list, and this is the only
@@ -1032,7 +1039,7 @@ TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
     CHECK(c->conversation(idb)->priority() == -1);
 
     // ...and unhiding brings it back where its priority says.
-    c->set_priority(idb, 0);
+    c->conversation(idb)->set_priority(0, wait);
     CHECK(ids() == std::vector{ida, idd, idb});
 }
 
@@ -1048,7 +1055,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     sync(*c);
     r.order.clear();
 
-    c->set_priority(ConversationId::dm(a.session_id), 3);
+    c->conversation(ConversationId::dm(a.session_id))->set_priority(3, wait);
 
     // Reported as a replacement, not as an update to the one conversation whose priority changed:
     // what moved is the list.  Both lists are replaced together, because hiding takes a
@@ -1062,7 +1069,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     // Hiding removes it from the replacement list, which is how a subscriber learns it is gone.
     r.order.clear();
     r.replaced.clear();
-    c->set_priority(ConversationId::dm(a.session_id), -1);
+    c->conversation(ConversationId::dm(a.session_id))->set_priority(-1, wait);
     CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 1);
@@ -1070,7 +1077,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
 
     // Setting the same value again changes nothing, so it says nothing.
     r.order.clear();
-    c->set_priority(ConversationId::dm(a.session_id), -1);
+    c->conversation(ConversationId::dm(a.session_id))->set_priority(-1, wait);
     CHECK(r.order.empty());
 }
 
@@ -1164,7 +1171,7 @@ TEST_CASE("Client: an arriving message records the files it names", "[client][at
             });
     sync(*c);
 
-    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id))->messages(wait);
     REQUIRE(msgs.size() == 1);
     const auto& m = msgs[0];
     CHECK(m.body.empty());
@@ -1260,7 +1267,7 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     }
 
     // The same list reaches a paged read, not only the single-message one.
-    auto page = c->messages(ConversationId::dm(me));
+    auto page = c->conversation(ConversationId::dm(me))->messages(wait);
     REQUIRE(page.size() == 1);
     CHECK(page[0].attachments.size() == 3);
     CHECK(page[0].attachments[0].content_type == "image/png");
@@ -1296,7 +1303,7 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
             42);
     sync(*c);
 
-    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id))->messages(wait);
     REQUIRE(msgs.size() == 1);
     auto msg_id = msgs[0].id;
 
@@ -1377,7 +1384,7 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
     };
     deliver(*c, peer, "", from_epoch_ms(2000), "h2", "", std::nullopt, add, 43);
     sync(*c);
-    auto msg_id = c->messages(ConversationId::dm(peer.session_id))[0].id;
+    auto msg_id = c->conversation(ConversationId::dm(peer.session_id))->messages(wait)[0].id;
 
     auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_save", 7);
     std::filesystem::create_directories(dir);
@@ -1638,7 +1645,7 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
             44);
     sync(*c);
 
-    auto msgs = c->messages(ConversationId::dm(peer.session_id));
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id))->messages(wait);
     REQUIRE(msgs.size() == 1);
     REQUIRE(msgs[0].attachments.size() == 1);
 
@@ -1676,8 +1683,8 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     TestHelper::seed_pfs_nak(c->core, me);
 
     // Mirrors opening the conversation first, as a UI does, before sending into it.
-    auto convo = c->create_conversation(ConversationId::dm(me));
-    CHECK(convo.id() == ConversationId::dm(me));
+    auto convo = c->open_dm(ConversationId::dm(me));
+    CHECK(convo.id == ConversationId::dm(me));
 
     auto id = c->send_message(ConversationId::dm(me), "note to self");
     CHECK(c->message(id)->body == "note to self");
@@ -1693,7 +1700,7 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
 
     // That single store went to our own swarm, so its hash is one worth keeping.
     CHECK(c->message(id)->hash == store_hash_for(oxenc::to_hex(me)));
-    CHECK(c->messages(ConversationId::dm(me)).size() == 1);
+    CHECK(c->conversation(ConversationId::dm(me))->messages(wait).size() == 1);
 
     // ...and when our own swarm hands it straight back on the next poll, which is what note to self
     // does, it must recognise its own message rather than storing a second copy.  What makes that
@@ -1719,7 +1726,7 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
         return 0;
     });
 
-    CHECK(c->messages(ConversationId::dm(me)).size() == 1);
+    CHECK(c->conversation(ConversationId::dm(me))->messages(wait).size() == 1);
 }
 
 // ── Core interoperability ───────────────────────────────────────────────────────────────────────
@@ -1834,7 +1841,7 @@ TEST_CASE("Client: reads are safe while messages arrive on another thread", "[cl
         try {
             while (writing) {
                 for (const auto& convo_row : c->conversations())
-                    c->messages(convo_row.id(), 50);
+                    convo_row.messages(50, wait);
                 reads++;
             }
         } catch (...) {
@@ -1852,7 +1859,7 @@ TEST_CASE("Client: reads are safe while messages arrive on another thread", "[cl
         std::rethrow_exception(reader_err);
 
     CHECK(reads > 0);  // the reader really did run alongside, rather than after
-    CHECK(c->messages(convo, N + 10).size() == N);
+    CHECK(c->conversation(convo)->messages(N + 10, wait).size() == N);
 }
 
 TEST_CASE(
@@ -1867,8 +1874,10 @@ TEST_CASE(
                     {OutgoingAttachment{.path = "/nonexistent/nope.png"}}),
             std::invalid_argument);
 
-    // Rejected before anything was stored, rather than leaving a message that can never be sent.
-    CHECK(c->messages(ConversationId::dm(me), 10, std::nullopt).empty());
+    // Rejected before anything was stored, rather than leaving a message that can never be sent --
+    // and not even a conversation, which is a stronger thing to be able to say than that it has no
+    // messages in it.
+    CHECK_FALSE(c->conversation(ConversationId::dm(me)).has_value());
 }
 
 TEST_CASE(
@@ -2226,7 +2235,7 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
             R"(INSERT INTO messages (conversation, sender, outgoing, timestamp, body)
                VALUES ((SELECT id FROM conversations WHERE dm = ?1), ?1, 0, 1000, 'hi'))",
             account);
-    REQUIRE(c->messages(id).size() == 1);
+    REQUIRE(c->conversation(id)->messages(wait).size() == 1);
 
     // Now the other device removes them entirely.  An absent entry can only mean the stronger
     // thing, since hiding arrives as a negative priority instead.
@@ -2442,7 +2451,9 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
     }
     REQUIRE_FALSE(c->core.configs.contacts().get(them));
 
-    c->set_blocked(id, true);
+    // Through Client, not through a DM: there is no conversation here, which is exactly the case
+    // that carve-out exists for.
+    c->set_blocked(id, true, wait);
 
     // The block has to be synced and the entry is the only place it can live, so blocking makes
     // one.  It does not approve them: refusing someone's messages is not accepting them.
@@ -2451,7 +2462,7 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
     CHECK(entry->blocked);
     CHECK_FALSE(entry->approved);
 
-    c->set_blocked(id, false);
+    c->set_blocked(id, false, wait);
     REQUIRE(c->core.configs.contacts().get(them));
     CHECK_FALSE(c->core.configs.contacts().get(them)->blocked);
 }
@@ -2464,14 +2475,14 @@ TEST_CASE("Client: clearing a conversation says when it was cleared", "[client][
 
     auto them = "05" + std::string(64, '2');
     auto id = dm_from_hex(them);
-    c->create_conversation(id);
+    c->open_dm(id);
     insert_message(*c.client, id, 1000, "hi");
-    REQUIRE(c->messages(id).size() == 1);
+    REQUIRE(c->conversation(id)->messages(wait).size() == 1);
 
     auto before = std::chrono::floor<std::chrono::seconds>(clock_now_ms());
-    c->clear_messages(id);
+    c->conversation(id)->clear_messages(wait);
 
-    CHECK(c->messages(id).empty());
+    CHECK(c->conversation(id)->messages(wait).empty());
     CHECK(c->conversation(id));  // The conversation stays; only its history went.
     CHECK(std::ranges::find(reloaded, id) != reloaded.end());
 
@@ -2486,15 +2497,15 @@ TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs
     TempClient c;
     auto them = "05" + std::string(64, '3');
     auto id = dm_from_hex(them);
-    c->create_conversation(id);
-    c->set_priority(id, 5);
+    c->open_dm(id);
+    c->conversation(id)->set_priority(5, wait);
     insert_message(*c.client, id, 1000, "hi");
     REQUIRE(listed(*c.client, id));
 
-    c->delete_conversation(id);
+    c->conversation(id)->delete_conversation(wait);
 
     CHECK_FALSE(listed(*c.client, id));
-    CHECK(c->messages(id).empty());
+    CHECK(c->conversation(id)->messages(wait).empty());
 
     auto entry = c->core.configs.contacts().get(them);
     REQUIRE(entry);  // Still a contact, so a message from them brings the conversation back.
@@ -2506,14 +2517,14 @@ TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs
 TEST_CASE("Client: hiding note to self keeps what is in it", "[client][configs]") {
     TempClient c;
     auto me = self_convo(*c.client);
-    c->create_conversation(me);
+    c->open_dm(me);
     insert_message(*c.client, me, 1000, "note");
     REQUIRE(listed(*c.client, me));
 
-    c->delete_conversation(me, /*keep_messages=*/true);
+    c->conversation(me)->delete_conversation(/*keep_messages=*/true, wait);
 
     CHECK_FALSE(listed(*c.client, me));
-    CHECK(c->messages(me).size() == 1);
+    CHECK(c->conversation(me)->messages(wait).size() == 1);
     CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
 
     // No instruction to destroy anything, which is the whole difference between hiding a
@@ -2529,11 +2540,11 @@ TEST_CASE("Client: deleting a contact takes the entry that held the block", "[cl
 
     auto them = "05" + std::string(64, '4');
     auto id = dm_from_hex(them);
-    c->create_conversation(id);
-    c->set_blocked(id, true);
+    c->open_dm(id);
+    c->dm(id)->set_blocked(true, wait);
     insert_message(*c.client, id, 1000, "hi");
 
-    c->delete_contact(id);
+    c->dm(id)->delete_contact(wait);
 
     CHECK_FALSE(c->conversation(id));
     CHECK(std::ranges::find(gone, id) != gone.end());
@@ -2560,7 +2571,7 @@ TEST_CASE("Client: a delete-before from another device destroys history", "[clie
 
     insert_message(*c.client, id, 1'000'000, "old");
     insert_message(*c.client, id, 3'000'000, "new");
-    REQUIRE(c->messages(id).size() == 2);
+    REQUIRE(c->conversation(id)->messages(wait).size() == 2);
 
     // Retroactive: what the instruction is about is the history that was there when someone chose
     // to destroy it, not merely what arrives after it.
@@ -2571,7 +2582,7 @@ TEST_CASE("Client: a delete-before from another device destroys history", "[clie
     });
     merge_contacts(*c.client, cleared);
 
-    auto left = c->messages(id);
+    auto left = c->conversation(id)->messages(wait);
     REQUIRE(left.size() == 1);
     CHECK(left[0].body == "new");
 }
@@ -2580,7 +2591,7 @@ TEST_CASE("Client: a conversation knows which kind it is", "[client][convos]") {
     TempClient c;
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
-    c->create_conversation(id);
+    c->open_dm(id);
 
     auto convo = c->conversation(id);
     REQUIRE(convo);
@@ -2603,10 +2614,8 @@ TEST_CASE("Client: every conversation kind starts with its base", "[client][conv
     // address and the compiler folds it away.  Put another base ahead of `Conversation` and that
     // silently becomes a runtime selection instead.
     //
-    // While these stay aggregates, prepending a base breaks the build here rather than reaching
-    // this check -- the initialisation below stops compiling.  This is the backstop for when they
-    // grow constructors and that stops being true.
-    Conversation base{.id = dm_from_hex("05" + std::string(64, '9'))};
+    TempClient c;
+    Conversation base{*c.client, dm_from_hex("05" + std::string(64, '9'))};
     DM dm{base};
     Group group{base};
     Community community{base};
@@ -2638,7 +2647,7 @@ TEST_CASE("Client: a stranger's message is a request, not a conversation", "[cli
     CHECK(r.added[0].dm()->request);
     REQUIRE(c->conversation(id));
     CHECK(c->conversation(id)->dm()->request);
-    CHECK(c->messages(id).size() == 1);
+    CHECK(c->conversation(id)->messages(wait).size() == 1);
 
     // And it is synced, so a request answered on one device is not still waiting on another.  Their
     // writing to us is what says they approved us; nothing yet says we approved them.
@@ -2741,19 +2750,19 @@ TEST_CASE("Client: a blocked account's messages are refused", "[client][requests
     auto id = ConversationId::dm(sender.session_id);
 
     deliver(*c, sender, "first", from_epoch_ms(5000), "h1");
-    REQUIRE(c->messages(id).size() == 1);
+    REQUIRE(c->conversation(id)->messages(wait).size() == 1);
 
-    c->set_blocked(id, true);
+    c->dm(id)->set_blocked(true, wait);
     deliver(*c, sender, "and again", from_epoch_ms(6000), "h2");
 
     // Refused on arrival rather than hidden when drawing, so nothing they send becomes history or
     // an unread count.
-    CHECK(c->messages(id).size() == 1);
+    CHECK(c->conversation(id)->messages(wait).size() == 1);
     CHECK(c->conversation(id)->unread() == 1);
 
-    c->set_blocked(id, false);
+    c->dm(id)->set_blocked(false, wait);
     deliver(*c, sender, "still there?", from_epoch_ms(7000), "h3");
-    CHECK(c->messages(id).size() == 2);
+    CHECK(c->conversation(id)->messages(wait).size() == 2);
 }
 
 TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]") {
@@ -2761,7 +2770,7 @@ TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]")
     auto them = "05" + std::string(64, '7');
     auto id = dm_from_hex(them);
 
-    c->create_conversation(id);
+    c->open_dm(id);
     REQUIRE(c->core.configs.contacts().get(them));
     REQUIRE(c->core.configs.contacts().get(them)->approved);
 
@@ -2799,7 +2808,7 @@ TEST_CASE("Client: reading a conversation publishes the watermark", "[client][vo
     deliver(*c, them, "two", newest, "h2");
     REQUIRE(c->conversation(id)->unread() == 2);
 
-    c->mark_read(id);
+    c->conversation(id)->mark_read(wait);
 
     CHECK(c->conversation(id)->unread() == 0);
     auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
@@ -2841,7 +2850,7 @@ TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client]
     auto newest = recently(10s);
     deliver(*c, them, "one", older, "h1");
     deliver(*c, them, "two", newest, "h2");
-    c->mark_read(id);
+    c->conversation(id)->mark_read(wait);
     REQUIRE(c->conversation(id)->unread() == 0);
 
     // The config permits a value to be written backwards on purpose, and a same-seqno conflict
@@ -2871,17 +2880,17 @@ TEST_CASE("Client: marking unread syncs, and reading clears it", "[client][volat
     approve(*c, them.session_id);
 
     deliver(*c, them, "one", recently(5s), "h1");
-    c->mark_read(id);
+    c->conversation(id)->mark_read(wait);
     REQUIRE(c->conversation(id)->unread() == 0);
 
-    c->set_marked_unread(id, true);
+    c->conversation(id)->set_marked_unread(true, wait);
 
     // Survives having read everything, which is the whole point of it.
     CHECK(c->conversation(id)->marked_unread());
     CHECK(c->conversation(id)->unread() == 0);
     CHECK(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
 
-    c->mark_read(id);
+    c->conversation(id)->mark_read(wait);
     CHECK_FALSE(c->conversation(id)->marked_unread());
     CHECK_FALSE(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
 }
@@ -2909,7 +2918,7 @@ TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
     TempClient c;
     auto them = "05" + std::string(64, '6');
     auto id = dm_from_hex(them);
-    c->create_conversation(id);
+    c->open_dm(id);
 
     // Another device cleared at a moment this one has not reached yet -- clock skew is enough for
     // that.  Publishing our own, smaller value would tell it to un-delete what it destroyed.
@@ -2919,7 +2928,7 @@ TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
     entry.delete_before = later;
     contacts.set(entry);
 
-    c->clear_messages(id);
+    c->conversation(id)->clear_messages(wait);
 
     REQUIRE(contacts.get(them));
     CHECK(contacts.get(them)->delete_before == later);
