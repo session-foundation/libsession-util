@@ -2600,8 +2600,15 @@ void Client::_save_attachment(
         // ourselves and one to the sender, and neither is true until it is on disk under its final
         // name, which is why they are here rather than anywhere earlier.  Recording it does not
         // depend on telling them: a caller who saved privately still gets to see that they did.
+        //
+        // Both are also only true when the recipient is *us*.  `saved_at` says the recipient saved
+        // it, which is what lets a sender read it as "the file reached a person rather than a file
+        // server", so stamping it for our own save of something we sent would claim they have a file
+        // they may never have opened.  A note to self is exempt: there the recipient is us, so
+        // saving it really is the recipient saving it.
         loop.call([this, message_id, index, notify_sender] {
-            _record_saved(message_id, index, clock_now_ms());
+            if (_saved_by_recipient(message_id))
+                _record_saved(message_id, index, clock_now_ms());
             if (notify_sender)
                 _notify_media_saved(message_id, index);
         });
@@ -2668,6 +2675,25 @@ void Client::_on_media_saved(
     // ours, and unauthenticated, but the alternative is our receive time, which is wrong by however
     // long the notification sat in the swarm.
     _record_saved(*message_id, index, when);
+}
+
+bool Client::_saved_by_recipient(int64_t message_id) {
+    auto c = core.database().conn();
+    auto row = c.prepared_maybe_get<int, std::optional<sqlite::blob_guts<b33>>>(
+            R"(
+        SELECT m.outgoing, a.session_id
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation
+        LEFT JOIN accounts a ON a.id = c.dm
+        WHERE m.id = ?
+    )",
+            message_id);
+    if (!row)
+        return false;
+    auto [outgoing, with] = *row;
+    if (!outgoing)
+        return true;
+    return with && std::ranges::equal(static_cast<const b33&>(*with), _self_or_none());
 }
 
 void Client::_record_saved(int64_t message_id, std::optional<size_t> index, sys_ms when) {

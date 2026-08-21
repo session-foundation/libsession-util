@@ -472,9 +472,18 @@ class Client {
     // rather than part of what the caller asked for.
     void _notify_media_saved(int64_t message_id, size_t index);
 
+    // Whether *we* are the recipient of a message, which is what makes our own save of one of its
+    // attachments worth recording.  True for anything incoming, and for a note to self, where the
+    // message is outgoing but the recipient is still us.
+    bool _saved_by_recipient(int64_t message_id);
+
     // Records that the recipient of a message saved one of its attachments: us, for one we
     // received, and them for one we sent.  An unset `index` means all of the message's
     // attachments, which is what a peer saving several at once reports.
+    //
+    // Told rather than deciding: this is reached both by our own save and by a peer's notification,
+    // and only the caller knows which of those it is -- for a message we sent, our save is not the
+    // recipient's and theirs is.
     void _record_saved(int64_t message_id, std::optional<size_t> index, sys_ms when);
 
     // A peer telling us they saved a file we sent them.  `when` is the notification's own

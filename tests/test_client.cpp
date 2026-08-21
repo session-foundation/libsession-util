@@ -1495,6 +1495,60 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     in.read(reinterpret_cast<char*>(got.data()), got.size());
     CHECK(!!(got == contents));
 
+    // Stamped, even though the message is outgoing: this conversation is with ourselves, so the
+    // recipient saving it and us saving it are the same event.
+    CHECK(c->message(id, wait)->attachments[0].saved_at.has_value());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: saving what we sent someone else does not claim they saved it",
+          "[client][attachments]") {
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    SenderKeys peer;
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_theirs", 7);
+    std::filesystem::create_directories(dir);
+    auto source = dir / "sent.bin";
+    std::vector<std::byte> contents(2048, std::byte{0x5a});
+    {
+        std::ofstream out{source, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    }
+
+    auto id = c->send_message(
+            ConversationId::dm(peer.session_id),
+            "for you",
+            {OutgoingAttachment{.path = source}},
+            wait);
+    sync(*c);
+    REQUIRE(accept_stores(*net) >= 1);
+
+    auto dest = dir / "my-copy.bin";
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            id, 0, dest, nullptr,
+            [&done](std::optional<std::string> err) { done.set_value(std::move(err)); });
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    REQUIRE_FALSE(waiter.get().has_value());
+    REQUIRE(std::filesystem::exists(dest));
+
+    // `saved_at` on an outgoing attachment means *they* saved it, which is what lets a sender read
+    // it as "the file reached a person rather than a file server".  Our own copy says nothing about
+    // that, so it must leave the field alone -- otherwise a UI reports "they have it" about someone
+    // who may never have opened the conversation.
+    auto msg = c->message(id, wait);
+    REQUIRE(msg);
+    REQUIRE(msg->attachments.size() == 1);
+    CHECK_FALSE(msg->attachments[0].saved_at.has_value());
+
     std::filesystem::remove_all(dir);
 }
 
