@@ -6,6 +6,8 @@
 #include <session/client/handler.hpp>
 #include <session/client/message.hpp>
 #include <session/clock.hpp>
+#include <session/config/expiring.hpp>
+#include <session/config/notify.hpp>
 #include <string>
 #include <utility>
 #include <variant>
@@ -76,6 +78,23 @@ class Conversation {
     /// top while still letting the most recently active of them lead.
     int priority = 0;
 
+    /// When to notify about this conversation.  `defaulted` means the application's own default
+    /// applies; `mentions_only` is a group notion and reads as `all` on a DM.
+    ///
+    /// Independent of `mute_until`, and overridden by it while that is in the future.
+    config::notify_mode notifications = config::notify_mode::defaulted;
+
+    /// Notifications are suppressed until this moment, whatever `notifications` says.  The epoch
+    /// means not muted — which is not the same as `notify_mode::disabled`, since a mute expires and
+    /// a UI shows it as "muted until …" rather than as off.
+    std::chrono::sys_seconds mute_until{};
+
+    /// Disappearing messages.  The timer is meaningless when the mode is `none`, and the mode is
+    /// what a UI has to say out loud: after-send and after-read are a different promise to the
+    /// person you are talking to, not two spellings of the same one.
+    config::expiration_mode exp_mode = config::expiration_mode::none;
+    std::chrono::seconds exp_timer{0};
+
     /// The display name if known, otherwise the conversation's string id — a reasonable default
     /// for a caller that has no better fallback of its own.
     std::string name_or_id() const { return display_name.empty() ? id.to_string() : display_name; }
@@ -124,6 +143,25 @@ class Conversation {
     /// so what changed is the list, not a row in it.
     void set_priority(int priority, failable_function<void()> cb);
     void set_priority(int priority, wait_t);
+
+    /// Sets when to notify, and until when to stay quiet.  Separate calls because they are separate
+    /// decisions: muting until Monday does not change what you want notified after Monday, and a UI
+    /// that offered them together would have to invent an answer for the other one.
+    ///
+    /// A `mute_until` in the past, or the epoch, is not muted.
+    void set_notifications(config::notify_mode mode, failable_function<void()> cb);
+    void set_notifications(config::notify_mode mode, wait_t);
+    void set_mute_until(std::chrono::sys_seconds until, failable_function<void()> cb);
+    void set_mute_until(std::chrono::sys_seconds until, wait_t);
+
+    /// Sets the disappearing-message mode and timer together, because neither means anything
+    /// alone: a timer with no mode does not expire, and a mode with no timer has nothing to count.
+    /// `expiration_mode::none` clears the timer whatever is passed with it.
+    void set_expiry(
+            config::expiration_mode mode,
+            std::chrono::seconds timer,
+            failable_function<void()> cb);
+    void set_expiry(config::expiration_mode mode, std::chrono::seconds timer, wait_t);
 
     // -- Sending ------------------------------------------------------------------------------
 
@@ -269,6 +307,30 @@ class DM : public Conversation {
     /// decision: `display_name` is whatever our own profile says, not a localised label.
     bool note_to_self = false;
 
+    /// Whether their messages are refused on arrival.  The other half of `set_blocked`: a toggle
+    /// whose state cannot be read is not a toggle, and a UI needs this to draw it as on, to offer
+    /// "unblock" rather than "block", and to stop offering to block somebody already blocked.
+    bool blocked = false;
+
+    /// The two halves `display_name` merges, for a screen that *edits* the name rather than
+    /// rendering it.
+    ///
+    /// `name` is what they call themselves — from the `LokiProfile` on a message, or from the
+    /// Contacts config, whichever is fresher.  `nickname` is what we call them, which is ours and
+    /// syncs to our other devices.  A list row wants the merge and should keep using
+    /// `display_name`; only a screen offering to change the nickname needs to show "they call
+    /// themselves X, you call them Y", and it cannot when only the resolved answer arrives.
+    ///
+    /// Either may be empty: an account we have seen but know nothing else about has no name, and
+    /// most contacts have no nickname.
+    std::string name;
+    std::string nickname;
+
+    /// Sets or clears the name we have given them, which is ours rather than theirs and follows us
+    /// between devices.  An empty nickname removes it, so `display_name` falls back to `name`.
+    void set_nickname(std::string_view nickname, failable_function<void()> cb);
+    void set_nickname(std::string_view nickname, wait_t);
+
     /// Blocks or unblocks the account.  Blocking is synced, so it takes effect on every device, and
     /// what they send is refused on arrival rather than hidden when drawing.
     ///
@@ -345,6 +407,10 @@ class AnyConversation {
     int unread() const { return base().unread; }
     bool marked_unread() const { return base().marked_unread; }
     int priority() const { return base().priority; }
+    config::notify_mode notifications() const { return base().notifications; }
+    std::chrono::sys_seconds mute_until() const { return base().mute_until; }
+    config::expiration_mode exp_mode() const { return base().exp_mode; }
+    std::chrono::seconds exp_timer() const { return base().exp_timer; }
     std::string name_or_id() const { return base().name_or_id(); }
 
     /// The kind, or nullptr if it is not that one.  This is how a caller asks a question only one
@@ -373,6 +439,9 @@ class AnyConversation {
     SESSION_CONVO_FORWARD(mark_read)
     SESSION_CONVO_FORWARD(set_marked_unread)
     SESSION_CONVO_FORWARD(set_priority)
+    SESSION_CONVO_FORWARD(set_notifications)
+    SESSION_CONVO_FORWARD(set_mute_until)
+    SESSION_CONVO_FORWARD(set_expiry)
     SESSION_CONVO_FORWARD(send_message)
     SESSION_CONVO_FORWARD(clear_messages)
     SESSION_CONVO_FORWARD(delete_conversation)

@@ -444,6 +444,16 @@ class Client {
     void _mark_read(const ConversationId& id, std::optional<sys_ms> up_to);
     void _set_priority(const ConversationId& id, int priority);
     void _set_marked_unread(const ConversationId& id, bool unread);
+    void _set_notifications(const ConversationId& id, config::notify_mode mode);
+    void _set_mute_until(const ConversationId& id, std::chrono::sys_seconds until);
+    void _set_expiry(
+            const ConversationId& id, config::expiration_mode mode, std::chrono::seconds timer);
+    void _set_nickname(const ConversationId& id, std::string_view nickname);
+
+    // One conversation-row column, updated where it differs and re-derived into the config if it
+    // did.  Templated on the value only so the caller need not name the bind type.
+    template <typename T>
+    void _set_conversation_setting(const ConversationId& id, std::string_view column, T value);
     void _set_blocked(const ConversationId& id, bool blocked);
     void _clear_messages(const ConversationId& id);
     void _delete_conversation(const ConversationId& id, bool keep_messages);

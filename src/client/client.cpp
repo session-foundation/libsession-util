@@ -757,7 +757,8 @@ static const auto CONVO_COLUMNS = R"(
            coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
            c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
-           c.marked_unread
+           c.marked_unread, coalesce(ct.blocked, 0), a.name, ct.nickname,
+           c.notifications, c.mute_until, c.exp_mode, c.exp_timer
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -774,8 +775,9 @@ template <typename... Bind>
 static std::vector<AnyConversation> query_conversations(
         Client& client, sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<AnyConversation> out;
-    for (auto [convo, sid, gid, url, room, name, activity, preview, unread, priority, approved,
-               approved_me, marked_unread] :
+    for (auto [convo, sid, gid, url, room, display_name, activity, preview, unread, priority,
+               approved, approved_me, marked_unread, blocked, name, nickname, notifications,
+               mute_until, exp_mode, exp_timer] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -789,14 +791,25 @@ static std::vector<AnyConversation> query_conversations(
                  int,
                  int,
                  int,
-                 int>(query, bind...)) {
+                 int,
+                 int,
+                 std::optional<std::string>,
+                 std::optional<std::string>,
+                 int,
+                 int64_t,
+                 int,
+                 int64_t>(query, bind...)) {
         Conversation base{client, subject_to_id(convo, sid, gid, url, room)};
-        base.display_name = name.value_or("");
+        base.display_name = display_name.value_or("");
         base.last_message = std::move(preview);
         base.last_activity = from_epoch_ms(activity);
         base.unread = unread;
         base.marked_unread = marked_unread != 0;
         base.priority = priority;
+        base.notifications = static_cast<config::notify_mode>(notifications);
+        base.mute_until = as_sys_seconds(mute_until);
+        base.exp_mode = static_cast<config::expiration_mode>(exp_mode);
+        base.exp_timer = std::chrono::seconds{exp_timer};
 
         // The same branch that decided which identity the row joined to decides which kind it is:
         // exactly one of them is set, which is what the table's CHECK constraint enforces.
@@ -810,6 +823,9 @@ static std::vector<AnyConversation> query_conversations(
             dm.request = !me && !approved;
             dm.awaiting_approval = !me && !approved_me;
             dm.note_to_self = me;
+            dm.blocked = blocked != 0;
+            dm.name = name.value_or("");
+            dm.nickname = nickname.value_or("");
             out.emplace_back(std::move(dm));
         }
     }
@@ -959,6 +975,98 @@ void Client::_set_marked_unread(const ConversationId& id, bool unread) {
     }
     if (changed > 0) {
         _sync_convo_volatile(id);
+        _touch(id);
+    }
+}
+
+// The settings below all live on the conversation row and all reach the config the same way, so
+// they share one shape: update where it differs, and if it did, re-derive and report.
+template <typename T>
+void Client::_set_conversation_setting(
+        const ConversationId& id, std::string_view column, T value) {
+    int changed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        changed = c.prepared_exec(
+                "UPDATE conversations SET {0} = ?2 WHERE id = ?1 AND {0} IS NOT ?2"_format(column),
+                *convo,
+                value);
+        tx.commit();
+    }
+    if (changed > 0) {
+        _sync_conversation(id);
+        _touch(id);
+    }
+}
+
+void Client::_set_notifications(const ConversationId& id, config::notify_mode mode) {
+    _set_conversation_setting(id, "notifications", static_cast<int>(mode));
+}
+
+void Client::_set_mute_until(const ConversationId& id, std::chrono::sys_seconds until) {
+    _set_conversation_setting(id, "mute_until", epoch_seconds(until));
+}
+
+void Client::_set_expiry(
+        const ConversationId& id, config::expiration_mode mode, std::chrono::seconds timer) {
+    // A timer with no mode never expires anything, so storing one would be a value that reads as a
+    // setting and behaves as nothing.
+    if (mode == config::expiration_mode::none)
+        timer = 0s;
+
+    int changed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        changed = c.prepared_exec(
+                R"(
+            UPDATE conversations SET exp_mode = ?2, exp_timer = ?3
+            WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
+        )",
+                *convo,
+                static_cast<int>(mode),
+                static_cast<int64_t>(timer.count()));
+        tx.commit();
+    }
+    if (changed > 0) {
+        _sync_conversation(id);
+        _touch(id);
+    }
+}
+
+void Client::_set_nickname(const ConversationId& id, std::string_view nickname) {
+    bool changed = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto account = identity_id(c, id);
+
+        // A nickname is a fact about a relationship, so it needs the row that carries one -- the
+        // same reasoning as blocking.  Naming somebody is not approving them.
+        bool made = ensure_contact(c, account, false);
+        bool set = c.prepared_exec(
+                           "UPDATE contacts SET nickname = ?2"
+                           " WHERE account = ?1 AND nickname IS NOT ?2",
+                           account,
+                           nickname.empty() ? std::optional<std::string>{}
+                                            : std::optional<std::string>{nickname}) > 0;
+        changed = made || set;
+        tx.commit();
+    }
+    if (changed) {
+        _sync_contact(id);
         _touch(id);
     }
 }

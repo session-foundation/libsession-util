@@ -84,6 +84,31 @@ void Conversation::set_priority(int priority, wait_t) {
     _client->loop.call_get([this, priority] { _client->_set_priority(id, priority); });
 }
 
+void Conversation::set_notifications(config::notify_mode mode, failable_function<void()> cb) {
+    _client->_async([c = _client, id = id, mode] { c->_set_notifications(id, mode); },
+                    std::move(cb));
+}
+void Conversation::set_notifications(config::notify_mode mode, wait_t) {
+    _client->loop.call_get([this, mode] { _client->_set_notifications(id, mode); });
+}
+
+void Conversation::set_mute_until(std::chrono::sys_seconds until, failable_function<void()> cb) {
+    _client->_async([c = _client, id = id, until] { c->_set_mute_until(id, until); },
+                    std::move(cb));
+}
+void Conversation::set_mute_until(std::chrono::sys_seconds until, wait_t) {
+    _client->loop.call_get([this, until] { _client->_set_mute_until(id, until); });
+}
+
+void Conversation::set_expiry(
+        config::expiration_mode mode, std::chrono::seconds timer, failable_function<void()> cb) {
+    _client->_async([c = _client, id = id, mode, timer] { c->_set_expiry(id, mode, timer); },
+                    std::move(cb));
+}
+void Conversation::set_expiry(config::expiration_mode mode, std::chrono::seconds timer, wait_t) {
+    _client->loop.call_get([this, mode, timer] { _client->_set_expiry(id, mode, timer); });
+}
+
 // -- Sending ------------------------------------------------------------------------------------
 
 void Conversation::send_message(
@@ -171,6 +196,17 @@ void DM::set_blocked(bool blocked, failable_function<void()> cb) {
 void DM::set_blocked(bool blocked, wait_t) {
     _client->_require_contact("set_blocked", id);
     _client->loop.call_get([this, blocked] { _client->_set_blocked(id, blocked); });
+}
+
+void DM::set_nickname(std::string_view nickname, failable_function<void()> cb) {
+    _client->_require_contact("set_nickname", id);
+    _client->_async(
+            [c = _client, id = id, nickname = std::string{nickname}] { c->_set_nickname(id, nickname); },
+            std::move(cb));
+}
+void DM::set_nickname(std::string_view nickname, wait_t) {
+    _client->_require_contact("set_nickname", id);
+    _client->loop.call_get([this, nickname] { _client->_set_nickname(id, nickname); });
 }
 
 void DM::delete_contact(failable_function<void()> cb) {
