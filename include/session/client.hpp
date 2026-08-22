@@ -448,6 +448,36 @@ class Client {
     /// this or having its own dispatcher run the work inline once posting stops arriving anywhere.
     void set_dispatcher(dispatcher d);
 
+    // -- Our own account ----------------------------------------------------------------------
+    //
+    // These read and write the UserProfile config, which follows the account between devices.  They
+    // are here rather than left to `client.core.configs.user_profile()` because that has to be
+    // touched on Core's loop -- a config read racing a merge is not safe -- and an application
+    // drawing a settings screen is on its own thread.  One place doing the hop correctly beats
+    // every caller discovering the rule, or not.
+
+    /// Our own display name: what we publish about ourselves, empty until one is set.
+    ///
+    /// Not to be confused with a conversation's `display_name`, which is what we call somebody
+    /// else.  This is account state and has no conversation: reading it off the note-to-self
+    /// conversation works only once that conversation exists, which is a bug waiting for a fresh
+    /// account.
+    void display_name(failable_function<void(std::string)> cb);
+    std::string display_name(wait_t);
+    void set_display_name(std::string_view name, failable_function<void()> cb);
+    void set_display_name(std::string_view name, wait_t);
+
+    /// Whether to tell somebody when we save a file they sent us.
+    ///
+    /// Follows the account, so turning it off on one device turns it off everywhere.  Composes with
+    /// `save_attachment`'s `notify_sender` in one direction only: this can refuse a notification and
+    /// cannot require one, so a caller passing false is never overruled, and a client with no
+    /// setting of its own still honours a choice made elsewhere.
+    void notify_media_saved(failable_function<void(bool)> cb);
+    bool notify_media_saved(wait_t);
+    void set_notify_media_saved(bool notify, failable_function<void()> cb);
+    void set_notify_media_saved(bool notify, wait_t);
+
     /// How often a handler that reports continuously — such as attachment upload progress — is
     /// allowed to fire, per thing being reported on.  Defaults to 100ms; zero lets every update
     /// through.

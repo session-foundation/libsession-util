@@ -486,3 +486,36 @@ TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
     REQUIRE(contacts.get(them));
     CHECK(contacts.get(them)->delete_before == later);
 }
+
+TEST_CASE("Client: our own profile is account state, not a conversation", "[client][configs]") {
+    TempClient c;
+
+    // Nothing set yet, and -- the point of this being on Client -- no note-to-self conversation
+    // needed for the question to have an answer.
+    CHECK(c->conversations(wait).empty());
+    CHECK(c->display_name(wait).empty());
+
+    c->set_display_name("Leia", wait);
+    CHECK(c->display_name(wait) == "Leia");
+    CHECK(c->core.configs.user_profile().get_name() == "Leia");
+
+    // Still no conversation: setting a name is not writing to yourself.
+    CHECK(c->conversations(wait).empty());
+}
+
+TEST_CASE("Client: the save-notification preference follows the account", "[client][configs]") {
+    TempClient c;
+
+    // Session's default is to tell people when you save their files.
+    CHECK(c->notify_media_saved(wait));
+
+    c->set_notify_media_saved(false, wait);
+    CHECK_FALSE(c->notify_media_saved(wait));
+    CHECK_FALSE(c->core.configs.user_profile().get_notify_media_saved());
+
+    // What another device set reaches us through a merge, like any other profile field.
+    auto pushed = profile_from_another_device(
+            *c.client, [](config::UserProfile& p) { p.set_notify_media_saved(true); });
+    merge_profile(*c.client, pushed);
+    CHECK(c->notify_media_saved(wait));
+}

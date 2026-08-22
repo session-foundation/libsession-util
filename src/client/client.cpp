@@ -593,6 +593,42 @@ bool Client::delete_message(int64_t message_id, wait_t) {
     return loop.call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
+void Client::display_name(failable_function<void(std::string)> cb) {
+    _async([this] { return std::string{core.configs.user_profile().get_name().value_or("")}; },
+           std::move(cb));
+}
+
+std::string Client::display_name(wait_t) {
+    return loop.call_get(
+            [this] { return std::string{core.configs.user_profile().get_name().value_or("")}; });
+}
+
+void Client::set_display_name(std::string_view name, failable_function<void()> cb) {
+    _async([this, name = std::string{name}] { core.configs.user_profile().set_name(name); },
+           std::move(cb));
+}
+
+void Client::set_display_name(std::string_view name, wait_t) {
+    loop.call_get([this, name] { core.configs.user_profile().set_name(name); });
+}
+
+void Client::notify_media_saved(failable_function<void(bool)> cb) {
+    _async([this] { return core.configs.user_profile().get_notify_media_saved(); }, std::move(cb));
+}
+
+bool Client::notify_media_saved(wait_t) {
+    return loop.call_get([this] { return core.configs.user_profile().get_notify_media_saved(); });
+}
+
+void Client::set_notify_media_saved(bool notify, failable_function<void()> cb) {
+    _async([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); },
+           std::move(cb));
+}
+
+void Client::set_notify_media_saved(bool notify, wait_t) {
+    loop.call_get([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); });
+}
+
 void Client::delete_message_everywhere(int64_t message_id, failable_function<void(bool)> cb) {
     _async([this, message_id] { return _delete_message_everywhere(message_id); }, std::move(cb));
 }
