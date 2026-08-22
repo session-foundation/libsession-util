@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <session/attachments.hpp>
+#include <session/random.hpp>
 
 #include "utils.hpp"
 
@@ -651,4 +652,62 @@ TEST_CASE("legacy attachment decryption rejects bad input", "[attachments][legac
     // Not a whole number of cipher blocks, so it cannot be what a CBC encryptor produced.
     CHECK_THROWS(attachment::legacy_decrypt(
             LEGACY_BLOB.subspan(0, LEGACY_BLOB.size() - 1), legacy_key(), legacy_digest(), 1));
+}
+
+TEST_CASE("Attachment encryption -- a key of our own", "[attachments][fixed-key]") {
+    // Encrypting to our own disk rather than to a file server: the key is ours, kept once and
+    // reused, so nothing about the content decides it.
+    cleared_b32 cache_key;
+    session::random::fill(cache_key);
+
+    std::vector<std::byte> plaintext(70'000);
+    session::random::fill(plaintext);
+
+    auto encrypt_with = [&](std::span<const std::byte> data) {
+        attachment::Encryptor enc{cache_key};
+        size_t pos = 0;
+        enc.start_encryption(
+                [&](std::span<std::byte> buf) -> size_t {
+                    auto n = std::min(buf.size(), data.size() - pos);
+                    std::memcpy(buf.data(), data.data() + pos, n);
+                    pos += n;
+                    return n;
+                },
+                false,
+                data.size());
+
+        std::vector<std::byte> out;
+        for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next())
+            out.insert(out.end(), chunk.begin(), chunk.end());
+        return out;
+    };
+
+    auto encrypted = encrypt_with(plaintext);
+
+    // Reads back with the ordinary decrypt: same format, so there is one decryptor, not two.
+    CHECK(attachment::decrypt(encrypted, cache_key) == plaintext);
+
+    // Not deterministic, which is the point of the random nonce: the seed-based encryptor
+    // deliberately repeats itself so a file server can deduplicate, and repeating a keystream
+    // under one key across every cached file is the failure that would cause here.
+    auto again = encrypt_with(plaintext);
+    CHECK(again != encrypted);
+    CHECK(attachment::decrypt(again, cache_key) == plaintext);
+
+    // Another key does not open it.
+    cleared_b32 other;
+    session::random::fill(other);
+    CHECK_THROWS(attachment::decrypt(encrypted, other));
+
+    // Padded exactly as the seed-based path is: a local disk ends up in backups and disk images,
+    // and an exact size identifies a file as well there as on a file server.
+    CHECK(encrypted.size() == attachment::encrypted_size(plaintext.size()));
+
+    // Phase 1 has no meaning here, and asking for it is a mistake rather than a no-op.
+    attachment::Encryptor enc{cache_key};
+    CHECK_THROWS_AS(enc.update_key(plaintext), std::logic_error);
+    // ...and without phase 1 nothing knows how much is coming, so the size is required.
+    CHECK_THROWS_AS(
+            enc.start_encryption([](std::span<std::byte>) -> size_t { return 0; }),
+            std::invalid_argument);
 }

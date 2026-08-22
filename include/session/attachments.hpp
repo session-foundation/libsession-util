@@ -389,6 +389,9 @@ class Encryptor {
     // Phase 1 state
     size_t hashed_size = 0;
     bool phase1_done = false;
+    // Set by the key-taking constructor: there is no key to derive, so phase 1 is skipped entirely
+    // and start_encryption() must not finalize a hash that was never started.
+    bool key_given = false;
 
     // Phase 2 state
     std::function<size_t(std::span<std::byte> buffer)> source;
@@ -418,6 +421,28 @@ class Encryptor {
     /// `seed` must be at least 32 bytes; typically the user's Session seed.  `domain` is the
     /// domain separator (ATTACHMENT or PROFILE_PIC).
     Encryptor(std::span<const std::byte> seed, Domain domain);
+
+    /// Constructs an encryptor that uses a key we choose rather than one derived from the content,
+    /// for encrypting something to our own disk rather than to a file server.
+    ///
+    /// Phase 1 does not apply and update_key() must not be called: there is nothing to derive.  Go
+    /// straight to start_encryption(), which then *requires* its `encrypt_size` argument, since
+    /// without phase 1 nothing else knows how much is coming.
+    ///
+    /// The nonce is random per encryption rather than derived.  That is not a detail: the same key
+    /// is used for every file, so a derived-from-content nonce would repeat the keystream for
+    /// anything encrypted twice, and a fixed one would repeat it for everything.  The consequence
+    /// is that this is *not* deterministic — encrypting the same bytes twice gives different output
+    /// — which is the opposite of what the seed-based constructor is for, and is right here: file
+    /// server deduplication is exactly what a local cache does not want.
+    ///
+    /// Output is the same `'S'`-prefixed chunked format, so `decrypt(data, key)` reads it back
+    /// unchanged, padding included.  Padding is kept rather than skipped: it hides a plaintext's
+    /// exact size from whoever holds the ciphertext, and a local disk is held by backups, disk
+    /// images and whoever ends up with the machine.  An exact size identifies a file — against a
+    /// known image, or against an upload someone watched go out — so the reason for padding it on
+    /// the way to a file server applies here too.
+    explicit Encryptor(std::span<const std::byte, ENCRYPT_KEY_SIZE> key);
 
     /// Phase 1: feed plaintext data into key derivation (hashing).
     /// The data is hashed to derive the encryption key; normally this should be the actual file

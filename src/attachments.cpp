@@ -16,6 +16,7 @@
 #include <limits>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/random.hpp>
 #include <session/util.hpp>
 #include <stdexcept>
 #include <type_traits>
@@ -824,7 +825,17 @@ Encryptor::Encryptor(std::span<const std::byte> seed, Domain domain) {
             &b2b_st(hash_st_data), uc(seed.data()), 32, nonce_key.size(), nullptr, uc(pers.data()));
 }
 
+Encryptor::Encryptor(std::span<const std::byte, ENCRYPT_KEY_SIZE> key) : key_given{true} {
+    // The layout the seed-based path derives: nonce first, then key.  Here the key is given and the
+    // nonce is random, because one key encrypts everything we cache and a repeated nonce under a
+    // repeated key repeats the keystream.
+    random::fill(std::span{nonce_key.data(), ENCRYPT_HEADER});
+    std::memcpy(nonce_key.data() + ENCRYPT_HEADER, key.data(), ENCRYPT_KEY_SIZE);
+}
+
 void Encryptor::update_key(std::span<const std::byte> data) {
+    if (key_given)
+        throw std::logic_error{"Encryptor::update_key() called on a fixed-key encryptor"};
     if (phase1_done)
         throw std::logic_error{"Encryptor::update() called after start_encryption()"};
 
@@ -840,7 +851,14 @@ cleared_b32 Encryptor::start_encryption(
         throw std::logic_error{"start_encryption() called twice"};
     phase1_done = true;
 
-    crypto_generichash_blake2b_final(&b2b_st(hash_st_data), uc(nonce_key.data()), nonce_key.size());
+    // With a key of our own there is no hash to finalize; nonce_key was filled at construction.
+    if (!key_given)
+        crypto_generichash_blake2b_final(
+                &b2b_st(hash_st_data), uc(nonce_key.data()), nonce_key.size());
+    else if (!enc_size)
+        throw std::invalid_argument{
+                "start_encryption() on a fixed-key encryptor requires encrypt_size: nothing "
+                "hashed the data to know how much is coming"};
 
     cleared_b32 key;
     std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
