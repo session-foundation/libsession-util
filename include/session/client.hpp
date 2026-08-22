@@ -290,6 +290,44 @@ class Client {
             int64_t message_id, Conversation::upload_progress on_upload, wait_t);
     bool retry_send(int64_t message_id, wait_t);
 
+    /// Deletes one message from this device: its body, its decrypted content and everything it
+    /// recorded about its attachments go, and what is left says only that someone said something
+    /// here and when.
+    ///
+    /// The row stays, marked `Deletion::here`, and this is not squeamishness about the data.  The
+    /// swarm still holds the message, and the swarm hash on that row is the only thing that
+    /// recognises it if it is delivered again -- which a storage server makes likely rather than
+    /// hypothetical, since it stops honouring a `last_hash` once that has expired and answers the
+    /// next poll with the whole retention window.  Delete the row and the message comes back
+    /// looking new.
+    ///
+    /// Files are not touched.  An attachment's path names a file the user chose -- one they picked
+    /// to send, or a place they asked a download to be put -- so it is theirs in both directions and
+    /// nothing here has ever unlinked one.  The rows that described the attachments do go.
+    ///
+    /// Deleting an unread incoming message makes it read, since there is no longer anything to
+    /// read; the conversation's unread count follows.
+    ///
+    /// This is the whole of "delete for me": nothing is sent, so nothing tells the other side or
+    /// our own other devices.  A message deleted here can still be deleted everywhere afterwards,
+    /// which is why how far it went is recorded rather than merely that it happened.
+    ///
+    /// Returns false, having done nothing, if there is no such message.  Deleting one already
+    /// deleted here is not an error and changes nothing.
+    void delete_message(int64_t message_id, failable_function<void(bool deleted)> cb);
+    bool delete_message(int64_t message_id, wait_t);
+
+    /// Removes one deleted message's leftover row.  The conversation-wide form, and the reason a
+    /// deletion leaves a row at all — including how this can bring a message back — are on
+    /// `Conversation::purge_deleted`.
+    ///
+    /// Returns false, having done nothing, if the message does not exist or has not been deleted.
+    /// Refusing a live message is the point rather than a nicety: this is the one operation here
+    /// that removes history outright, and it is only ever entitled to remove what a deletion left.
+    void purge_deleted_message(int64_t message_id, failable_function<void(bool removed)> cb);
+    bool purge_deleted_message(int64_t message_id, wait_t);
+
+
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
     ///
     /// Nothing is downloaded until this is called.  An arriving message records where its files are
@@ -458,8 +496,14 @@ class Client {
     void _clear_messages(const ConversationId& id);
     void _delete_conversation(const ConversationId& id, bool keep_messages);
     void _delete_contact(const ConversationId& id);
+    bool _delete_message(int64_t message_id, Deletion how_far);
+    bool _purge_deleted_message(int64_t message_id);
+    size_t _purge_deleted(const ConversationId& id);
     std::vector<Message> _messages(
-            const ConversationId& id, int limit, std::optional<MessageCursor> before);
+            const ConversationId& id,
+            int limit,
+            std::optional<MessageCursor> before,
+            bool include_deleted);
     std::optional<Message> _message(int64_t id);
     int64_t _send_message(const ConversationId& id, std::string_view body);
     int64_t _send_message(

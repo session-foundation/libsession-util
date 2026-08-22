@@ -56,6 +56,12 @@ struct MessageCursor {
     std::strong_ordering operator<=>(const MessageCursor&) const = default;
 };
 
+/// How far a deletion went, for a message whose content has been removed.
+enum class Deletion : int {
+    here = 1,       ///< Deleted on this device; the copies elsewhere are untouched.
+    everywhere = 2  ///< Deleted here, and asked to be deleted wherever else it reached.
+};
+
 struct Message {
     /// Client-assigned, database-local message id.  Stable for the life of the message; not the
     /// swarm hash and not Core's send id.
@@ -101,6 +107,15 @@ struct Message {
     /// Unset for an outgoing message that has not been stored yet, and for one stored by a build
     /// whose storage server did not report a hash.
     std::optional<std::string> hash;
+
+    /// Set once the message has been deleted, saying how far the deletion went.  The row survives
+    /// so that a redelivery cannot resurrect it, and so that a message deleted only here can still
+    /// be deleted everywhere afterwards.
+    ///
+    /// Everything the message said is gone when this is set: `body` is empty and `attachments` is
+    /// empty, whatever it carried before.  What remains is who sent it and when, which is what a
+    /// client needs to draw the gap where it was — and `hash`, which is what keeps it deleted.
+    std::optional<Deletion> deleted;
 
     MessageCursor cursor() const { return {timestamp, id}; }
 };

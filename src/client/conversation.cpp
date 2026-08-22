@@ -33,8 +33,17 @@ void Conversation::messages(
         int limit,
         std::optional<MessageCursor> before,
         failable_function<void(std::vector<Message>)> cb) const {
+    messages(limit, before, false, std::move(cb));
+}
+void Conversation::messages(
+        int limit,
+        std::optional<MessageCursor> before,
+        bool include_deleted,
+        failable_function<void(std::vector<Message>)> cb) const {
     _client->_async(
-            [c = _client, id = id, limit, before] { return c->_messages(id, limit, before); },
+            [c = _client, id = id, limit, before, include_deleted] {
+                return c->_messages(id, limit, before, include_deleted);
+            },
             std::move(cb));
 }
 
@@ -46,9 +55,22 @@ std::vector<Message> Conversation::messages(int limit, wait_t) const {
 }
 std::vector<Message> Conversation::messages(
         int limit, std::optional<MessageCursor> before, wait_t) const {
-    return _client->loop.call_get([this, limit, before] {
-        return _client->_messages(id, limit, before);
+    return messages(limit, before, false, wait);
+}
+std::vector<Message> Conversation::messages(
+        int limit, std::optional<MessageCursor> before, bool include_deleted, wait_t) const {
+    return _client->loop.call_get([this, limit, before, include_deleted] {
+        return _client->_messages(id, limit, before, include_deleted);
     });
+}
+
+void Conversation::purge_deleted(failable_function<void(size_t)> cb) {
+    _client->_require_dm("purge_deleted", id);
+    _client->_async([c = _client, id = id] { return c->_purge_deleted(id); }, std::move(cb));
+}
+size_t Conversation::purge_deleted(wait_t) {
+    _client->_require_dm("purge_deleted", id);
+    return _client->loop.call_get([this] { return _client->_purge_deleted(id); });
 }
 
 // -- Read state ---------------------------------------------------------------------------------

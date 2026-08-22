@@ -278,6 +278,13 @@ static bool approve_recipient(sqlite::Connection& c, const ConversationId& id, C
     return made || flagged;
 }
 
+// What counts as unread, as a fragment the three places that recompute the count share.  The schema
+// says why this is not in a trigger: it is policy rather than structure, and it grows.  It has more
+// than one clause now, which is the point at which three copies of it start drifting.
+//
+// Unqualified on purpose, so it reads the same inside a correlated subquery as in a plain one.
+static constexpr auto UNREAD = "outgoing = 0 AND deleted IS NULL"sv;
+
 // Carries out a delete-before instruction, and says whether anything went.  Must be called inside
 // the caller's transaction.
 //
@@ -294,11 +301,11 @@ static bool delete_messages_before(sqlite::Connection& c, int64_t convo, sys_ms 
     c.prepared_exec(
             R"(
         UPDATE conversations SET unread_count = (
-            SELECT COUNT(*) FROM messages m
-            WHERE m.conversation = conversations.id AND m.outgoing = 0
-              AND m.timestamp > conversations.last_read)
+            SELECT COUNT(*) FROM messages
+            WHERE messages.conversation = conversations.id AND {}
+              AND messages.timestamp > conversations.last_read)
         WHERE id = ?
-    )",
+    )"_format(UNREAD),
             convo);
     return true;
 }
@@ -571,6 +578,23 @@ bool Client::retry_send(int64_t message_id, wait_t) {
     return retry_send(message_id, nullptr, wait);
 }
 
+void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb) {
+    _async([this, message_id] { return _delete_message(message_id, Deletion::here); },
+           std::move(cb));
+}
+
+bool Client::delete_message(int64_t message_id, wait_t) {
+    return loop.call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
+}
+
+void Client::purge_deleted_message(int64_t message_id, failable_function<void(bool)> cb) {
+    _async([this, message_id] { return _purge_deleted_message(message_id); }, std::move(cb));
+}
+
+bool Client::purge_deleted_message(int64_t message_id, wait_t) {
+    return loop.call_get([this, message_id] { return _purge_deleted_message(message_id); });
+}
+
 void Client::send_message(
         const ConversationId& id,
         std::string_view body,
@@ -759,7 +783,11 @@ static const auto CONVO_COLUMNS = R"(
            -- A nickname is ours for them and wins over the name they chose for themselves; falling
            -- back means an account we have seen but never made a contact of still has a name.
            coalesce(ct.nickname, a.name), c.last_activity,
-           coalesce((SELECT b.body FROM messages b WHERE b.conversation = c.id
+           -- The most recent message that still says something.  A deleted one has an empty body,
+           -- so taking it would blank the row rather than showing what was last actually said, and
+           -- a list has no way to draw the difference.
+           coalesce((SELECT b.body FROM messages b
+                      WHERE b.conversation = c.id AND b.deleted IS NULL
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
            c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
            c.marked_unread, coalesce(ct.blocked, 0), a.name, ct.nickname,
@@ -925,9 +953,8 @@ void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
             // "Everything" means every message that exists now, not every message that ever will:
             // parking the watermark at infinity would silently mark all future arrivals read.
             auto newest = c.prepared_get<std::optional<int64_t>>(
-                    R"(
-                SELECT max(timestamp) FROM messages WHERE conversation = ? AND outgoing = 0
-            )",
+                    "SELECT max(timestamp) FROM messages WHERE conversation = ? AND {}"_format(
+                            UNREAD),
                     *convo);
             if (!newest)
                 return;
@@ -941,9 +968,9 @@ void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
             UPDATE conversations
             SET last_read = ?1,
                 unread_count = (SELECT COUNT(*) FROM messages
-                                 WHERE conversation = ?2 AND outgoing = 0 AND timestamp > ?1)
+                                 WHERE conversation = ?2 AND {} AND timestamp > ?1)
             WHERE id = ?2 AND last_read < ?1
-        )",
+        )"_format(UNREAD),
                 target,
                 *convo);
 
@@ -1214,6 +1241,116 @@ void Client::_delete_contact(const ConversationId& id) {
         _emit_conversation_removed(id);
         _emit_lists_replaced();
     }
+}
+
+bool Client::_delete_message(int64_t message_id, Deletion how_far) {
+    std::optional<ConversationId> convo;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo_row = c.prepared_maybe_get<int64_t>(
+                "SELECT conversation FROM messages WHERE id = ?", message_id);
+        if (!convo_row)
+            return false;
+
+        // Not `= ?` : a message deleted here and then deleted everywhere has to move, while one
+        // already at `everywhere` must not be walked back to `here` by a later local delete.  The
+        // reach of a deletion only ever grows.
+        c.prepared_exec(
+                R"(
+            UPDATE messages
+            SET body = '', deleted = max(coalesce(deleted, 0), ?2)
+            WHERE id = ?1
+        )",
+                message_id,
+                static_cast<int>(how_far));
+
+        // The decrypted Content, which is where the body actually survives: leaving it would make
+        // this a deletion only of the copy that happens to be easy to read.
+        c.prepared_exec("DELETE FROM message_raw_content WHERE message = ?", message_id);
+
+        // The rows describing the attachments, not the files they name.  Those belong to the user
+        // in both directions -- a file they chose to send, or a place they asked a download to be
+        // put -- and nothing here has ever unlinked one.
+        c.prepared_exec("DELETE FROM message_attachments WHERE message = ?", message_id);
+
+        // There is nothing left to read, so it stops being unread.  Recomputed rather than
+        // decremented because whether it counted in the first place is the policy in UNREAD, and
+        // guessing that here is how the cached count drifts from what the query would say.
+        c.prepared_exec(
+                R"(
+            UPDATE conversations SET unread_count = (
+                SELECT COUNT(*) FROM messages
+                WHERE messages.conversation = conversations.id AND {}
+                  AND messages.timestamp > conversations.last_read)
+            WHERE id = ?
+        )"_format(UNREAD),
+                *convo_row);
+
+        convo = conversation_id_at(c, *convo_row);
+        tx.commit();
+    }
+
+    if (convo) {
+        // Updated rather than removed: the row is still there, and a client that draws a gap where
+        // the message was needs to be told what it now says rather than that it went.
+        _emit_message(false, *convo, message_id);
+        // The list shows the newest message's body, which may be the one just emptied.
+        _touch(*convo);
+    }
+    return true;
+}
+
+// The two purges below are the only thing here that removes a message row outright rather than
+// emptying it, so both are written to be incapable of touching anything a deletion did not leave:
+// the predicate is part of the statement, not a check made before it.
+bool Client::_purge_deleted_message(int64_t message_id) {
+    std::optional<ConversationId> convo;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo_row = c.prepared_maybe_get<int64_t>(
+                "SELECT conversation FROM messages WHERE id = ? AND deleted IS NOT NULL",
+                message_id);
+        if (!convo_row)
+            return false;
+
+        c.prepared_exec("DELETE FROM messages WHERE id = ? AND deleted IS NOT NULL", message_id);
+        convo = conversation_id_at(c, *convo_row);
+        tx.commit();
+    }
+
+    if (convo) {
+        _emit_history_replaced(*convo);
+        _touch(*convo);
+    }
+    return true;
+}
+
+size_t Client::_purge_deleted(const ConversationId& id) {
+    int removed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return 0;
+
+        removed = c.prepared_exec(
+                "DELETE FROM messages WHERE conversation = ? AND deleted IS NOT NULL", *convo);
+        tx.commit();
+    }
+
+    // `count` follows by trigger; `unread_count` cannot have changed, since a deleted message had
+    // already stopped counting as unread when it was deleted.
+    if (removed > 0) {
+        _emit_history_replaced(id);
+        _touch(id);
+    }
+    return static_cast<size_t>(removed);
 }
 
 void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
@@ -1568,9 +1705,9 @@ WHERE id = ?1 AND (pro_revocation_tag, pro_expiry) IS NOT (?2, ?3)
 UPDATE conversations
 SET last_read = ?2,
     unread_count = (SELECT COUNT(*) FROM messages
-                     WHERE conversation = ?1 AND outgoing = 0 AND timestamp > ?2)
+                     WHERE conversation = ?1 AND {} AND timestamp > ?2)
 WHERE id = ?1 AND last_read < ?2
-)",
+)"_format(UNREAD),
                             *convo,
                             entry.last_read) > 0;
 
@@ -1859,7 +1996,7 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 // ConversationId is resolved once by the caller rather than rebuilt per row.
 static constexpr auto MESSAGE_COLUMNS = R"(
     SELECT m.id, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body, m.send_state,
-           m.sync_send_state
+           m.sync_send_state, m.deleted
     FROM messages m
     JOIN accounts a ON a.id = m.sender
 )"sv;
@@ -1932,7 +2069,7 @@ static std::vector<Message> query_messages(
         const std::string& query,
         const Bind&... bind) {
     std::vector<Message> out;
-    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state] :
+    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state, deleted] :
          c.prepared_results<
                  int64_t,
                  std::optional<std::string>,
@@ -1940,6 +2077,7 @@ static std::vector<Message> query_messages(
                  int,
                  int64_t,
                  std::string,
+                 std::optional<int>,
                  std::optional<int>,
                  std::optional<int>>(query, bind...))
         out.push_back(
@@ -1955,7 +2093,9 @@ static std::vector<Message> query_messages(
                         .sync_send_state = sync_send_state ? std::optional{static_cast<SendState>(
                                                                      *sync_send_state)}
                                                            : std::nullopt,
-                        .hash = std::move(swarm_hash)});
+                        .hash = std::move(swarm_hash),
+                        .deleted = deleted ? std::optional{static_cast<Deletion>(*deleted)}
+                                           : std::nullopt});
 
     // Done here rather than by each caller so that every path that produces Messages produces whole
     // ones: a Message with its attachments silently missing is worse than no accessor at all.
@@ -1964,19 +2104,27 @@ static std::vector<Message> query_messages(
 }
 
 std::vector<Message> Client::_messages(
-        const ConversationId& id, int limit, std::optional<MessageCursor> before) {
+        const ConversationId& id,
+        int limit,
+        std::optional<MessageCursor> before,
+        bool include_deleted) {
     auto c = core.database().conn();
     auto convo = find_conversation(c, id);
     if (!convo)
         return {};
+
+    // In the query rather than dropped from the result, so that `limit` counts rows the caller will
+    // actually see: filtering afterwards would return short pages with nothing to say that another
+    // page is warranted.
+    auto visible = include_deleted ? ""sv : "AND m.deleted IS NULL"sv;
 
     if (!before)
         return query_messages(
                 c,
                 id,
                 R"(
-            {} WHERE m.conversation = ? ORDER BY m.timestamp DESC, m.id DESC LIMIT ?
-        )"_format(MESSAGE_COLUMNS),
+            {} WHERE m.conversation = ? {} ORDER BY m.timestamp DESC, m.id DESC LIMIT ?
+        )"_format(MESSAGE_COLUMNS, visible),
                 *convo,
                 limit);
 
@@ -1986,10 +2134,10 @@ std::vector<Message> Client::_messages(
             c,
             id,
             R"(
-        {} WHERE m.conversation = ?1
+        {} WHERE m.conversation = ?1 {}
              AND (m.timestamp < ?2 OR (m.timestamp = ?2 AND m.id < ?3))
            ORDER BY m.timestamp DESC, m.id DESC LIMIT ?4
-    )"_format(MESSAGE_COLUMNS),
+    )"_format(MESSAGE_COLUMNS, visible),
             *convo,
             to_ms(before->timestamp),
             before->id,

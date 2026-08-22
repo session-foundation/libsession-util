@@ -465,3 +465,112 @@ TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages
 
     CHECK(seen == std::vector<std::string>{"same3", "same2", "same1"});
 }
+
+
+TEST_CASE("Client: deleting a message empties it but keeps its place", "[client][messages][delete]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
+    REQUIRE(c->conversation(convo, wait)->unread() == 3);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 3);
+    auto middle = msgs[1];  // "two"
+    REQUIRE(middle.body == "two");
+    REQUIRE(middle.hash == "h2");
+
+    CHECK(c->delete_message(middle.id, wait));
+
+    // Hidden by default...
+    auto visible = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(visible.size() == 2);
+    CHECK(visible[0].body == "three");
+    CHECK(visible[1].body == "one");
+
+    // ...and in its original place when asked for, saying who and when but nothing else.
+    auto all = c->conversation(convo, wait)->messages(50, std::nullopt, true, wait);
+    REQUIRE(all.size() == 3);
+    CHECK(all[1].id == middle.id);
+    CHECK(all[1].deleted == Deletion::here);
+    CHECK(all[1].body.empty());
+    CHECK(all[1].timestamp == from_epoch_ms(2000));
+    CHECK(all[1].sender == sender.session_id);
+    // The hash stays: it is what stops a redelivery bringing the message back.
+    CHECK(all[1].hash == "h2");
+
+    // Nothing left to read, so it stops being unread.
+    CHECK(c->conversation(convo, wait)->unread() == 2);
+
+    // A redelivery under the same hash is still recognised as one we have seen.
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+    CHECK(c->conversation(convo, wait)->messages(50, std::nullopt, true, wait).size() == 3);
+
+    // Deleting a message that does not exist is false, not an error.
+    CHECK_FALSE(c->delete_message(middle.id + 10000, wait));
+}
+
+TEST_CASE("Client: the list preview skips a deleted last message", "[client][convos][delete]") {
+    TempClient c;
+    SenderKeys sender;
+    approve(*c, sender.session_id);
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "older", from_epoch_ms(1000), "h1");
+    deliver(*c, sender, "newest", from_epoch_ms(2000), "h2");
+
+    auto newest = c->conversation(convo, wait)->messages(wait).front();
+    REQUIRE(newest.body == "newest");
+    REQUIRE(c->conversation(convo, wait)->last_message() == "newest");
+
+    c->delete_message(newest.id, wait);
+
+    // The list says what was last actually said, rather than going blank.
+    CHECK(c->conversation(convo, wait)->last_message() == "older");
+}
+
+TEST_CASE("Client: purging removes what a deletion left", "[client][messages][delete]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto live = msgs[0].id;  // "three"
+    c->delete_message(msgs[1].id, wait);
+    c->delete_message(msgs[2].id, wait);
+
+    SECTION("one at a time, and only what was deleted") {
+        // A live message is refused: this is the one call that destroys history outright.
+        CHECK_FALSE(c->purge_deleted_message(live, wait));
+        CHECK(c->conversation(convo, wait)->messages(wait).size() == 1);
+
+        CHECK(c->purge_deleted_message(msgs[1].id, wait));
+        CHECK(c->conversation(convo, wait)->messages(50, std::nullopt, true, wait).size() == 2);
+
+        // Purging the same row twice is false the second time rather than an error.
+        CHECK_FALSE(c->purge_deleted_message(msgs[1].id, wait));
+    }
+
+    SECTION("all of them at once") {
+        CHECK(c->conversation(convo, wait)->purge_deleted(wait) == 2);
+
+        auto left = c->conversation(convo, wait)->messages(50, std::nullopt, true, wait);
+        REQUIRE(left.size() == 1);
+        CHECK(left[0].body == "three");
+
+        // Nothing left to purge.
+        CHECK(c->conversation(convo, wait)->purge_deleted(wait) == 0);
+
+        // And having forgotten it, a redelivery is a new message again -- the cost the header warns
+        // about, asserted here so it is a decision rather than a surprise.
+        deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+        CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
+    }
+}

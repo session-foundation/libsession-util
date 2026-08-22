@@ -155,7 +155,21 @@ CREATE TABLE messages (
     -- sync_send_state is NULL for a note to self, where the recipient's swarm is our own and a
     -- second store would be the same store twice.
     send_state INTEGER,
-    sync_send_state INTEGER
+    sync_send_state INTEGER,
+    -- Set once the message's content has been removed but the row has to stay:
+    --   1 = deleted here only
+    --   2 = deleted everywhere, either because we asked for that or because the sender did
+    --
+    -- A row rather than a DELETE because `swarm_hash` is what a redelivery dedupes against, and a
+    -- message deleted only here is still on the swarm to be delivered again.  Removing the row
+    -- would let it come back looking new -- which is not hypothetical: a storage server stops
+    -- honouring a `last_hash` once it has expired, and the poll that follows returns the whole
+    -- retention window.
+    --
+    -- Which of the two it is has to survive, not just that it happened: deleting for everyone is
+    -- still offerable on a message already deleted here, and the two are different things to draw.
+    -- The direction that completes the picture is `outgoing`, so there is no column for it.
+    deleted INTEGER
 ) STRICT;
 
 -- Delivery is at-least-once, so a redelivered message must not duplicate.  This also catches what

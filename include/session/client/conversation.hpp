@@ -105,15 +105,55 @@ class Conversation {
 
     /// A window of history, newest first.  Pass the `cursor()` of the last message of a page as
     /// `before` to fetch the next (older) page; the message at the cursor is not repeated.
+    ///
+    /// Deleted messages are left out unless `include_deleted` is passed.  Out by default because a
+    /// deleted message carries no body, so a caller that has not thought about `Message::deleted`
+    /// would draw an empty row that looks like a bug.  A client that wants to show "message deleted"
+    /// asks for them, and gets them in place, in order.
+    ///
+    /// Filtered in the query rather than left to the caller, because the alternative breaks paging:
+    /// a page of 50 that is mostly deleted would hand back a handful of rows with nothing to say
+    /// that another page is warranted.
     void messages(failable_function<void(std::vector<Message>)> cb) const;
     void messages(int limit, failable_function<void(std::vector<Message>)> cb) const;
     void messages(
             int limit,
             std::optional<MessageCursor> before,
             failable_function<void(std::vector<Message>)> cb) const;
+    void messages(
+            int limit,
+            std::optional<MessageCursor> before,
+            bool include_deleted,
+            failable_function<void(std::vector<Message>)> cb) const;
     std::vector<Message> messages(wait_t) const;
     std::vector<Message> messages(int limit, wait_t) const;
     std::vector<Message> messages(int limit, std::optional<MessageCursor> before, wait_t) const;
+    std::vector<Message> messages(
+            int limit,
+            std::optional<MessageCursor> before,
+            bool include_deleted,
+            wait_t) const;
+
+    /// Removes every deleted message's leftover row from this conversation, and says how many went.
+    ///
+    /// A deletion leaves a row behind deliberately — see `Client::delete_message` — and this is what
+    /// finally removes them, for a client that would rather not accumulate them or show them.
+    ///
+    /// **This can bring a message back.** A message deleted only here is still in our swarm, and
+    /// that row's swarm hash is the only thing that recognises it if it is delivered again — which a
+    /// storage server makes likely rather than hypothetical, since it stops honouring a `last_hash`
+    /// once that has expired and answers the next poll with the whole retention window.  Removing
+    /// the row removes the memory of it, and the message returns looking new.
+    ///
+    /// The alternative — deleting our swarm copy too, so there is nothing to come back — is worse
+    /// and is deliberately not done: that copy is what our *other devices* poll, so destroying it
+    /// would turn "delete for me" into "delete on every device I own", including devices that have
+    /// never seen the message and then never would.
+    ///
+    /// Messages we sent and deleted everywhere are not exposed to this: their swarm copy is already
+    /// gone, so there is nothing left to return.
+    void purge_deleted(failable_function<void(size_t removed)> cb);
+    size_t purge_deleted(wait_t);
 
     // -- Read state ---------------------------------------------------------------------------
 
@@ -445,6 +485,7 @@ class AnyConversation {
     SESSION_CONVO_FORWARD(send_message)
     SESSION_CONVO_FORWARD(clear_messages)
     SESSION_CONVO_FORWARD(delete_conversation)
+    SESSION_CONVO_FORWARD(purge_deleted)
 
 #undef SESSION_CONVO_FORWARD
 };
