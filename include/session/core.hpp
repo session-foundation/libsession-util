@@ -382,6 +382,28 @@ class Core {
             std::chrono::milliseconds ttl,
             bool force_v2);
 
+  public:
+    /// Deletes messages from *our own* swarm by hash, and forgets the cursors that named them.
+    ///
+    /// Only our own: a delete is signed by the account that owns the swarm, so this can reach the
+    /// copy of a message we sent that lives in our swarm for our other devices, and the copy of a
+    /// message we received that was delivered to us.  It cannot touch the copy sitting in someone
+    /// else's swarm — asking them to remove that is what an unsend request is for.
+    ///
+    /// Best effort, and `on_complete` says only whether the request was accepted.  A storage server
+    /// that no longer holds a hash reports that rather than failing, which is the same outcome we
+    /// wanted; treating it as an error would make a second delete look broken.
+    ///
+    /// The hashes are removed from the cursor history as part of this, which is the whole reason
+    /// that history exists: the next retrieve from a node then measures from the newest hash we
+    /// still hold rather than from one the node has just been told to forget.
+    ///
+    /// Does nothing and reports success for an empty list.  Throws std::logic_error if no network
+    /// is attached.
+    void delete_from_swarm(
+            std::vector<std::string> hashes, std::function<void(bool success)> on_complete);
+
+  private:
     // Dispatches a fully-encoded payload to a swarm for storage via the attached network object,
     // firing on_complete with the outcome and, where the storage server reported one, the hash it
     // assigned the message.  Throws std::logic_error if no network is attached.

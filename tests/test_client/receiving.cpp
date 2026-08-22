@@ -627,3 +627,100 @@ TEST_CASE("Client: purging removes what a deletion left", "[client][messages][de
         CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
     }
 }
+
+TEST_CASE("Client: deleting for everyone is only for what we sent", "[client][messages][delete]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "theirs", from_epoch_ms(1000), "h1");
+    auto theirs = c->conversation(convo, wait)->messages(wait).front();
+
+    // Their message, in their swarm as well as ours: an unsend request from us would be ignored at
+    // the other end, so we do not pretend to offer it.
+    CHECK_FALSE(c->delete_message_everywhere(theirs.id, wait));
+    CHECK_FALSE(c->message(theirs.id, wait)->deleted.has_value());
+    CHECK(c->message(theirs.id, wait)->body == "theirs");
+
+    // Deleting it for ourselves is what that caller wanted, and still works.
+    CHECK(c->delete_message(theirs.id, wait));
+    CHECK(c->message(theirs.id, wait)->deleted == Deletion::here);
+
+    // A message that does not exist is false either way, not an error.
+    CHECK_FALSE(c->delete_message_everywhere(theirs.id + 10000, wait));
+}
+
+TEST_CASE("Client: an unsend request from the author deletes the message", "[client][delete]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    auto unsend = [&](const SenderKeys& from, const b33& author, int64_t ts,
+                      std::optional<int64_t> msgid, std::string hash) {
+        SessionProtos::Content content;
+        content.set_sigtimestamp(9000);
+        auto* req = content.mutable_unsendrequest();
+        req->set_msgtimestamp(static_cast<uint64_t>(ts));
+        req->set_author(oxenc::to_hex(author));
+        if (msgid)
+            req->set_msgid(*msgid);
+
+        auto plaintext = content.SerializeAsString();
+        auto encoded = encode_dm_v1(
+                std::as_bytes(std::span{plaintext}),
+                from.ed_sk,
+                from_epoch_ms(9000),
+                own_sid(*c),
+                std::nullopt);
+        core::SwarmMessage sm{encoded, std::move(hash), from_epoch_ms(9000), from_epoch_ms(1e12)};
+        c->core.loop().call_get([&] {
+            c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+            return 0;
+        });
+    };
+
+    deliver(*c, sender, "regrettable", from_epoch_ms(1000), "h1", "", std::nullopt, nullptr, 42);
+    auto msg = c->conversation(convo, wait)->messages(wait).front();
+    REQUIRE(msg.body == "regrettable");
+
+    SECTION("naming someone else's message, ignored") {
+        // The one that actually exercises the authorisation check: a stranger who correctly names
+        // somebody else's message, so the lookup *would* find it.  Naming a message they did write
+        // is a different test -- it would be honoured, and rightly.
+        SenderKeys stranger;
+        unsend(stranger, sender.session_id, 1000, 42, "u2");
+        CHECK(c->message(msg.id, wait)->body == "regrettable");
+        CHECK_FALSE(c->message(msg.id, wait)->deleted.has_value());
+    }
+
+    SECTION("from the author, honoured") {
+        unsend(sender, sender.session_id, 1000, 42, "u3");
+        auto after = c->message(msg.id, wait);
+        REQUIRE(after);
+        CHECK(after->deleted == Deletion::everywhere);
+        CHECK(after->body.empty());
+        // The row stays, so a redelivery cannot resurrect it.
+        CHECK(after->hash == "h1");
+        CHECK(c->conversation(convo, wait)->unread() == 0);
+    }
+
+    SECTION("matching nothing, ignored") {
+        unsend(sender, sender.session_id, 5555, 42, "u4");
+        CHECK(c->message(msg.id, wait)->body == "regrettable");
+    }
+
+    SECTION("ambiguous, refused rather than guessed") {
+        // Two messages in the same millisecond from the same sender, neither carrying a msgid: the
+        // case the id exists for, and the case a sender most often unsends.
+        deliver(*c, sender, "one", from_epoch_ms(7000), "amb1");
+        deliver(*c, sender, "two", from_epoch_ms(7000), "amb2");
+        REQUIRE(c->conversation(convo, wait)->messages(wait).size() == 3);
+
+        unsend(sender, sender.session_id, 7000, std::nullopt, "u5");
+
+        auto left = c->conversation(convo, wait)->messages(wait);
+        CHECK(left.size() == 3);
+        for (const auto& m : left)
+            CHECK_FALSE(m.deleted.has_value());
+    }
+}

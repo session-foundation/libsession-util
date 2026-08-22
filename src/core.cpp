@@ -606,6 +606,87 @@ void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string 
     }
 }
 
+void Core::delete_from_swarm(
+        std::vector<std::string> hashes, std::function<void(bool)> on_complete) {
+    if (hashes.empty()) {
+        if (on_complete)
+            on_complete(true);
+        return;
+    }
+
+    auto net = _network;
+    if (!net)
+        throw std::logic_error{"delete_from_swarm: no network object"};
+
+    b64 sig;
+    {
+        auto seed = globals.account_seed();
+        // Signed over the hashes in the order they are sent, so the two must not be reordered
+        // independently.
+        auto to_sign = delete_signature_value(hashes);
+        ed25519::sign(sig, seed.ed25519_secret(), std::as_bytes(std::span{to_sign}));
+    }
+
+    nlohmann::json params = {
+            {"pubkey", globals.session_id_hex()},
+            {"pubkey_ed25519", globals.pubkey_ed25519().hex()},
+            {"messages", hashes},
+            {"signature", "{:b}"_format(sig)},
+    };
+    auto body = to_vector<std::byte>(params.dump());
+
+    net->get_swarm(
+            globals.pubkey_x25519(),
+            false,
+            [this, net, hashes = std::move(hashes), body = std::move(body), on_complete](
+                    auto, auto swarm) mutable {
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot delete from swarm: no swarm nodes available");
+                    if (on_complete)
+                        on_complete(false);
+                    return;
+                }
+
+                net->send_request(
+                        swarm_request(
+                                swarm.front(),
+                                globals.pubkey_x25519(),
+                                "delete",
+                                std::move(body)),
+                        [this, hashes = std::move(hashes), on_complete](
+                                bool success,
+                                bool timeout,
+                                int16_t status,
+                                auto,
+                                std::optional<std::string> resp) {
+                            if (!success) {
+                                log::warning(
+                                        cat,
+                                        "Swarm delete failed ({}): {}",
+                                        timeout ? "timed out" : "status {}"_format(status),
+                                        resp.value_or("no response body"));
+                                if (on_complete)
+                                    on_complete(false);
+                                return;
+                            }
+
+                            // Forget the cursors naming what we just deleted, so the next retrieve
+                            // measures from the newest hash the node still holds.  Done on success
+                            // only: a failed delete leaves the messages there, and dropping the
+                            // cursor would replay the retention window for nothing.
+                            {
+                                auto conn = db.conn();
+                                for (const auto& h : hashes)
+                                    conn.prepared_exec(
+                                            "DELETE FROM swarm_hashes WHERE hash = ?", h);
+                            }
+
+                            if (on_complete)
+                                on_complete(true);
+                        });
+            });
+}
+
 void Core::_send_to_swarm(
         std::span<const std::byte, 33> dest_pubkey,
         config::Namespace ns,

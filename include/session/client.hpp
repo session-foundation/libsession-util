@@ -65,6 +65,7 @@ class JobQueue;
 namespace SessionProtos {
 class Content;
 class DataExtractionNotification;
+class UnsendRequest;
 }
 
 namespace session::client {
@@ -317,6 +318,30 @@ class Client {
     void delete_message(int64_t message_id, failable_function<void(bool deleted)> cb);
     bool delete_message(int64_t message_id, wait_t);
 
+    /// Deletes a message we sent, here and everywhere else it reached.
+    ///
+    /// Does everything `delete_message` does, and then two things more: removes our own swarm's
+    /// copy — the one our other devices read — and asks the recipient to remove theirs.
+    ///
+    /// **Only for messages we sent.** Not a policy choice: an unsend request is honoured only from
+    /// the message's author or from one of your own devices, so asking a stranger to delete their
+    /// own message is asking for something the other end will ignore.  Returns false for an
+    /// incoming message, having done nothing — a caller wanting that message gone locally wants
+    /// `delete_message`.
+    ///
+    /// **The remote half cannot be confirmed, and is not reported.** `cb` fires once the local
+    /// deletion is done, which is immediate and certain; the swarm delete and the request to the
+    /// recipient are dispatched and not waited on.  There is no acknowledgement to wait for — a
+    /// recipient may be offline for a week, may be running a client that ignores unsend requests,
+    /// and may have already read and screenshotted it.  Reporting "deleted everywhere" as a
+    /// completed fact would be a promise nothing can keep, so this reports what it did rather than
+    /// what it achieved.
+    ///
+    /// The message is marked `Deletion::everywhere` locally either way, since that records what we
+    /// asked for, and it is what stops a client offering the same deletion twice.
+    void delete_message_everywhere(int64_t message_id, failable_function<void(bool deleted)> cb);
+    bool delete_message_everywhere(int64_t message_id, wait_t);
+
     /// Removes one deleted message's leftover row.  The conversation-wide form, and the reason a
     /// deletion leaves a row at all — including how this can bring a message back — are on
     /// `Conversation::purge_deleted`.
@@ -520,6 +545,11 @@ class Client {
     void _delete_conversation(const ConversationId& id, bool keep_messages);
     void _delete_contact(const ConversationId& id);
     bool _delete_message(int64_t message_id, Deletion how_far);
+    bool _delete_message_everywhere(int64_t message_id);
+    // Handles an inbound unsend request: finds what it names, if it names exactly one thing we
+    // hold, and deletes it.
+    void _on_unsend_request(
+            std::span<const std::byte, 33> sender, const SessionProtos::UnsendRequest& req);
     bool _purge_deleted_message(int64_t message_id);
     size_t _purge_deleted(const ConversationId& id);
     std::optional<std::string> _message_debug(int64_t message_id);

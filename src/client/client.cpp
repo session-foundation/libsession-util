@@ -593,6 +593,14 @@ bool Client::delete_message(int64_t message_id, wait_t) {
     return loop.call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
+void Client::delete_message_everywhere(int64_t message_id, failable_function<void(bool)> cb) {
+    _async([this, message_id] { return _delete_message_everywhere(message_id); }, std::move(cb));
+}
+
+bool Client::delete_message_everywhere(int64_t message_id, wait_t) {
+    return loop.call_get([this, message_id] { return _delete_message_everywhere(message_id); });
+}
+
 void Client::purge_deleted_message(int64_t message_id, failable_function<void(bool)> cb) {
     _async([this, message_id] { return _purge_deleted_message(message_id); }, std::move(cb));
 }
@@ -1305,6 +1313,151 @@ bool Client::_delete_message(int64_t message_id, Deletion how_far) {
         // The list shows the newest message's body, which may be the one just emptied.
         _touch(*convo);
     }
+    return true;
+}
+
+void Client::_on_unsend_request(
+        std::span<const std::byte, 33> sender, const SessionProtos::UnsendRequest& req) {
+    if (!req.has_author() || !req.has_msgtimestamp())
+        return;
+
+    b33 author;
+    {
+        auto raw = oxenc::from_hex(req.author());
+        if (raw.size() != author.size())
+            return;
+        std::memcpy(author.data(), raw.data(), author.size());
+    }
+
+    // Honoured from the message's own author, or from ourselves -- which is how this arrives when
+    // another of our devices deletes something we sent.  Anyone else asking us to destroy a message
+    // is asking for something that is not theirs to ask.
+    if (!std::ranges::equal(sender, author) && !is_me(sender)) {
+        log::warning(cat, "Ignoring unsend request from someone who did not write the message");
+        return;
+    }
+
+    auto ts = epoch_ms(from_epoch_ms(static_cast<int64_t>(req.msgtimestamp())));
+
+    auto c = core.database().conn();
+    std::vector<int64_t> found;
+    if (req.has_msgid()) {
+        // Both halves: this identifies one message even among several sent in the same millisecond,
+        // which is the case the id exists for.
+        for (auto id : c.prepared_results<int64_t>(
+                     R"(
+            SELECT m.id FROM messages m JOIN accounts a ON a.id = m.sender
+             WHERE m.timestamp = ? AND a.session_id = ? AND m.msgid = ?
+        )",
+                     ts,
+                     author,
+                     req.msgid()))
+            found.push_back(id);
+    } else {
+        for (auto id : c.prepared_results<int64_t>(
+                     R"(
+            SELECT m.id FROM messages m JOIN accounts a ON a.id = m.sender
+             WHERE m.timestamp = ? AND a.session_id = ?
+        )",
+                     ts,
+                     author))
+            found.push_back(id);
+    }
+
+    if (found.empty())
+        return;
+
+    // A request that names more than one message is not a weaker match but an ambiguous one, and
+    // the messages a sender most often unsends -- several lines pasted and thought better of -- are
+    // exactly the ones that share a millisecond.  Deleting the wrong one destroys something nobody
+    // asked to lose, so leave it rather than guess.
+    if (found.size() > 1) {
+        log::warning(
+                cat,
+                "Ignoring unsend request matching {} messages: cannot tell which was meant",
+                found.size());
+        return;
+    }
+
+    // Marked as deleted everywhere rather than only here: this is the author saying it is gone, not
+    // us tidying our own copy.
+    _delete_message(found.front(), Deletion::everywhere);
+
+    // And our own swarm's copy of it, so it cannot be delivered to us again and so our other
+    // devices stop seeing it too.  Ours to delete: it was stored in our swarm for us.
+    if (auto hash = c.prepared_maybe_get<std::optional<std::string>>(
+                "SELECT swarm_hash FROM messages WHERE id = ?", found.front());
+        hash && *hash && core.network())
+        core.delete_from_swarm({**hash}, [](bool ok) {
+            if (!ok)
+                log::warning(cat, "Could not delete our swarm copy of an unsent message");
+        });
+}
+
+bool Client::_delete_message_everywhere(int64_t message_id) {
+    std::optional<std::string> swarm_hash;
+    std::optional<b33> recipient;
+    std::optional<int64_t> msgid;
+    sys_ms timestamp{};
+    {
+        auto c = core.database().conn();
+        auto row = c.prepared_maybe_get<int, std::optional<std::string>, int64_t,
+                                        std::optional<int64_t>, sqlite::blob_guts<b33>>(
+                R"(
+            SELECT m.outgoing, m.swarm_hash, m.timestamp, m.msgid, a.session_id
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation
+            JOIN accounts a ON a.id = c.dm
+            WHERE m.id = ?
+        )",
+                message_id);
+        if (!row)
+            return false;
+
+        auto [outgoing, hash, ts, mid, peer] = *row;
+        // The other end honours an unsend only from the author or from one of their own devices, so
+        // for a message we did not write there is nothing to ask for.
+        if (!outgoing)
+            return false;
+
+        swarm_hash = std::move(hash);
+        timestamp = from_epoch_ms(ts);
+        msgid = mid;
+        recipient = peer;
+    }
+
+    // The local half first, and on its own terms: it is the part that is certain, and the caller is
+    // told about this rather than about what the network does with the rest.
+    if (!_delete_message(message_id, Deletion::everywhere))
+        return false;
+
+    // Our own swarm's copy -- what our other devices read.  Not the recipient's: that one is in
+    // their swarm and only they can remove it, which is what the request below asks for.
+    if (swarm_hash && core.network())
+        core.delete_from_swarm({*swarm_hash}, [](bool ok) {
+            if (!ok)
+                log::warning(cat, "Could not delete our own swarm copy of an unsent message");
+        });
+
+    // Best effort, and deliberately not waited on: there is no acknowledgement, and a recipient may
+    // be offline, or running something that ignores this entirely.
+    if (recipient && core.network() && !is_me(*recipient)) {
+        auto now = clock_now_ms();
+        SessionProtos::Content content;
+        content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
+        auto* req = content.mutable_unsendrequest();
+        req->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(timestamp)));
+        req->set_author(oxenc::to_hex(core.globals.session_id()));
+        // Both halves of the identity where we have them: the timestamp alone cannot separate two
+        // messages sent in the same millisecond, and those are exactly what someone deletes.
+        if (msgid)
+            req->set_msgid(*msgid);
+
+        // Registered rather than fired blind: Core reports on every send, and a status for an id
+        // nobody claims would sit in _early_status for the life of the process.
+        _quiet_sends.insert(core.send_dm(*recipient, content, now));
+    }
+
     return true;
 }
 
@@ -3345,6 +3498,13 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                     content.has_sigtimestamp()
                             ? from_epoch_ms(static_cast<int64_t>(content.sigtimestamp()))
                             : msg.timestamp);
+        return;
+    }
+
+    // Someone asking us to remove a message they sent.  Not history either -- it takes something
+    // away rather than adding anything -- so it is handled here and goes no further.
+    if (content.has_unsendrequest()) {
+        _on_unsend_request(msg.sender_session_id, content.unsendrequest());
         return;
     }
 
