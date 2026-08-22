@@ -2937,6 +2937,146 @@ static std::filesystem::path final_path(const std::filesystem::path& dest, bool 
     throw std::runtime_error{"Cannot find a free name beside {}"_format(dest.string())};
 }
 
+void Client::_download_decrypted(
+        const std::string& url,
+        std::vector<std::byte> key,
+        std::vector<std::byte> digest,
+        std::optional<int64_t> claimed_size,
+        std::function<void(std::span<const std::byte>)> on_plain,
+        std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
+        std::function<void(std::optional<std::string>)> on_done) {
+
+    auto info = network::file_server::parse_download_url(url);
+    if (!info)
+        throw std::runtime_error{"{} is not a download url"_format(url)};
+
+    auto net = core.network();
+    if (!net)
+        throw std::runtime_error{"Cannot download: no network is attached"};
+
+    bool stream = info->wants_stream_decryption;
+    if (stream ? key.size() != attachment::ENCRYPT_KEY_SIZE
+               : key.size() != attachment::LEGACY_KEY_SIZE)
+        throw std::runtime_error{
+                "Cannot decrypt {}: a {} download needs a {}-byte key and we have {}"_format(
+                        url,
+                        stream ? "stream-encrypted" : "legacy",
+                        stream ? attachment::ENCRYPT_KEY_SIZE : attachment::LEGACY_KEY_SIZE,
+                        key.size())};
+    if (!stream && digest.size() != attachment::LEGACY_DIGEST_SIZE)
+        throw std::runtime_error{
+                "Cannot authenticate {}: a legacy download needs a {}-byte digest and we have "
+                "{}"_format(url, attachment::LEGACY_DIGEST_SIZE, digest.size())};
+
+    // Shared with the network's thread, where every callback below runs.  The stream case hands
+    // plaintext over as it decrypts and so never holds the whole thing; the legacy case has to
+    // accumulate, because its MAC and digest cover the whole ciphertext and neither can be checked
+    // until all of it is here.
+    struct DownloadState {
+        std::vector<std::byte> buffered;
+        std::optional<attachment::Decryptor> decryptor;
+        std::optional<std::string> failure;
+        int64_t received = 0;
+    };
+    auto state = std::make_shared<DownloadState>();
+
+    if (stream) {
+        std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
+        std::ranges::copy(key, k.begin());
+        state->decryptor.emplace(k, [on_plain](std::span<const std::byte> plain) {
+            on_plain(plain);
+        });
+    }
+
+    auto throttle = std::make_shared<update_throttle>(_high_freq_dispatch_interval);
+
+    // As uploads do: the 0/0 that says this one has started, before the size is known.
+    if (on_progress)
+        on_progress(0, 0, std::nullopt);
+
+    network::DownloadRequest req;
+    req.download_url = url;
+    req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
+    req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
+
+    req.on_data = [state, stream, on_progress, throttle](
+                          const network::file_metadata& meta, std::span<const std::byte> data) {
+        if (state->failure)
+            return;
+        try {
+            state->received += static_cast<int64_t>(data.size());
+
+            // Enforced against bytes actually arriving rather than against anything the sender or
+            // the server claimed, so an over-long transfer is cut off rather than accumulated.
+            if (state->received > static_cast<int64_t>(attachment::LEGACY_MAX_ENCRYPTED_SIZE)) {
+                state->failure = "download is larger than the file server's maximum";
+                return;
+            }
+
+            if (stream) {
+                if (!state->decryptor->update(data))
+                    state->failure = "decryption failed";
+            } else
+                state->buffered.insert(state->buffered.end(), data.begin(), data.end());
+
+            if (on_progress && throttle->allow())
+                on_progress(state->received, meta.size, std::nullopt);
+        } catch (const std::exception& e) {
+            state->failure = e.what();
+        }
+    };
+
+    req.on_complete = [state,
+                       stream,
+                       on_plain,
+                       on_progress,
+                       on_done,
+                       key = std::move(key),
+                       digest = std::move(digest),
+                       claimed_size](
+                              std::variant<network::file_metadata, int16_t> result, bool timeout) {
+        auto fail = [&](std::string why, int code) {
+            if (on_progress)
+                on_progress(0, 0, code);
+            on_done(std::move(why));
+        };
+
+        if (auto* err = std::get_if<int16_t>(&result))
+            return fail(
+                    timeout ? "download timed out"s
+                            : "download failed with status {}"_format(*err),
+                    *err);
+
+        if (state->failure)
+            return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
+
+        try {
+            if (stream) {
+                if (!state->decryptor->finalize())
+                    throw std::runtime_error{"download ended mid-stream"};
+            } else {
+                std::array<std::byte, attachment::LEGACY_KEY_SIZE> k;
+                std::array<std::byte, attachment::LEGACY_DIGEST_SIZE> d;
+                std::ranges::copy(key, k.begin());
+                std::ranges::copy(digest, d.begin());
+                on_plain(attachment::legacy_decrypt(
+                        state->buffered,
+                        k,
+                        d,
+                        claimed_size ? static_cast<size_t>(*claimed_size) : 0));
+            }
+        } catch (const std::exception& e) {
+            return fail(e.what(), ATTACHMENT_UNREADABLE);
+        }
+
+        if (on_progress)
+            on_progress(state->received, state->received, 0);
+        on_done(std::nullopt);
+    };
+
+    net->download(std::move(req));
+}
+
 void Client::_save_attachment(
         int64_t message_id,
         size_t index,
@@ -2980,186 +3120,87 @@ void Client::_save_attachment(
                 "Attachment {} of message {} cannot be fetched: its sender gave no url"_format(
                         index, message_id)};
 
-    auto info = network::file_server::parse_download_url(*url);
-    if (!info)
-        throw std::runtime_error{
-                "Attachment {} of message {} cannot be fetched: {} is not a download url"_format(
-                        index, message_id, *url)};
-
-    auto net = core.network();
-    if (!net)
-        throw std::runtime_error{"Cannot fetch an attachment: no network is attached"};
-
-    bool stream = info->wants_stream_decryption;
-    if (stream ? key.size() != attachment::ENCRYPT_KEY_SIZE
-               : key.size() != attachment::LEGACY_KEY_SIZE)
-        throw std::runtime_error{
-                "Attachment {} of message {} cannot be decrypted: a {} attachment needs a {}-byte "
-                "key and its sender gave {}"_format(
-                        index,
-                        message_id,
-                        stream ? "stream-encrypted" : "legacy",
-                        stream ? attachment::ENCRYPT_KEY_SIZE : attachment::LEGACY_KEY_SIZE,
-                        key.size())};
-    if (!stream && digest.size() != attachment::LEGACY_DIGEST_SIZE)
-        throw std::runtime_error{
-                "Attachment {} of message {} cannot be authenticated: a legacy attachment needs a "
-                "{}-byte digest and its sender gave {}"_format(
-                        index, message_id, attachment::LEGACY_DIGEST_SIZE, digest.size())};
-
-    // Shared with the network's thread, where every callback below runs.  The stream case writes as
-    // it decrypts and so never holds the file; the legacy case has to accumulate, because its MAC
-    // and digest cover the whole ciphertext and neither can be checked until all of it is here.
+    // Written to a temporary name beside the destination and renamed only once it is whole, so an
+    // interrupted save leaves nothing that looks finished.
     struct SaveState {
         std::filesystem::path dest, partial, saved_to;
         std::ofstream out;
-        std::vector<std::byte> buffered;
-        std::optional<attachment::Decryptor> decryptor;
-        std::optional<std::string> failure;
-        int64_t received = 0;
     };
     auto state = std::make_shared<SaveState>();
     state->dest = std::move(dest);
     state->partial = open_partial(state->out, state->dest);
 
-    if (stream) {
-        std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
-        std::ranges::copy(key, k.begin());
-        state->decryptor.emplace(k, [state](std::span<const std::byte> plain) {
-            state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
-        });
-    }
-
-    auto throttle = std::make_shared<update_throttle>(_high_freq_dispatch_interval);
+    // The download reports unindexed; a caller watching several attachments needs to know which.
     auto report = [this, on_progress, index](int64_t done, int64_t total, std::optional<int> r) {
         if (on_progress)
             _dispatch_out([on_progress, index, done, total, r] {
                 on_progress(index, done, total, r);
             });
     };
-    // As uploads do: the 0/0 that says this one has started, before the size is known.
-    report(0, 0, std::nullopt);
 
-    network::DownloadRequest req;
-    req.download_url = *url;
-    req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
-    req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
-
-    req.on_data = [state, stream, report, throttle](
-                          const network::file_metadata& meta, std::span<const std::byte> data) {
-        if (state->failure)
-            return;
-        try {
-            state->received += static_cast<int64_t>(data.size());
-
-            // Enforced against bytes actually arriving rather than against anything the sender or
-            // the server claimed, so an over-long transfer is cut off rather than accumulated.
-            if (state->received > static_cast<int64_t>(attachment::LEGACY_MAX_ENCRYPTED_SIZE)) {
-                state->failure = "attachment is larger than the file server's maximum";
-                return;
-            }
-
-            if (stream) {
-                if (!state->decryptor->update(data))
-                    state->failure = "decryption failed";
-            } else
-                state->buffered.insert(state->buffered.end(), data.begin(), data.end());
-
-            if (throttle->allow())
-                report(state->received, meta.size, std::nullopt);
-        } catch (const std::exception& e) {
-            state->failure = e.what();
-        }
-    };
-
-    req.on_complete = [this,
-                       state,
-                       stream,
-                       report,
-                       message_id,
-                       index,
-                       notify_sender,
-                       replace,
-                       cb = std::move(cb),
-                       key = std::move(key),
-                       digest = std::move(digest),
-                       claimed_size](
-                              std::variant<network::file_metadata, int16_t> result, bool timeout) {
-        auto fail = [&](std::string why, int code) {
-            state->out.close();
-            std::error_code ec;
-            std::filesystem::remove(state->partial, ec);
-            report(0, 0, code);
-            _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
-        };
-
-        if (auto* err = std::get_if<int16_t>(&result))
-            return fail(
-                    timeout ? "attachment download timed out"s
-                            : "attachment download failed with status {}"_format(*err),
-                    *err);
-
-        if (state->failure)
-            return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
-
-        try {
-            if (stream) {
-                if (!state->decryptor->finalize())
-                    throw std::runtime_error{"attachment ended mid-stream"};
-            } else {
-                std::array<std::byte, attachment::LEGACY_KEY_SIZE> k;
-                std::array<std::byte, attachment::LEGACY_DIGEST_SIZE> d;
-                std::ranges::copy(key, k.begin());
-                std::ranges::copy(digest, d.begin());
-                auto plain = attachment::legacy_decrypt(
-                        state->buffered,
-                        k,
-                        d,
-                        claimed_size ? static_cast<size_t>(*claimed_size) : 0);
+    _download_decrypted(
+            *url,
+            std::move(key),
+            std::move(digest),
+            claimed_size,
+            [state](std::span<const std::byte> plain) {
                 state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
-            }
+            },
+            report,
+            [this, state, message_id, index, notify_sender, replace, cb = std::move(cb)](
+                    std::optional<std::string> error) {
+                auto fail = [&](std::string why) {
+                    state->out.close();
+                    std::error_code ec;
+                    std::filesystem::remove(state->partial, ec);
+                    _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
+                };
 
-            state->out.close();
-            if (!state->out)
-                throw std::runtime_error{"writing {} failed"_format(state->partial.string())};
+                if (error)
+                    return fail(std::move(*error));
 
-            // Only now does it get a name a user would recognise -- and only now can it be known
-            // whether the one they asked for is still free, which is why the choice is here rather
-            // than where the caller made it.
-            state->saved_to = final_path(state->dest, replace);
-            std::filesystem::rename(state->partial, state->saved_to);
-        } catch (const std::exception& e) {
-            return fail(e.what(), ATTACHMENT_UNREADABLE);
-        }
+                try {
+                    state->out.close();
+                    if (!state->out)
+                        throw std::runtime_error{
+                                "writing {} failed"_format(state->partial.string())};
 
-        report(state->received, state->received, 0);
-        _report(cb, std::optional<std::string>{}, state->saved_to);
+                    // Only now does it get a name a user would recognise -- and only now can it be
+                    // known whether the one they asked for is still free, which is why the choice
+                    // is here rather than where the caller made it.
+                    state->saved_to = final_path(state->dest, replace);
+                    std::filesystem::rename(state->partial, state->saved_to);
+                } catch (const std::exception& e) {
+                    return fail(e.what());
+                }
 
-        // Both of these say the same thing -- that the recipient now has the file -- one to
-        // ourselves and one to the sender, and neither is true until it is on disk under its final
-        // name, which is why they are here rather than anywhere earlier.  Recording it does not
-        // depend on telling them: a caller who saved privately still gets to see that they did.
-        //
-        // Both are also only true when the recipient is *us*.  `saved_at` says the recipient saved
-        // it, which is what lets a sender read it as "the file reached a person rather than a file
-        // server", so stamping it for our own save of something we sent would claim they have a file
-        // they may never have opened.  A note to self is exempt: there the recipient is us, so
-        // saving it really is the recipient saving it.
-        loop.call([this, message_id, index, notify_sender] {
-            if (_saved_by_recipient(message_id))
-                _record_saved(message_id, index, clock_now_ms());
+                _report(cb, std::optional<std::string>{}, state->saved_to);
 
-            // The account's own answer overrides the caller's, and only downwards.  Somebody who
-            // has said not to report their saves has said it for every client on the account, and a
-            // client that forgot to ask -- or never grew the setting -- would otherwise report them
-            // anyway.  A caller passing false is still respected: this can refuse a notification,
-            // never require one.
-            if (notify_sender && core.configs.user_profile().get_notify_media_saved())
-                _notify_media_saved(message_id, index);
-        });
-    };
+                // Both of these say the same thing -- that the recipient now has the file -- one to
+                // ourselves and one to the sender, and neither is true until it is on disk under
+                // its final name, which is why they are here rather than anywhere earlier.
+                // Recording it does not depend on telling them: a caller who saved privately still
+                // gets to see that they did.
+                //
+                // Both are also only true when the recipient is *us*.  `saved_at` says the
+                // recipient saved it, which is what lets a sender read it as "the file reached a
+                // person rather than a file server", so stamping it for our own save of something
+                // we sent would claim they have a file they may never have opened.  A note to self
+                // is exempt: there the recipient is us, so saving it really is the recipient
+                // saving it.
+                loop.call([this, message_id, index, notify_sender] {
+                    if (_saved_by_recipient(message_id))
+                        _record_saved(message_id, index, clock_now_ms());
 
-    net->download(std::move(req));
+                    // The account's own answer overrides the caller's, and only downwards.
+                    // Somebody who has said not to report their saves has said it for every client
+                    // on the account, and a client that forgot to ask -- or never grew the setting
+                    // -- would otherwise report them anyway.  A caller passing false is still
+                    // respected: this can refuse a notification, never require one.
+                    if (notify_sender && core.configs.user_profile().get_notify_media_saved())
+                        _notify_media_saved(message_id, index);
+                });
+            });
 }
 
 void Client::_on_media_saved(

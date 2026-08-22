@@ -617,6 +617,29 @@ class Client {
             int64_t client_id,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
 
+    // Downloads `url`, decrypts it, and hands the plaintext to `on_plain` — possibly in pieces, and
+    // on the network's thread.  Whatever wants the bytes decides what to do with them: write them
+    // to a file the user chose, keep them in memory, put them in the cache.
+    //
+    // Both of Session's attachment encryptions are handled here and neither is the caller's
+    // business: which applies is decided by the url, the stream scheme decrypts as it arrives, and
+    // the legacy one has to accumulate because its MAC and digest cover the whole ciphertext.  That
+    // difference is exactly what a second copy of this would get wrong.
+    //
+    // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment adds
+    // its own index.  `on_done` fires exactly once, with the failure if there was one.
+    //
+    // Throws, before starting anything, if the url is not a download url, if no network is attached,
+    // or if the key or digest is the wrong length for the scheme the url implies.
+    void _download_decrypted(
+            const std::string& url,
+            std::vector<std::byte> key,
+            std::vector<std::byte> digest,
+            std::optional<int64_t> claimed_size,
+            std::function<void(std::span<const std::byte> plaintext)> on_plain,
+            std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
+            std::function<void(std::optional<std::string> error)> on_done);
+
     // Starts the download behind save_attachment.  Everything after the row lookup happens off the
     // loop, on the network's thread: the file is decrypted and written there, and nothing about it
     // is recorded, so this is the one attachment path that never comes back to the database.
