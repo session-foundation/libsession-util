@@ -1,5 +1,6 @@
 #include <SQLiteCpp/Transaction.h>
 #include <SessionProtos.pb.h>
+#include <debug_print.hpp>
 #include <oxenc/hex.h>
 
 #include <algorithm>
@@ -576,6 +577,15 @@ bool Client::retry_send(
 
 bool Client::retry_send(int64_t message_id, wait_t) {
     return retry_send(message_id, nullptr, wait);
+}
+
+void Client::message_debug(
+        int64_t message_id, failable_function<void(std::optional<std::string>)> cb) {
+    _async([this, message_id] { return _message_debug(message_id); }, std::move(cb));
+}
+
+std::optional<std::string> Client::message_debug(int64_t message_id, wait_t) {
+    return loop.call_get([this, message_id] { return _message_debug(message_id); });
 }
 
 void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb) {
@@ -2156,6 +2166,23 @@ std::optional<Message> Client::_message(int64_t id) {
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
+}
+
+std::optional<std::string> Client::_message_debug(int64_t message_id) {
+    auto c = core.database().conn();
+    auto raw = c.prepared_maybe_get<std::string>(
+            "SELECT content FROM message_raw_content WHERE message = ?", message_id);
+    if (!raw)
+        return std::nullopt;
+
+    SessionProtos::Content content;
+    if (!content.ParseFromString(*raw)) {
+        // Stored after it parsed, or serialized by us, so this is the bytes having rotted rather
+        // than a message we never understood.  Worth a warning; still nothing to show.
+        log::warning(cat, "Stored wire content for message {} did not parse", message_id);
+        return std::nullopt;
+    }
+    return proto::debug_print(content);
 }
 
 int64_t Client::_send_message(const ConversationId& id, std::string_view body) {

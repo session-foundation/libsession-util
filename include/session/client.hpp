@@ -327,6 +327,29 @@ class Client {
     void purge_deleted_message(int64_t message_id, failable_function<void(bool removed)> cb);
     bool purge_deleted_message(int64_t message_id, wait_t);
 
+    /// The message as it arrived on the wire, rendered as indented text: one line per field that is
+    /// set, named, with nested messages beneath their field and enums by name.
+    ///
+    /// For seeing what a client actually sent, which nothing else here answers.  A message is
+    /// stored twice — as the columns this schema models, and as the whole decrypted `Content` it
+    /// came in — and everything else reads the first of those.
+    ///
+    /// Rendered here rather than handed over as bytes, because the wire format is this layer's to
+    /// interpret: nothing above Client parses a protobuf, and the generated headers are kept out of
+    /// the public ones deliberately.
+    ///
+    /// Deliberately not a field on `Message`: this is asked for one message at a time by someone
+    /// looking, and putting it on the row would drag the whole wire form through the query that
+    /// draws a conversation.
+    ///
+    /// Returns nullopt when there is nothing to show — which is not an error, and covers three
+    /// cases a viewer is free to render alike: a message composed here that was never given a
+    /// stored wire form, one whose content has been deleted, and one whose content some later
+    /// pruning removed.  Also nullopt if the stored bytes no longer parse, which is corruption
+    /// rather than absence and is logged as such.
+    void message_debug(
+            int64_t message_id, failable_function<void(std::optional<std::string>)> cb);
+    std::optional<std::string> message_debug(int64_t message_id, wait_t);
 
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
     ///
@@ -499,6 +522,7 @@ class Client {
     bool _delete_message(int64_t message_id, Deletion how_far);
     bool _purge_deleted_message(int64_t message_id);
     size_t _purge_deleted(const ConversationId& id);
+    std::optional<std::string> _message_debug(int64_t message_id);
     std::vector<Message> _messages(
             const ConversationId& id,
             int limit,

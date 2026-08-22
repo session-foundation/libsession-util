@@ -466,6 +466,56 @@ TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages
     CHECK(seen == std::vector<std::string>{"same3", "same2", "same1"});
 }
 
+TEST_CASE("Client: a message can be shown as it was on the wire", "[client][messages][debug]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c,
+            sender,
+            "hello there",
+            from_epoch_ms(5000),
+            "h1",
+            "Obi-Wan",
+            std::nullopt,
+            [](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(12345);
+                a->set_contenttype("image/png");
+                a->set_key("\x01\x02\x03\x04");
+            },
+            77);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 1);
+
+    auto dump = c->message_debug(msgs[0].id, wait);
+    REQUIRE(dump);
+    INFO("dump:\n" << *dump);
+
+    // Named *and* numbered, and nested beneath the field that holds them.  The number is what the
+    // wire carries, so it is what a dump is compared against.
+    //
+    // A message field opens a brace and closes it at its own indent, rather than being followed by
+    // an empty-looking `{}` with its contents underneath.
+    CHECK(dump->find("dataMessage [1] {\n") != std::string::npos);
+    CHECK(dump->find("\n}\n") != std::string::npos);
+    CHECK(dump->find("  body [1]: \"hello there\"\n") != std::string::npos);
+    CHECK(dump->find("    displayName [1]: \"Obi-Wan\"\n") != std::string::npos);
+    CHECK(dump->find("    contentType [2]: \"image/png\"\n") != std::string::npos);
+    // Bytes summarised as length plus hex rather than dumped raw.
+    CHECK(dump->find("    key [3]: (4 bytes) 01020304\n") != std::string::npos);
+    // Scalars at the top level of Content.
+    CHECK(dump->find("sigTimestamp [15]: 5000\n") != std::string::npos);
+    CHECK(dump->find("msgId [18]: 77\n") != std::string::npos);
+
+    // The name as declared in the .proto, not the lowercased spelling protoc gives the accessor.
+    CHECK(dump->find("sourcedevice") == std::string::npos);
+
+    // A message with no stored wire form, and one that does not exist, are both "nothing to show"
+    // rather than errors.
+    CHECK_FALSE(c->message_debug(msgs[0].id + 1000, wait).has_value());
+}
 
 TEST_CASE("Client: deleting a message empties it but keeps its place", "[client][messages][delete]") {
     TempClient c;
@@ -504,6 +554,9 @@ TEST_CASE("Client: deleting a message empties it but keeps its place", "[client]
 
     // Nothing left to read, so it stops being unread.
     CHECK(c->conversation(convo, wait)->unread() == 2);
+
+    // The stored wire form goes with it, which is where the body actually survived.
+    CHECK_FALSE(c->message_debug(middle.id, wait).has_value());
 
     // A redelivery under the same hash is still recognised as one we have seen.
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
