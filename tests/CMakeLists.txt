@@ -9,6 +9,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_client/configs.cpp
     test_client/conversation_api.cpp
     test_client/download_cache.cpp
+    test_client/profile_pictures.cpp
     test_client/ids_and_schema.cpp
     test_client/interop_and_threading.cpp
     test_client/receiving.cpp

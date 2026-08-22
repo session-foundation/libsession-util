@@ -682,22 +682,43 @@ class Client {
     std::function<void(int64_t, int64_t, std::optional<int>)> _dispatch_progress(
             std::function<void(int64_t, int64_t, std::optional<int>)> cb);
 
+    // What is being downloaded.  Only ever consulted to pick between the two *legacy* formats,
+    // which are different for no reason anyone chose — see `attachment::legacy_display_pic_decrypt`
+    // — and which nothing in the bytes distinguishes.
+    enum class DownloadKind {
+        attachment,    ///< A file sent with a message.
+        display_pic,   ///< A profile picture or a group avatar.
+    };
+
     // Downloads `url`, decrypts it, and hands the plaintext to `on_plain` — possibly in pieces, and
     // on the network's thread.  Whatever wants the bytes decides what to do with them: write them
     // to a file the user chose, keep them in memory, put them in the cache.
     //
-    // Both of Session's attachment encryptions are handled here and neither is the caller's
-    // business: which applies is decided by the url, the stream scheme decrypts as it arrives, and
-    // the legacy one has to accumulate because its MAC and digest cover the whole ciphertext.  That
-    // difference is exactly what a second copy of this would get wrong.
+    // **This is the one place that chooses between Session's three at-rest formats**, and no caller
+    // above it learns there was a choice.  The rule:
+    //
+    //   - the url carries a `d` fragment -> the stream scheme, whatever is being fetched.  That
+    //     fragment means stream encryption universally; it is the one honest discriminator here.
+    //   - otherwise, `kind` decides: an attachment is AES-CBC with an HMAC and a separate digest;
+    //     a display picture is AES-GCM with the nonce and tag inline.
+    //   - no key at all -> plaintext.  Community images are stored that way.
+    //
+    // `kind` is a parameter rather than something inferred from the key's length because the caller
+    // knows which it asked for, and inference would be a guess standing in for a fact: it happens to
+    // work today only because the two legacy key sizes differ, and would misroute silently the first
+    // time something else turned up with a 32-byte key and no `d`.
+    //
+    // The stream scheme decrypts as it arrives; both legacy ones have to accumulate, because their
+    // authentication covers the whole ciphertext and cannot be checked until all of it is here.
     //
     // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment adds
     // its own index.  `on_done` fires exactly once, with the failure if there was one.
     //
     // Throws, before starting anything, if the url is not a download url, if no network is attached,
-    // or if the key or digest is the wrong length for the scheme the url implies.
+    // or if the key or digest is the wrong length for the scheme that resolves to.
     void _download_decrypted(
             const std::string& url,
+            DownloadKind kind,
             std::vector<std::byte> key,
             std::vector<std::byte> digest,
             std::optional<int64_t> claimed_size,

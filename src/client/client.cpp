@@ -639,18 +639,29 @@ void Client::_profile_picture(
         failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
 
     auto convo = _conversation(id);
-    if (!convo || convo->picture().url.empty() || convo->picture().key.size() != 32) {
+    if (!convo || convo->picture().url.empty()) {
         // Nobody has told us of one, or it is a kind whose picture is not wired up yet.  Not an
         // error: there is simply nothing to show.
         _report(cb, std::optional<std::string>{}, std::nullopt);
         return;
     }
 
+    // No check on the key here: a missing one is not malformed, it means the file is stored in the
+    // clear, which is how a community's image is kept.  A key of the wrong length *is* malformed,
+    // and the download reports it as the error it is rather than as an absent picture.
+
     auto pic = convo->picture();
 
-    if (!_cache_dir.empty()) {
+    // Taken here, on the loop, because generating it touches globals -- and taking it now rather
+    // than when the download finishes is also what lets the write happen where the bytes are, see
+    // below.
+    std::optional<b32> cache_key;
+    if (!_cache_dir.empty())
+        cache_key = _cache_encryption_key();
+
+    if (cache_key) {
         auto file = cache::path_for(_cache_dir, cache::PROFILE_DIR, pic.url);
-        if (auto cached = cache::read(file, _cache_encryption_key())) {
+        if (auto cached = cache::read(file, *cache_key)) {
             // No progress reported: there is nothing to watch, and a bar that flashes for a cached
             // read is worse than none.
             _report(cb, std::optional<std::string>{}, std::move(cached));
@@ -667,6 +678,7 @@ void Client::_profile_picture(
 
     _download_decrypted(
             pic.url,
+            DownloadKind::display_pic,
             pic.key,
             {},
             std::nullopt,
@@ -674,27 +686,31 @@ void Client::_profile_picture(
                 plain->insert(plain->end(), chunk.begin(), chunk.end());
             },
             report,
-            [this, plain, url = pic.url, cb = std::move(cb)](std::optional<std::string> error) {
+            [this, plain, url = pic.url, cache_key, cb = std::move(cb)](
+                    std::optional<std::string> error) {
                 if (error) {
                     _report(cb, std::move(error), std::nullopt);
                     return;
                 }
 
-                // Cached only now, and only on success: what a failed decryption produced is not
-                // the picture, and storing it would serve it back forever without another attempt.
-                if (!_cache_dir.empty())
-                    loop.call([this, plain, url] {
-                        try {
-                            cache::write(
-                                    cache::path_for(_cache_dir, cache::PROFILE_DIR, url),
-                                    _cache_encryption_key(),
-                                    *plain);
-                        } catch (const std::exception& e) {
-                            // A cache that cannot be written is a cache that misses next time,
-                            // which is not worth failing the caller's fetch over.
-                            log::warning(cat, "Could not cache a profile picture: {}", e.what());
-                        }
-                    });
+                // Written here, before the plaintext is handed over, rather than deferred to the
+                // loop: reporting moves the bytes out, so anything reading them afterwards would
+                // find an empty vector and cache that.
+                //
+                // Only on success, too: what a failed decryption produced is not the picture, and
+                // storing it would serve it back forever without another attempt.
+                if (cache_key) {
+                    try {
+                        cache::write(
+                                cache::path_for(_cache_dir, cache::PROFILE_DIR, url),
+                                *cache_key,
+                                *plain);
+                    } catch (const std::exception& e) {
+                        // A cache that cannot be written is a cache that misses next time, which is
+                        // not worth failing the caller's fetch over.
+                        log::warning(cat, "Could not cache a profile picture: {}", e.what());
+                    }
+                }
 
                 _report(cb, std::optional<std::string>{}, std::move(*plain));
             });
@@ -3066,6 +3082,7 @@ std::function<void(int64_t, int64_t, std::optional<int>)> Client::_dispatch_prog
 
 void Client::_download_decrypted(
         const std::string& url,
+        DownloadKind kind,
         std::vector<std::byte> key,
         std::vector<std::byte> digest,
         std::optional<int64_t> claimed_size,
@@ -3081,19 +3098,37 @@ void Client::_download_decrypted(
     if (!net)
         throw std::runtime_error{"Cannot download: no network is attached"};
 
-    bool stream = info->wants_stream_decryption;
-    if (stream ? key.size() != attachment::ENCRYPT_KEY_SIZE
-               : key.size() != attachment::LEGACY_KEY_SIZE)
-        throw std::runtime_error{
-                "Cannot decrypt {}: a {} download needs a {}-byte key and we have {}"_format(
-                        url,
-                        stream ? "stream-encrypted" : "legacy",
-                        stream ? attachment::ENCRYPT_KEY_SIZE : attachment::LEGACY_KEY_SIZE,
-                        key.size())};
-    if (!stream && digest.size() != attachment::LEGACY_DIGEST_SIZE)
-        throw std::runtime_error{
-                "Cannot authenticate {}: a legacy download needs a {}-byte digest and we have "
-                "{}"_format(url, attachment::LEGACY_DIGEST_SIZE, digest.size())};
+    // The whole of the format question, answered once.  See the header for why `kind` is passed in
+    // rather than guessed from how long the key happens to be.
+    enum class Scheme { plaintext, stream, legacy_attachment, legacy_display_pic } scheme;
+    if (key.empty())
+        scheme = Scheme::plaintext;
+    else if (info->wants_stream_decryption)
+        scheme = Scheme::stream;
+    else if (kind == DownloadKind::attachment)
+        scheme = Scheme::legacy_attachment;
+    else
+        scheme = Scheme::legacy_display_pic;
+
+    auto need_key = [&](size_t want) {
+        if (key.size() != want)
+            throw std::runtime_error{
+                    "Cannot decrypt {}: this download needs a {}-byte key and we have {}"_format(
+                            url, want, key.size())};
+    };
+    switch (scheme) {
+        case Scheme::plaintext: break;
+        case Scheme::stream: need_key(attachment::ENCRYPT_KEY_SIZE); break;
+        case Scheme::legacy_display_pic: need_key(attachment::LEGACY_DISPLAY_PIC_KEY_SIZE); break;
+        case Scheme::legacy_attachment:
+            need_key(attachment::LEGACY_KEY_SIZE);
+            if (digest.size() != attachment::LEGACY_DIGEST_SIZE)
+                throw std::runtime_error{
+                        "Cannot authenticate {}: a legacy attachment needs a {}-byte digest and we "
+                        "have {}"_format(url, attachment::LEGACY_DIGEST_SIZE, digest.size())};
+            break;
+    }
+    bool stream = scheme == Scheme::stream;
 
     // Shared with the network's thread, where every callback below runs.  The stream case hands
     // plaintext over as it decrypts and so never holds the whole thing; the legacy case has to
@@ -3154,7 +3189,7 @@ void Client::_download_decrypted(
     };
 
     req.on_complete = [state,
-                       stream,
+                       scheme,
                        on_plain,
                        on_progress,
                        on_done,
@@ -3178,19 +3213,36 @@ void Client::_download_decrypted(
             return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
 
         try {
-            if (stream) {
-                if (!state->decryptor->finalize())
-                    throw std::runtime_error{"download ended mid-stream"};
-            } else {
-                std::array<std::byte, attachment::LEGACY_KEY_SIZE> k;
-                std::array<std::byte, attachment::LEGACY_DIGEST_SIZE> d;
-                std::ranges::copy(key, k.begin());
-                std::ranges::copy(digest, d.begin());
-                on_plain(attachment::legacy_decrypt(
-                        state->buffered,
-                        k,
-                        d,
-                        claimed_size ? static_cast<size_t>(*claimed_size) : 0));
+            switch (scheme) {
+                case Scheme::stream:
+                    if (!state->decryptor->finalize())
+                        throw std::runtime_error{"download ended mid-stream"};
+                    break;
+
+                case Scheme::plaintext:
+                    // Nothing to undo: community images are stored as they are.
+                    on_plain(state->buffered);
+                    break;
+
+                case Scheme::legacy_attachment: {
+                    std::array<std::byte, attachment::LEGACY_KEY_SIZE> k;
+                    std::array<std::byte, attachment::LEGACY_DIGEST_SIZE> d;
+                    std::ranges::copy(key, k.begin());
+                    std::ranges::copy(digest, d.begin());
+                    on_plain(attachment::legacy_decrypt(
+                            state->buffered,
+                            k,
+                            d,
+                            claimed_size ? static_cast<size_t>(*claimed_size) : 0));
+                    break;
+                }
+
+                case Scheme::legacy_display_pic: {
+                    std::array<std::byte, attachment::LEGACY_DISPLAY_PIC_KEY_SIZE> k;
+                    std::ranges::copy(key, k.begin());
+                    on_plain(attachment::legacy_display_pic_decrypt(state->buffered, k));
+                    break;
+                }
             }
         } catch (const std::exception& e) {
             return fail(e.what(), ATTACHMENT_UNREADABLE);
@@ -3269,6 +3321,7 @@ void Client::_save_attachment(
 
     _download_decrypted(
             *url,
+            DownloadKind::attachment,
             std::move(key),
             std::move(digest),
             claimed_size,
