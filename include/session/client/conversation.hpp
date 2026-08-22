@@ -8,6 +8,7 @@
 #include <session/clock.hpp>
 #include <session/config/expiring.hpp>
 #include <session/config/notify.hpp>
+#include <session/config/profile_pic.hpp>
 #include <string>
 #include <utility>
 #include <variant>
@@ -94,6 +95,17 @@ class Conversation {
     /// person you are talking to, not two spellings of the same one.
     config::expiration_mode exp_mode = config::expiration_mode::none;
     std::chrono::seconds exp_timer{0};
+
+    /// Where this conversation's picture is, if we know of one: the url it was uploaded to and the
+    /// key that decrypts it.  Empty url means there is no picture, or none we have been told about.
+    ///
+    /// Enough to know whether there is one and whether it has changed — the url is what changes
+    /// when somebody updates their picture — without fetching anything.  `Client::profile_picture`
+    /// is what turns it into bytes.
+    ///
+    /// On the base rather than on `DM` because every kind of conversation can have one; only a DM's
+    /// is wired up today, so this is empty for a group or community until that lands.
+    config::profile_pic picture;
 
     /// The display name if known, otherwise the conversation's string id — a reasonable default
     /// for a caller that has no better fallback of its own.
@@ -451,6 +463,7 @@ class AnyConversation {
     std::chrono::sys_seconds mute_until() const { return base().mute_until; }
     config::expiration_mode exp_mode() const { return base().exp_mode; }
     std::chrono::seconds exp_timer() const { return base().exp_timer; }
+    const config::profile_pic& picture() const { return base().picture; }
     std::string name_or_id() const { return base().name_or_id(); }
 
     /// The kind, or nullptr if it is not that one.  This is how a caller asks a question only one

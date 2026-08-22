@@ -448,6 +448,49 @@ class Client {
     /// this or having its own dispatcher run the work inline once posting stops arriving anywhere.
     void set_dispatcher(dispatcher d);
 
+    /// Gives us somewhere to keep what we download, and turns caching on.
+    ///
+    /// Unset by default, and with it unset nothing is cached: every fetch goes to the file server.
+    /// That is the safe default rather than a limitation — we are handed a database file, not
+    /// permission to write beside it, and an embedder that has somewhere in mind (an Android cache
+    /// dir, an XDG cache home) should be the one to say where.
+    ///
+    /// **The directory must be ours outright.** Freeing what nothing references any more works by
+    /// listing the directory and unlinking what is not in the list, which is only safe somewhere
+    /// nothing else writes.  Point this at a directory with other things in it and they will go.
+    ///
+    /// Contents are encrypted under a key generated once and kept in the database, so they outlive
+    /// the message or config entry whose key originally opened them — and so the files are not
+    /// readable by whoever ends up with the disk.  That protection is only as good as the
+    /// database's: with an unencrypted database the key sits in plaintext beside them.
+    void set_cache_dir(std::filesystem::path dir);
+
+    /// A conversation's picture, decrypted and ready to decode.
+    ///
+    /// Served from the cache when it is there, and fetched, decrypted and cached when it is not.
+    /// Which of those happened is deliberately not reported: it is the same picture either way, and
+    /// a caller that had to know would end up implementing the caching decision itself.
+    ///
+    /// `on_progress` reports the download as `save_attachment` does — `done`/`total` in encrypted
+    /// bytes while it runs, `result == 0` when it is in, anything else a failure status.  It is not
+    /// called at all on a cache hit: there is no progress to draw when the bytes are already here,
+    /// and a progress bar that flashes for a cached read is worse than none.
+    ///
+    /// Returns nullopt when there is no picture to fetch — nobody has told us of one, or this is a
+    /// group or community, whose pictures are real but not wired up yet.  An actual failure to
+    /// fetch reports through `cb`'s error rather than as nullopt, so "there isn't one" and "we
+    /// could not get it" stay apart.
+    ///
+    /// Needs `set_cache_dir` to cache; without it every call fetches.  Nothing is cached for a
+    /// picture we could not decrypt, since what we would be storing is not the picture.
+    void profile_picture(
+            const ConversationId& id,
+            std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
+            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
+    void profile_picture(
+            const ConversationId& id,
+            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
+
     // -- Our own account ----------------------------------------------------------------------
     //
     // These read and write the UserProfile config, which follows the account between devices.  They
@@ -583,6 +626,18 @@ class Client {
     bool _purge_deleted_message(int64_t message_id);
     size_t _purge_deleted(const ConversationId& id);
     std::optional<std::string> _message_debug(int64_t message_id);
+
+    // Where downloads are cached, and the key they are encrypted under.  Empty path means no
+    // caching.  The key is read (or generated) on first use rather than at construction, so an
+    // account that never caches anything never grows one.
+    std::filesystem::path _cache_dir;
+    std::optional<b32> _cache_key;
+    // Must be called on the loop: it touches globals.
+    const b32& _cache_encryption_key();
+    void _profile_picture(
+            const ConversationId& id,
+            std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
+            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
     std::vector<Message> _messages(
             const ConversationId& id,
             int limit,

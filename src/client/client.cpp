@@ -24,6 +24,8 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "download_cache.hpp"
+
 namespace session::client {
 
 namespace log = oxen::log;
@@ -593,6 +595,114 @@ bool Client::delete_message(int64_t message_id, wait_t) {
     return loop.call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
+void Client::set_cache_dir(std::filesystem::path dir) {
+    _cache_dir = std::move(dir);
+}
+
+const b32& Client::_cache_encryption_key() {
+    if (!_cache_key) {
+        auto& key = _cache_key.emplace();
+        if (!core.globals.get_blob_to("client:cache_key", key)) {
+            // Generated once and kept: every cached file is encrypted under it, so losing it would
+            // orphan the whole cache -- which is survivable (everything in it can be fetched again)
+            // but silently wasteful, since nothing would ever read those files or delete them.
+            random::fill(key);
+            core.globals.set("client:cache_key", std::span<const std::byte>{key});
+        }
+    }
+    return *_cache_key;
+}
+
+void Client::profile_picture(
+        const ConversationId& id,
+        std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
+        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+    loop.call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
+        try {
+            _profile_picture(id, std::move(on_progress), std::move(cb));
+        } catch (const std::exception& e) {
+            _report(cb, std::optional{std::string{e.what()}}, std::nullopt);
+        }
+    });
+}
+
+void Client::profile_picture(
+        const ConversationId& id, failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+    profile_picture(id, nullptr, std::move(cb));
+}
+
+// No waiting form, deliberately: this is a network fetch of an unbounded file, and the one caller
+// that wants to block on it is a caller that has not thought about a slow file server.
+void Client::_profile_picture(
+        const ConversationId& id,
+        std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
+        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+
+    auto convo = _conversation(id);
+    if (!convo || convo->picture().url.empty() || convo->picture().key.size() != 32) {
+        // Nobody has told us of one, or it is a kind whose picture is not wired up yet.  Not an
+        // error: there is simply nothing to show.
+        _report(cb, std::optional<std::string>{}, std::nullopt);
+        return;
+    }
+
+    auto pic = convo->picture();
+
+    if (!_cache_dir.empty()) {
+        auto file = cache::path_for(_cache_dir, cache::PROFILE_DIR, pic.url);
+        if (auto cached = cache::read(file, _cache_encryption_key())) {
+            // No progress reported: there is nothing to watch, and a bar that flashes for a cached
+            // read is worse than none.
+            _report(cb, std::optional<std::string>{}, std::move(cached));
+            return;
+        }
+    }
+
+    auto report = [this, on_progress](int64_t done, int64_t total, std::optional<int> r) {
+        if (on_progress)
+            _dispatch_out([on_progress, done, total, r] { on_progress(done, total, r); });
+    };
+
+    // Accumulated rather than streamed to disk: a caller asked for the bytes, so they are going to
+    // be in memory regardless, and a picture is small enough that holding it is not the cost the
+    // cache exists to avoid.
+    auto plain = std::make_shared<std::vector<std::byte>>();
+
+    _download_decrypted(
+            pic.url,
+            pic.key,
+            {},
+            std::nullopt,
+            [plain](std::span<const std::byte> chunk) {
+                plain->insert(plain->end(), chunk.begin(), chunk.end());
+            },
+            report,
+            [this, plain, url = pic.url, cb = std::move(cb)](std::optional<std::string> error) {
+                if (error) {
+                    _report(cb, std::move(error), std::nullopt);
+                    return;
+                }
+
+                // Cached only now, and only on success: what a failed decryption produced is not
+                // the picture, and storing it would serve it back forever without another attempt.
+                if (!_cache_dir.empty())
+                    loop.call([this, plain, url] {
+                        try {
+                            cache::write(
+                                    cache::path_for(_cache_dir, cache::PROFILE_DIR, url),
+                                    _cache_encryption_key(),
+                                    *plain);
+                        } catch (const std::exception& e) {
+                            // A cache that cannot be written is a cache that misses next time,
+                            // which is not worth failing the caller's fetch over.
+                            log::warning(cat, "Could not cache a profile picture: {}", e.what());
+                        }
+                    });
+
+                _report(cb, std::optional<std::string>{}, std::move(*plain));
+            });
+}
+
 void Client::display_name(failable_function<void(std::string)> cb) {
     _async([this] { return std::string{core.configs.user_profile().get_name().value_or("")}; },
            std::move(cb));
@@ -827,7 +937,9 @@ void Client::save_attachment(
 
 // -- Conversations ----------------------------------------------------------------------------
 
-// Only a DM has a name source so far; groups and communities gain one with the features.
+// Only a DM has a name source so far; groups and communities gain one with the features.  The same
+// goes for the picture: a group's and a community's live elsewhere and are not wired up yet, so
+// those columns come back null and the conversation reports no picture.
 static const auto CONVO_COLUMNS = R"(
     SELECT c.id, a.session_id, g.group_id, m.base_url, m.room,
            -- A nickname is ours for them and wins over the name they chose for themselves; falling
@@ -841,7 +953,8 @@ static const auto CONVO_COLUMNS = R"(
                       ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
            c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
            c.marked_unread, coalesce(ct.blocked, 0), a.name, ct.nickname,
-           c.notifications, c.mute_until, c.exp_mode, c.exp_timer
+           c.notifications, c.mute_until, c.exp_mode, c.exp_timer,
+           a.profile_pic_url, a.profile_pic_key
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -860,7 +973,7 @@ static std::vector<AnyConversation> query_conversations(
     std::vector<AnyConversation> out;
     for (auto [convo, sid, gid, url, room, display_name, activity, preview, unread, priority,
                approved, approved_me, marked_unread, blocked, name, nickname, notifications,
-               mute_until, exp_mode, exp_timer] :
+               mute_until, exp_mode, exp_timer, pic_url, pic_key] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -881,8 +994,14 @@ static std::vector<AnyConversation> query_conversations(
                  int,
                  int64_t,
                  int,
-                 int64_t>(query, bind...)) {
+                 int64_t,
+                 std::optional<std::string>,
+                 std::optional<sqlite::blob>>(query, bind...)) {
         Conversation base{client, subject_to_id(convo, sid, gid, url, room)};
+        if (pic_url && pic_key) {
+            base.picture.url = *pic_url;
+            base.picture.key.assign(pic_key->begin(), pic_key->end());
+        }
         base.display_name = display_name.value_or("");
         base.last_message = std::move(preview);
         base.last_activity = from_epoch_ms(activity);

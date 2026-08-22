@@ -519,3 +519,47 @@ TEST_CASE("Client: the save-notification preference follows the account", "[clie
     merge_profile(*c.client, pushed);
     CHECK(c->notify_media_saved(wait));
 }
+
+TEST_CASE("Client: a conversation reports the picture it has been told about", "[client][configs]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'b');
+    auto id = dm_from_hex(them);
+
+    std::vector<std::byte> key(32, std::byte{0x7});
+    auto pushed = contacts_from_another_device(*c.client, them, [&](auto& e) {
+        e.set_name("Padmé");
+        e.profile_picture = config::profile_pic{"http://fs.example/file/99#pubkey=aa", key};
+    });
+    merge_contacts(*c.client, pushed);
+
+    auto convo = c->conversation(id, wait);
+    REQUIRE(convo);
+    CHECK(convo->picture().url == "http://fs.example/file/99#pubkey=aa");
+    CHECK(convo->picture().key == key);
+
+    // Somebody we know nothing about has none, which is not the same as an error.
+    auto stranger = dm_from_hex("05" + std::string(64, 'c'));
+    c->open_dm(stranger, wait);
+    CHECK(c->conversation(stranger, wait)->picture().url.empty());
+}
+
+TEST_CASE("Client: no picture is nullopt rather than a failure", "[client][configs]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    c->open_dm(id, wait);
+
+    std::optional<std::vector<std::byte>> got;
+    std::optional<std::string> err;
+    bool called = false;
+    c->profile_picture(id, [&](std::optional<std::string> e, auto pic) {
+        err = std::move(e);
+        got = std::move(pic);
+        called = true;
+    });
+    sync(*c);
+
+    REQUIRE(called);
+    CHECK_FALSE(err.has_value());
+    CHECK_FALSE(got.has_value());
+}
