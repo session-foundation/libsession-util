@@ -2133,9 +2133,12 @@ void Client::_sync_contact(const ConversationId& id) {
     auto c = core.database().conn();
     auto row = c.prepared_maybe_get<
             std::optional<std::string>,   // name
-            std::optional<std::string>,   // profile_pic_url
-            std::optional<sqlite::blob>,  // profile_pic_key
-            int64_t,                      // profile_updated
+            std::optional<std::string>,  // profile_pic_url
+            // By value rather than as a `blob`, which is a view into the column: the statement is
+            // finished by the time this tuple is returned, so a view in it is already dangling and
+            // the key reads back with its first bytes overwritten.
+            std::optional<sqlite::blob_guts<b32>>,  // profile_pic_key
+            int64_t,                                // profile_updated
             int64_t,                      // pro_flags
             std::optional<std::string>,   // nickname
             int,                          // approved
@@ -3813,9 +3816,33 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                     ? from_epoch_ms(static_cast<int64_t>(content.sigtimestamp()))
                     : msg.timestamp;
 
-    std::string_view name;
-    if (data.has_profile() && data.profile().has_displayname())
+    // What the sender says about themselves, and when they last changed it.  All three move
+    // together: `profile_updated` is what decides between this and the Contacts config, so applying
+    // a name or a picture without the stamp that justifies it would leave the next comparison
+    // arguing from the wrong date.
+    std::optional<std::string_view> name;
+    if (data.has_profile() && data.profile().has_displayname() &&
+        !data.profile().displayname().empty())
         name = data.profile().displayname();
+
+    // A picture arrives split across two fields: the url inside their profile, and the key that
+    // decrypts it beside it rather than in it.  Neither alone is worth storing -- a url we cannot
+    // decrypt is a download that can only fail.
+    std::optional<std::string_view> pic_url;
+    std::optional<std::span<const std::byte>> pic_key;
+    if (data.has_profile() && data.profile().has_profilepicture() &&
+        !data.profile().profilepicture().empty() && data.has_profilekey() &&
+        data.profilekey().size() == 32) {
+        pic_url = data.profile().profilepicture();
+        pic_key = std::as_bytes(std::span{data.profilekey()});
+    }
+
+    // Zero when they did not say, which only a client old enough to predate the field does.  That
+    // then loses to anything we have already been told, which is the right way round: a client that
+    // cannot say when its profile changed has no claim to overwrite one we know the date of.
+    int64_t profile_stamp = 0;
+    if (data.has_profile() && data.profile().has_lastupdateseconds())
+        profile_stamp = static_cast<int64_t>(data.profile().lastupdateseconds());
 
     auto msgid = msgid_of(content);
 
@@ -3920,14 +3947,35 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         //
         // `IS NOT` rather than `!=`: the column is NULL until a name is known, and `NULL != 'x'`
         // is NULL, so `!=` would never fire for the first name we learn.
-        if (!outgoing && !name.empty())
+        // Only when what they sent is at least as new as what we hold, which is the same test the
+        // Contacts config reconcile makes and against the same column: a message that took a week
+        // to arrive must not undo a profile change made since.
+        //
+        // Fields the message did not carry are left alone rather than cleared.  Not every message
+        // carries a profile at all, so an absent picture is a silence, not a statement that they
+        // removed it; removal reaches us through the config, which does say so.
+        if (!outgoing && data.has_profile() &&
+            profile_stamp >= c.prepared_get<int64_t>(
+                                     "SELECT profile_updated FROM accounts WHERE id = ?", sender))
             renamed = c.prepared_exec(
                               R"(
-                UPDATE accounts SET name = ?1
-                WHERE id = ?2 AND name IS NOT ?1
+                UPDATE accounts
+                   SET name = coalesce(?2, name),
+                       profile_pic_url = coalesce(?3, profile_pic_url),
+                       profile_pic_key = coalesce(?4, profile_pic_key),
+                       profile_updated = ?5
+                 WHERE id = ?1
+                   AND (name, profile_pic_url, profile_pic_key, profile_updated)
+                       IS NOT (coalesce(?2, name),
+                               coalesce(?3, profile_pic_url),
+                               coalesce(?4, profile_pic_key),
+                               ?5)
             )",
+                              sender,
                               name,
-                              sender) > 0;
+                              pic_url,
+                              pic_key,
+                              profile_stamp) > 0;
 
         tx.commit();
     }

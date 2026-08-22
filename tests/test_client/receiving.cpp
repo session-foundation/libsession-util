@@ -724,3 +724,99 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
             CHECK_FALSE(m.deleted.has_value());
     }
 }
+
+TEST_CASE("Client: a sender's picture arrives with their message", "[client][receive][pictures]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    std::vector<std::byte> key(32, std::byte{0x5});
+    auto with_profile = [&](std::string_view display,
+                            std::optional<std::string> url,
+                            std::optional<std::vector<std::byte>> k,
+                            std::optional<uint64_t> stamp) {
+        return [=](SessionProtos::DataMessage& d) {
+            auto* p = d.mutable_profile();
+            if (!display.empty())
+                p->set_displayname(std::string{display});
+            if (url)
+                p->set_profilepicture(*url);
+            if (stamp)
+                p->set_lastupdateseconds(*stamp);
+            if (k)
+                d.set_profilekey(std::string{
+                        reinterpret_cast<const char*>(k->data()), k->size()});
+        };
+    };
+
+    deliver(*c,
+            sender,
+            "hi",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            with_profile("Padmé", "http://fs.example/file/7#pubkey=aa", key, 500));
+
+    auto pic = c->conversation(convo, wait)->picture();
+    CHECK(pic.url == "http://fs.example/file/7#pubkey=aa");
+    CHECK(pic.key == key);
+    CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+
+    SECTION("a newer profile replaces it") {
+        std::vector<std::byte> key2(32, std::byte{0x9});
+        deliver(*c,
+                sender,
+                "again",
+                from_epoch_ms(2000),
+                "h2",
+                "",
+                std::nullopt,
+                with_profile("Padme", "http://fs.example/file/8", key2, 900));
+
+        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/8");
+        CHECK(c->conversation(convo, wait)->picture().key == key2);
+    }
+
+    SECTION("a message that took a week to arrive does not undo a newer change") {
+        // Same sender, older profile stamp: the message is new to us but the profile in it is not.
+        std::vector<std::byte> stale(32, std::byte{0x1});
+        deliver(*c,
+                sender,
+                "delayed",
+                from_epoch_ms(3000),
+                "h3",
+                "",
+                std::nullopt,
+                with_profile("Old Name", "http://fs.example/file/old", stale, 100));
+
+        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+    }
+
+    SECTION("a url with no key is not stored, since it could only fail to open") {
+        deliver(*c,
+                sender,
+                "keyless",
+                from_epoch_ms(4000),
+                "h4",
+                "",
+                std::nullopt,
+                with_profile("", "http://fs.example/file/nokey", std::nullopt, 900));
+
+        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
+    }
+
+    SECTION("a message carrying no profile leaves it alone") {
+        deliver(*c, sender, "plain", from_epoch_ms(5000), "h5");
+        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+    }
+
+    SECTION("and it reaches the config, so our other devices learn it too") {
+        auto entry = c->core.configs.contacts().get(oxenc::to_hex(sender.session_id));
+        REQUIRE(entry);
+        CHECK(entry->profile_picture.url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(entry->profile_picture.key == key);
+    }
+}
