@@ -672,6 +672,16 @@ class Client {
             int64_t client_id,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
 
+    // Wraps a progress callback so each report reaches the application through the dispatcher, and
+    // returns an empty function when given one — so a download can skip reporting entirely rather
+    // than call something whose whole body is a check that there is nothing to do.
+    //
+    // A caller reporting something narrower than "this download" — one attachment of several, say —
+    // binds that in first and hands the result here; what is shared is the hop and the emptiness,
+    // not what the numbers are about.
+    std::function<void(int64_t, int64_t, std::optional<int>)> _dispatch_progress(
+            std::function<void(int64_t, int64_t, std::optional<int>)> cb);
+
     // Downloads `url`, decrypts it, and hands the plaintext to `on_plain` — possibly in pieces, and
     // on the network's thread.  Whatever wants the bytes decides what to do with them: write them
     // to a file the user chose, keep them in memory, put them in the cache.

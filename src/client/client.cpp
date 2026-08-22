@@ -658,16 +658,7 @@ void Client::_profile_picture(
         }
     }
 
-    // Left empty when there is nothing to report to, so the download skips the call rather than
-    // making one that decides it has nothing to do.
-    std::function<void(int64_t, int64_t, std::optional<int>)> report;
-    if (on_progress)
-        report = [this, on_progress = std::move(on_progress)](
-                         int64_t done, int64_t total, std::optional<int> r) {
-            // Copied rather than moved into the hop: this fires once per chunk, and moving would
-            // leave the next call with nothing to report to.
-            _dispatch_out([on_progress, done, total, r] { on_progress(done, total, r); });
-        };
+    auto report = _dispatch_progress(std::move(on_progress));
 
     // Accumulated rather than streamed to disk: a caller asked for the bytes, so they are going to
     // be in memory regardless, and a picture is small enough that holding it is not the cost the
@@ -3062,6 +3053,17 @@ static std::filesystem::path final_path(const std::filesystem::path& dest, bool 
     throw std::runtime_error{"Cannot find a free name beside {}"_format(dest.string())};
 }
 
+std::function<void(int64_t, int64_t, std::optional<int>)> Client::_dispatch_progress(
+        std::function<void(int64_t, int64_t, std::optional<int>)> cb) {
+    if (!cb)
+        return {};
+    return [this, cb = std::move(cb)](int64_t done, int64_t total, std::optional<int> r) {
+        // Copied rather than moved into the hop: this fires once per chunk, and moving would leave
+        // the next report with nothing to reach.
+        _dispatch_out([cb, done, total, r] { cb(done, total, r); });
+    };
+}
+
 void Client::_download_decrypted(
         const std::string& url,
         std::vector<std::byte> key,
@@ -3255,16 +3257,15 @@ void Client::_save_attachment(
     state->dest = std::move(dest);
     state->partial = open_partial(state->out, state->dest);
 
-    // The download reports unindexed; a caller watching several attachments needs to know which.
-    // Left empty when nobody is watching, so the download makes no call at all.
-    std::function<void(int64_t, int64_t, std::optional<int>)> report;
+    // The download reports unindexed; a caller watching several attachments needs to know which, so
+    // the index is bound in before the shared hop.
+    std::function<void(int64_t, int64_t, std::optional<int>)> indexed;
     if (on_progress)
-        report = [this, on_progress = std::move(on_progress), index](
-                         int64_t done, int64_t total, std::optional<int> r) {
-            _dispatch_out([on_progress, index, done, total, r] {
-                on_progress(index, done, total, r);
-            });
+        indexed = [on_progress = std::move(on_progress), index](
+                          int64_t done, int64_t total, std::optional<int> r) {
+            on_progress(index, done, total, r);
         };
+    auto report = _dispatch_progress(std::move(indexed));
 
     _download_decrypted(
             *url,
