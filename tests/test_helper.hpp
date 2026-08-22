@@ -378,13 +378,19 @@ class TestHelper {
                 .has_value();
     }
 
-    // Returns the last_hash stored for the given namespace+sn_pubkey pair (or nullopt if none).
+    // The cursor a retrieve from this namespace+node would send: the newest hash that node handed
+    // us and still holds.  Derived rather than stored, so this asks the same question the poll does.
     static std::optional<std::string> namespace_last_hash(
             core::Core& core, int16_t ns, const network::ed25519_pubkey& sn_pubkey) {
         return core.db.conn().prepared_maybe_get<std::string>(
-                "SELECT last_hash FROM namespace_sync WHERE namespace = ? AND sn_pubkey = ?",
+                R"(
+SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
+ WHERE h.namespace = ? AND n.pubkey = ? AND (h.expiry IS NULL OR h.expiry > ?)
+ ORDER BY h.id DESC LIMIT 1
+)",
                 ns,
-                sn_pubkey);
+                sn_pubkey,
+                epoch_ms(clock_now_ms()));
     }
 
     // Device group payload encryption/decryption.  These are private to Devices and currently have
@@ -433,13 +439,11 @@ class TestHelper {
         std::optional<std::array<std::byte, 1184>> pubkey_mlkem768;
     };
 
-    // Returns true if the namespace_sync table has at least one row with a last_hash set for the
-    // given namespace (on any swarm node).  Used by live tests to detect that a poll completed
-    // and delivered at least one message.
+    // Returns true if any swarm node has handed us a hash in the given namespace.  Used by live
+    // tests to detect that a poll completed and delivered at least one message.
     static bool has_any_namespace_sync(core::Core& core, config::Namespace ns) {
         auto count = core.db.conn().prepared_get<int64_t>(
-                "SELECT COUNT(*) FROM namespace_sync"
-                " WHERE namespace = ? AND last_hash IS NOT NULL",
+                "SELECT COUNT(*) FROM swarm_hashes WHERE namespace = ?",
                 static_cast<int16_t>(ns));
         return count > 0;
     }

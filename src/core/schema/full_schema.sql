@@ -133,13 +133,57 @@ CREATE TABLE globals (
 ) STRICT;
 
 
--- from 000_namespaces.sql
-CREATE TABLE namespace_sync (
-    namespace INTEGER NOT NULL,
-    sn_pubkey BLOB NOT NULL CHECK(length(sn_pubkey) = 32),
-    last_hash TEXT NOT NULL,
-    PRIMARY KEY (namespace, sn_pubkey)
+-- from 001_swarm_hash_history.sql
+--
+-- Every message hash a storage node has handed us, in the order that node handed it over, with the
+-- moment the node will drop it.
+--
+-- This is where a retrieve's `last_hash` comes from -- the newest unexpired row for that node and
+-- namespace -- rather than a stored cursor, so that deleting a hash from the swarm moves the cursor
+-- by itself.  A stored cursor has to be corrected by whoever deletes, and the correction is
+-- invisible from the delete: config pushes have destroyed their own cursor on every push since they
+-- were written, which costs a full retrieve each time and was never noticed because it is only
+-- expensive and never wrong.
+--
+-- Per node, because the cursor is.  Nodes do not agree on storage order, so a hash learned from one
+-- node is not a safe cursor for another: at best it is unrecognised and the node replays its whole
+-- retention window, at worst the node holds it *after* something we never received, and advancing
+-- there skips that message permanently.
+--
+-- Expiry rather than a row count is what bounds this.  A hash is a usable cursor for exactly as long
+-- as the node still holds the message, so the server's own expiry is the honest limit; a count would
+-- keep dead hashes and drop live ones at the same time.
+--
+-- Every hash from a retrieve goes in, including messages we store nothing for -- typing indicators,
+-- payloads that do not parse, anything a namespace carries that this build ignores.  Recording only
+-- what we kept would leave the cursor behind those, and we would fetch them again on every poll.
+--
+-- Deliberately no foreign key to the client's `messages`: this is Core's, and a bare Core has no
+-- such table.  It would also be the wrong fact -- a row here says a *node* still holds the message,
+-- which has nothing to do with whether we kept our copy of it.
+--
+-- The nodes are their own table because the alternative repeats a 32-byte key in every row and
+-- again in every index entry, to say something there are only a handful of distinct answers to.
+--
+-- Nothing prunes nodes by swarm membership, deliberately.  A node that has left is dead weight, but
+-- deciding that requires trusting a swarm list to be complete, and a momentarily narrow one would
+-- delete cursors that are still good -- costing a full retrieve from every node it omitted, which is
+-- the exact thing this table exists to avoid.  Expiry clears their rows soon enough anyway.
+CREATE TABLE swarm_nodes (
+    id INTEGER PRIMARY KEY,
+    pubkey BLOB NOT NULL UNIQUE CHECK(length(pubkey) = 32)
 ) STRICT;
+
+CREATE TABLE swarm_hashes (
+    id INTEGER PRIMARY KEY,
+    namespace INTEGER NOT NULL,
+    node INTEGER NOT NULL REFERENCES swarm_nodes(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL,
+    expiry INTEGER,
+    UNIQUE(namespace, node, hash)
+) STRICT;
+
+CREATE INDEX swarm_hashes_cursor ON swarm_hashes(namespace, node, id DESC);
 
 -- from 000_pfs_key_cache.sql
 -- Cache of remote account public keys (X25519 + ML-KEM-768) used for PFS+PQ message encryption.

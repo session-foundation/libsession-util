@@ -31,10 +31,6 @@ static auto cat = log::Cat("client");
 
 using namespace std::literals;
 
-static int64_t to_ms(sys_ms t) {
-    return t.time_since_epoch().count();
-}
-
 /// A message identifier: an opaque 64-bit pattern, compared for equality and never ordered or
 /// counted.  Signed all the way through -- the protobuf declares it sfixed64 for exactly that
 /// reason -- so no conversion is needed anywhere between the wire and the database.
@@ -225,7 +221,7 @@ static ConvoRow ensure_conversation(
         sqlite::Connection& c, const ConversationId& id, sys_ms activity) {
     auto kind = kind_of(id.type());
     auto subject = identity_id(c, id);
-    auto ms = to_ms(activity);
+    auto ms = epoch_ms(activity);
 
     bool created = c.prepared_exec(
                            R"(
@@ -296,7 +292,7 @@ static bool delete_messages_before(sqlite::Connection& c, int64_t convo, sys_ms 
     if (c.prepared_exec(
                 "DELETE FROM messages WHERE conversation = ?1 AND timestamp < ?2",
                 convo,
-                to_ms(before)) == 0)
+                epoch_ms(before)) == 0)
         return false;
 
     c.prepared_exec(
@@ -320,7 +316,7 @@ static bool delete_attachments_before(sqlite::Connection& c, int64_t convo, sys_
             (SELECT id FROM messages WHERE conversation = ?1 AND timestamp < ?2)
     )",
                    convo,
-                   to_ms(before)) > 0;
+                   epoch_ms(before)) > 0;
 }
 
 // Returns the conversation row id, or nullopt if we have no such conversation.
@@ -958,7 +954,7 @@ void Client::_mark_read(const ConversationId& id, std::optional<sys_ms> up_to) {
 
         int64_t target;
         if (up_to)
-            target = to_ms(*up_to);
+            target = epoch_ms(*up_to);
         else {
             // "Everything" means every message that exists now, not every message that ever will:
             // parking the watermark at infinity would silently mark all future arrivals read.
@@ -2149,7 +2145,7 @@ std::vector<Message> Client::_messages(
            ORDER BY m.timestamp DESC, m.id DESC LIMIT ?4
     )"_format(MESSAGE_COLUMNS, visible),
             *convo,
-            to_ms(before->timestamp),
+            epoch_ms(before->timestamp),
             before->id,
             limit);
 }
@@ -2195,14 +2191,14 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     auto self = core.globals.session_id();
 
     SessionProtos::Content content;
-    content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
     // Set before the copies below, so both carry it: that is what makes it the identifier every
     // party agrees on, unlike a hash of copies that differ.
     auto msgid = new_msgid();
     content.set_msgid(msgid);
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
-    data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
+    data->set_timestamp(static_cast<uint64_t>(epoch_ms(now)));
 
     // Two artifacts: the copy the recipient gets, and the copy we deposit in our own swarm so that
     // our other devices see it.  They differ only in syncTarget, which is what tells those devices
@@ -2240,7 +2236,7 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
                 convo.id,
                 msgid,
                 account_id(c, self),
-                to_ms(now),
+                epoch_ms(now),
                 body,
                 static_cast<int>(SendState::pending),
                 to_self ? std::optional<int>{}
@@ -2377,11 +2373,11 @@ int64_t Client::_send_message(
     auto msgid = new_msgid();
 
     SessionProtos::Content content;
-    content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
     content.set_msgid(msgid);
     auto* data = content.mutable_datamessage();
     data->set_body(std::string{body});
-    data->set_timestamp(static_cast<uint64_t>(to_ms(now)));
+    data->set_timestamp(static_cast<uint64_t>(epoch_ms(now)));
 
     auto serialised = content.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
@@ -2405,7 +2401,7 @@ int64_t Client::_send_message(
                 convo.id,
                 msgid,
                 account_id(c, self),
-                to_ms(now),
+                epoch_ms(now),
                 body,
                 static_cast<int>(SendState::uploading),
                 to_self ? std::optional<int>{}
@@ -3067,13 +3063,13 @@ void Client::_record_saved(int64_t message_id, std::optional<size_t> index, sys_
         auto changed = index ? c.prepared_exec(
                                        "UPDATE message_attachments SET saved_at = ?"
                                        " WHERE message = ? AND idx = ?",
-                                       to_ms(when),
+                                       epoch_ms(when),
                                        message_id,
                                        static_cast<int64_t>(*index))
                              : c.prepared_exec(
                                        "UPDATE message_attachments SET saved_at = ?"
                                        " WHERE message = ?",
-                                       to_ms(when),
+                                       epoch_ms(when),
                                        message_id);
         if (changed == 0)
             return;
@@ -3116,7 +3112,7 @@ void Client::_notify_media_saved(int64_t message_id, size_t index) {
 
     SessionProtos::Content content;
     auto now = clock_now_ms();
-    content.set_sigtimestamp(static_cast<uint64_t>(to_ms(now)));
+    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
     content.set_msgid(new_msgid());
 
     auto* note = content.mutable_dataextractionnotification();
@@ -3472,7 +3468,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                            msg.hash,
                            sender,
                            outgoing ? 1 : 0,
-                           to_ms(ts),
+                           epoch_ms(ts),
                            data.body(),
                            // Retrieving it from a swarm is proof it got there, whichever device
                            // put it there.
@@ -3496,7 +3492,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                 WHERE id = ?1 AND ?2 > last_read
             )",
                         convo.id,
-                        to_ms(ts));
+                        epoch_ms(ts));
         }
 
         // Skipped for a self-send: the LokiProfile on one of those is our own, which belongs to the

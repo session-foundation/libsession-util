@@ -37,6 +37,11 @@ using namespace session::sqlite;
 using namespace oxen::log::literals;
 static auto cat = log::Cat("core");
 
+// How many recent hashes to keep per namespace per swarm node, as a position to fall back to when
+// the newest ones are deleted from the swarm.  Deleting more than this in a run costs one full
+// retrieve from that node, which is the same thing that happens today for any other reason.
+static constexpr int SWARM_HASH_HISTORY = 100;
+
 static cleared_b32 seed_from_words(
         std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
     auto n = words.size();
@@ -179,6 +184,7 @@ void Core::_poll() {
                 nlohmann::json requests = nlohmann::json::array();
                 {
                     auto conn = db.conn();
+
                     for (size_t i = 0; i < namespaces.size(); ++i) {
                         auto ns = namespaces[i];
                         auto ns_val = static_cast<int16_t>(ns);
@@ -193,11 +199,22 @@ void Core::_poll() {
                             params["signature"] = ns_sig[i];
                         }
 
+                        // The newest hash this node handed us that it still holds.  Derived rather
+                        // than stored so that deleting a hash from the swarm moves the cursor back
+                        // to its predecessor on its own, with nothing to remember to update.
+                        //
+                        // A NULL expiry is a node that did not tell us when it would drop the
+                        // message, which is unknown rather than expired: refusing to use it would
+                        // throw away a working cursor over a missing field.
                         auto last_hash = conn.prepared_maybe_get<std::string>(
-                                "SELECT last_hash FROM namespace_sync"
-                                " WHERE namespace = ? AND sn_pubkey = ?",
+                                R"(
+SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
+ WHERE h.namespace = ? AND n.pubkey = ? AND (h.expiry IS NULL OR h.expiry > ?)
+ ORDER BY h.id DESC LIMIT 1
+)",
                                 ns_val,
-                                node.remote_pubkey);
+                                node.remote_pubkey,
+                                epoch_ms(clock_now_ms()));
                         if (last_hash)
                             params["last_hash"] = *last_hash;
 
@@ -278,7 +295,6 @@ void Core::_handle_poll_response(
             // into them.
             std::vector<std::vector<std::byte>> messages_data;
             std::vector<SwarmMessage> swarm_messages;
-            std::string newest_hash;
 
             for (const auto& msg : *msgs_it) {
                 auto data_it = msg.find("data");
@@ -292,10 +308,8 @@ void Core::_handle_poll_response(
                 SwarmMessage swarm_msg;
                 swarm_msg.data = {decoded.data(), decoded.size()};
 
-                if (auto h = msg.find("hash"); h != msg.end() && h->is_string()) {
+                if (auto h = msg.find("hash"); h != msg.end() && h->is_string())
                     swarm_msg.hash = h->get<std::string>();
-                    newest_hash = swarm_msg.hash;
-                }
 
                 if (auto t = msg.find("timestamp"); t != msg.end() && t->is_number_integer())
                     swarm_msg.timestamp = from_epoch_ms(t->get<int64_t>());
@@ -313,15 +327,54 @@ void Core::_handle_poll_response(
                 // last_hash, so advancing past messages that threw would drop them permanently.
                 // Handling then dying before this point re-delivers the batch instead, so message
                 // handlers must tolerate seeing a message twice.
-                if (!newest_hash.empty())
+                //
+                // Every hash goes in, not just the ones that produced something we kept: the cursor
+                // is a position in what this node returned, so leaving out what we ignored would
+                // park it behind those and fetch them again on every poll.  Insertion order is the
+                // order the node returned them, which is what `id DESC` reads back.
+                conn.prepared_exec(
+                        "INSERT INTO swarm_nodes (pubkey) VALUES (?) ON CONFLICT DO NOTHING",
+                        sn_pubkey);
+                auto node_id = conn.prepared_get<int64_t>(
+                        "SELECT id FROM swarm_nodes WHERE pubkey = ?", sn_pubkey);
+
+                for (const auto& m : swarm_messages) {
+                    if (m.hash.empty())
+                        continue;
                     conn.prepared_exec(
                             R"(
-INSERT INTO namespace_sync (namespace, sn_pubkey, last_hash) VALUES (?, ?, ?)
-ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
+INSERT INTO swarm_hashes (namespace, node, hash, expiry) VALUES (?, ?, ?, ?)
+ON CONFLICT(namespace, node, hash) DO UPDATE SET expiry = max(expiry, excluded.expiry)
 )",
                             ns_val,
-                            sn_pubkey,
-                            newest_hash);
+                            node_id,
+                            m.hash,
+                            m.expiry.time_since_epoch().count() > 0
+                                    ? std::optional{epoch_ms(m.expiry)}
+                                    : std::nullopt);
+                }
+
+                // An expired hash is not a cursor: the node no longer holds the message to measure
+                // from.
+                conn.prepared_exec(
+                        "DELETE FROM swarm_hashes WHERE expiry IS NOT NULL AND expiry <= ?",
+                        epoch_ms(clock_now_ms()));
+
+                // And a cap on top of that, because expiry alone bounds this at every message in
+                // the retention window.  Only the newest entry is ever read; the rest exist solely
+                // to walk back past hashes deleted from the swarm, so keeping more than a run of
+                // deletions could plausibly cover buys nothing but disk.
+                conn.prepared_exec(
+                        R"(
+DELETE FROM swarm_hashes
+ WHERE namespace = ?1 AND node = ?2
+   AND id NOT IN (SELECT id FROM swarm_hashes
+                   WHERE namespace = ?1 AND node = ?2
+                   ORDER BY id DESC LIMIT ?3)
+)",
+                        ns_val,
+                        node_id,
+                        SWARM_HASH_HISTORY);
             }
         }
     } catch (const std::exception& e) {
