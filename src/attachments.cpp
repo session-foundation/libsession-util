@@ -2,6 +2,7 @@
 
 #include <nettle/aes.h>
 #include <nettle/cbc.h>
+#include <nettle/gcm.h>
 #include <nettle/hmac.h>
 #include <nettle/memops.h>
 #include <nettle/sha2.h>
@@ -407,6 +408,38 @@ std::vector<std::byte> decrypt(
     result.resize(actual);
 
     return result;
+}
+
+std::vector<std::byte> legacy_display_pic_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_DISPLAY_PIC_KEY_SIZE> key) {
+
+    if (encrypted.size() <= LEGACY_DISPLAY_PIC_NONCE_SIZE + LEGACY_DISPLAY_PIC_TAG_SIZE)
+        throw std::runtime_error{
+                "Display picture decryption failed: {} bytes cannot hold a nonce, a tag and any "
+                "data"_format(encrypted.size())};
+
+    struct gcm_aes256_ctx ctx;
+    gcm_aes256_set_key(&ctx, to_unsigned(key.data()));
+    gcm_aes256_set_iv(&ctx, LEGACY_DISPLAY_PIC_NONCE_SIZE, to_unsigned(encrypted.data()));
+
+    auto body = encrypted.subspan(LEGACY_DISPLAY_PIC_NONCE_SIZE);
+    auto tag_in = body.subspan(body.size() - LEGACY_DISPLAY_PIC_TAG_SIZE);
+    body = body.subspan(0, body.size() - LEGACY_DISPLAY_PIC_TAG_SIZE);
+
+    std::vector<std::byte> plaintext(body.size());
+    gcm_aes256_decrypt(
+            &ctx, body.size(), to_unsigned(plaintext.data()), to_unsigned(body.data()));
+
+    std::array<unsigned char, LEGACY_DISPLAY_PIC_TAG_SIZE> tag_out;
+    gcm_aes256_digest(&ctx, tag_out.size(), tag_out.data());
+
+    // Constant time, as everywhere else a MAC is compared: leaking where two tags first differ is
+    // what lets an attacker find a valid one a byte at a time.
+    if (sodium_memcmp(tag_out.data(), tag_in.data(), LEGACY_DISPLAY_PIC_TAG_SIZE) != 0)
+        throw std::runtime_error{"Display picture decryption failed: bad tag"};
+
+    return plaintext;
 }
 
 std::vector<std::byte> legacy_decrypt(

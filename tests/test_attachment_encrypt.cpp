@@ -711,3 +711,33 @@ TEST_CASE("Attachment encryption -- a key of our own", "[attachments][fixed-key]
             enc.start_encryption([](std::span<std::byte>) -> size_t { return 0; }),
             std::invalid_argument);
 }
+
+TEST_CASE("Display picture decryption -- the legacy GCM scheme", "[attachments][legacy-pic]") {
+    // Session has three at-rest formats and nothing in the bytes says which is which.  This is the
+    // one display pictures used before the stream scheme: AES-256-GCM, 32-byte key, nonce and tag
+    // carried in the data -- unrelated to the legacy *attachment* scheme, which is CBC with a
+    // bolted-on HMAC, a 64-byte key and a digest carried in the protobuf.
+    //
+    // The vector is from python-cryptography rather than from our own encryptor, so this cannot
+    // pass by agreeing with itself.
+    constexpr auto key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"_hex_b;
+    constexpr auto blob =
+            "000102030405060708090a0b2622b272b695ae7af461e7e2d29d0d1fe6faa7559c173a1b5d0389fc903a"
+            "65df450ae8c0b3070d5d413b790c"_hex_b;
+    constexpr auto expected = "a display picture, allegedly"sv;
+
+    auto plain = attachment::legacy_display_pic_decrypt(blob, key);
+    CHECK(std::string_view{reinterpret_cast<const char*>(plain.data()), plain.size()} == expected);
+
+    // A flipped bit anywhere fails on the tag rather than yielding rubbish.
+    std::vector<std::byte> tampered{blob.begin(), blob.end()};
+    tampered[20] ^= std::byte{0x01};
+    CHECK_THROWS(attachment::legacy_display_pic_decrypt(tampered, key));
+
+    // As does the wrong key.
+    constexpr auto wrong = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"_hex_b;
+    CHECK_THROWS(attachment::legacy_display_pic_decrypt(blob, wrong));
+
+    // Too short to hold a nonce and a tag is refused rather than read past.
+    CHECK_THROWS(attachment::legacy_display_pic_decrypt(blob.subspan(0, 27), key));
+}

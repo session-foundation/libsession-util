@@ -307,6 +307,46 @@ std::vector<std::byte> legacy_decrypt(
         std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
         size_t unpadded_size);
 
+/// Sizes of the legacy *display picture* scheme, which is not the legacy attachment one above:
+/// AES-256-GCM under a 32-byte key, with a 12-byte nonce and the 16-byte tag both carried in the
+/// data.
+constexpr size_t LEGACY_DISPLAY_PIC_KEY_SIZE = 32;
+constexpr size_t LEGACY_DISPLAY_PIC_NONCE_SIZE = 12;
+constexpr size_t LEGACY_DISPLAY_PIC_TAG_SIZE = 16;
+
+/// API: crypto/attachment::legacy_display_pic_decrypt
+///
+/// Decrypts a display picture — a profile or group avatar — encrypted with the scheme Session used
+/// before the stream one.
+///
+/// "Display picture" rather than "profile picture" because it is both: the other clients apply this
+/// to a group's avatar as well as a person's.  It has nothing to do with picture *attachments*,
+/// which are attachments and use the attachment scheme.
+///
+/// This is a *third* format, unrelated to `legacy_decrypt` above despite both being "the old way".
+/// Attachments used AES-256-CBC with a bolted-on HMAC, a 64-byte key and a digest carried
+/// separately; display pictures used AES-256-GCM with a 32-byte key and nothing out of band.  Same
+/// file server, same clients, same era, two schemes — Session inherited both from Signal, where
+/// attachments and profile material were unrelated subsystems, and the stream scheme is what
+/// finally unified them.
+///
+/// The layout is `nonce || AES-256-GCM(plaintext) || tag`, and nothing in it says which format it
+/// is: that is decided by what was being downloaded and by whether its url carried the `d` fragment
+/// that means stream encryption.  Which is why choosing belongs in one place — see
+/// `Client::_download_decrypted` — rather than at each call site.
+///
+/// Inputs:
+/// - `encrypted` -- the downloaded file, entire.
+/// - `key` -- the 32-byte key from the profile pic or group info.
+///
+/// Outputs:
+/// - std::vector<std::byte> of decrypted data.  No padding is involved in this scheme.
+///
+/// Throws std::runtime_error if the tag does not verify or the input is too short to hold one.
+std::vector<std::byte> legacy_display_pic_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_DISPLAY_PIC_KEY_SIZE> key);
+
 /// API: crypto/attachment::Decryptor
 ///
 /// Object-based interfaced to streaming decryption.  The basic usage is to construct the object
