@@ -658,10 +658,16 @@ void Client::_profile_picture(
         }
     }
 
-    auto report = [this, on_progress](int64_t done, int64_t total, std::optional<int> r) {
-        if (on_progress)
+    // Left empty when there is nothing to report to, so the download skips the call rather than
+    // making one that decides it has nothing to do.
+    std::function<void(int64_t, int64_t, std::optional<int>)> report;
+    if (on_progress)
+        report = [this, on_progress = std::move(on_progress)](
+                         int64_t done, int64_t total, std::optional<int> r) {
+            // Copied rather than moved into the hop: this fires once per chunk, and moving would
+            // leave the next call with nothing to report to.
             _dispatch_out([on_progress, done, total, r] { on_progress(done, total, r); });
-    };
+        };
 
     // Accumulated rather than streamed to disk: a caller asked for the bytes, so they are going to
     // be in memory regardless, and a picture is small enough that holding it is not the cost the
@@ -3250,12 +3256,15 @@ void Client::_save_attachment(
     state->partial = open_partial(state->out, state->dest);
 
     // The download reports unindexed; a caller watching several attachments needs to know which.
-    auto report = [this, on_progress, index](int64_t done, int64_t total, std::optional<int> r) {
-        if (on_progress)
+    // Left empty when nobody is watching, so the download makes no call at all.
+    std::function<void(int64_t, int64_t, std::optional<int>)> report;
+    if (on_progress)
+        report = [this, on_progress = std::move(on_progress), index](
+                         int64_t done, int64_t total, std::optional<int> r) {
             _dispatch_out([on_progress, index, done, total, r] {
                 on_progress(index, done, total, r);
             });
-    };
+        };
 
     _download_decrypted(
             *url,
