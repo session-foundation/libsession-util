@@ -744,68 +744,43 @@ void Client::_profile_picture(
 
     auto pic = convo->picture();
 
-    // Taken here, on the loop, because generating it touches globals -- and taking it now rather
-    // than when the download finishes is also what lets the write happen where the bytes are, see
-    // below.
-    std::optional<b32> cache_key;
-    if (!_cache_dir.empty())
-        cache_key = _cache_encryption_key();
+    // A caller of this deals in an optional, because an absent picture is not an error -- but that
+    // case was answered above, so from here anything that is not an error is a picture.
+    failable_function<void(std::vector<std::byte>)> bytes;
+    if (cb)
+        bytes = [cb = std::move(cb)](
+                        std::optional<std::string> error, std::vector<std::byte> data) {
+            if (error)
+                cb(std::move(error), std::nullopt);
+            else
+                cb(std::nullopt, std::move(data));
+        };
 
-    if (cache_key) {
-        auto file = cache::path_for(_cache_dir, cache::PROFILE_DIR, pic.url);
-        if (auto cached = cache::read(file, *cache_key)) {
-            // No progress reported: there is nothing to watch, and a bar that flashes for a cached
-            // read is worse than none.
-            _report(cb, std::optional<std::string>{}, std::move(cached));
-            return;
+    _fetch_cached(
+            {pic.url, pic.key, {}, std::nullopt, DownloadKind::display_pic, cache::PROFILE_DIR},
+            on_progress ? _dispatch_progress(std::move(on_progress)) : nullptr,
+            std::move(bytes),
+            // Nothing on a hit: a picture is not indexed, so there is no use to record, and no
+            // progress to report either -- a bar that flashes for a local read is worse than none.
+            nullptr,
+            _store_picture(pic.url));
+}
+
+// Writes a fetched picture into the cache, or nothing at all when there is nowhere to put it.
+std::function<void(std::span<const std::byte>)> Client::_store_picture(std::string url) {
+    if (_cache_dir.empty())
+        return nullptr;
+
+    return [this, url = std::move(url), key = _cache_encryption_key()](
+                   std::span<const std::byte> data) {
+        try {
+            cache::write(cache::path_for(_cache_dir, cache::PROFILE_DIR, url), key, data);
+        } catch (const std::exception& e) {
+            // A cache that cannot be written is a cache that misses next time, which is not worth
+            // failing the caller's fetch over.
+            log::warning(cat, "Could not cache a profile picture: {}", e.what());
         }
-    }
-
-    auto report = _dispatch_progress(std::move(on_progress));
-
-    // Accumulated rather than streamed to disk: a caller asked for the bytes, so they are going to
-    // be in memory regardless, and a picture is small enough that holding it is not the cost the
-    // cache exists to avoid.
-    auto plain = std::make_shared<std::vector<std::byte>>();
-
-    _download_decrypted(
-            pic.url,
-            DownloadKind::display_pic,
-            pic.key,
-            {},
-            std::nullopt,
-            [plain](std::span<const std::byte> chunk) {
-                plain->insert(plain->end(), chunk.begin(), chunk.end());
-            },
-            report,
-            [this, plain, url = pic.url, cache_key, cb = std::move(cb)](
-                    std::optional<std::string> error) {
-                if (error) {
-                    _report(cb, std::move(error), std::nullopt);
-                    return;
-                }
-
-                // Written here, before the plaintext is handed over, rather than deferred to the
-                // loop: reporting moves the bytes out, so anything reading them afterwards would
-                // find an empty vector and cache that.
-                //
-                // Only on success, too: what a failed decryption produced is not the picture, and
-                // storing it would serve it back forever without another attempt.
-                if (cache_key) {
-                    try {
-                        cache::write(
-                                cache::path_for(_cache_dir, cache::PROFILE_DIR, url),
-                                *cache_key,
-                                *plain);
-                    } catch (const std::exception& e) {
-                        // A cache that cannot be written is a cache that misses next time, which is
-                        // not worth failing the caller's fetch over.
-                        log::warning(cat, "Could not cache a profile picture: {}", e.what());
-                    }
-                }
-
-                _report(cb, std::optional<std::string>{}, std::move(*plain));
-            });
+    };
 }
 
 namespace {
@@ -917,39 +892,62 @@ void Client::_attachment_data(
 
     auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
 
-    std::optional<b32> cache_key;
-    if (!_cache_dir.empty())
-        cache_key = _cache_encryption_key();
-
-    auto name = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url).filename().string();
-
-    if (cache_key) {
-        auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url);
-        if (auto cached = cache::read(file, *cache_key)) {
-            // Nothing to report: there is no transfer, and a progress bar for a local read is a
-            // flicker that means nothing.  The caller gets the bytes.
-            _touch_cached(name);
-            _report(cb, std::optional<std::string>{}, std::move(*cached));
-            return;
-        }
-    }
-
     // The caller's own progress reporting, identified and hopped out to their thread.
-    std::function<void(int64_t, int64_t, std::optional<int>)> identified;
+    std::function<void(int64_t, int64_t, std::optional<int>)> progress;
     if (on_progress)
-        identified = _dispatch_progress(
+        progress = _dispatch_progress(
                 [on_progress = std::move(on_progress), message_id, index](
                         int64_t done, int64_t total, std::optional<int> r) {
                     on_progress(AttachmentProgress{message_id, index, done, total, r});
                 });
 
+    std::function<void(std::span<const std::byte>)> store;
+    if (!_cache_dir.empty())
+        store = [this, url, k = _cache_encryption_key()](std::span<const std::byte> data) {
+            _cache_attachment(url, k, data);
+        };
+
+    _fetch_cached(
+            {url,
+             std::move(key),
+             std::move(digest),
+             claimed_size,
+             DownloadKind::attachment,
+             cache::ATTACHMENT_DIR},
+            std::move(progress),
+            std::move(cb),
+            [this](const std::string& name) { _touch_cached(name); },
+            std::move(store));
+}
+
+void Client::_fetch_cached(
+        FetchTarget target,
+        std::function<void(int64_t, int64_t, std::optional<int>)> progress,
+        failable_function<void(std::vector<std::byte>)> cb,
+        std::function<void(const std::string&)> on_hit,
+        std::function<void(std::span<const std::byte>)> store) {
+
+    auto name = cache::path_for(_cache_dir, target.dir, target.url).filename().string();
+
+    if (!_cache_dir.empty()) {
+        auto file = cache::path_for(_cache_dir, target.dir, target.url);
+        if (auto cached = cache::read(file, _cache_encryption_key())) {
+            // Nothing to report: there is no transfer, and a progress bar for a local read is a
+            // flicker that means nothing.  The caller gets the bytes.
+            if (on_hit)
+                on_hit(name);
+            _report(cb, std::optional<std::string>{}, std::move(*cached));
+            return;
+        }
+    }
+
     // Already being fetched: wait on that rather than asking for the same bytes again.
     if (auto found = _in_flight.find(name); found != _in_flight.end()) {
-        if (identified) {
+        if (progress) {
             // Told where it has got to before anything else happens, so a display that arrives
             // halfway through starts from halfway rather than from nothing.
-            identified(found->second.done, found->second.total, std::nullopt);
-            found->second.progress.push_back(std::move(identified));
+            progress(found->second.done, found->second.total, std::nullopt);
+            found->second.progress.push_back(std::move(progress));
         }
         if (cb)
             found->second.waiting.push_back(std::move(cb));
@@ -958,18 +956,18 @@ void Client::_attachment_data(
 
     auto& entry = _in_flight[name];
     entry.plain = std::make_shared<std::vector<std::byte>>();
-    if (identified)
-        entry.progress.push_back(std::move(identified));
+    if (progress)
+        entry.progress.push_back(std::move(progress));
     if (cb)
         entry.waiting.push_back(std::move(cb));
     auto plain = entry.plain;
 
     _download_decrypted(
-            url,
-            DownloadKind::attachment,
-            std::move(key),
-            std::move(digest),
-            claimed_size,
+            target.url,
+            target.kind,
+            std::move(target.key),
+            std::move(target.digest),
+            target.claimed_size,
             [plain](std::span<const std::byte> chunk) {
                 plain->insert(plain->end(), chunk.begin(), chunk.end());
             },
@@ -986,28 +984,26 @@ void Client::_attachment_data(
                         p(done, total, r);
                 });
             },
-            [this, name, url, cache_key](std::optional<std::string> error) {
-                loop.call([this, name, url, cache_key, error = std::move(error)]() mutable {
+            [this, name, store = std::move(store)](std::optional<std::string> error) {
+                loop.call([this, name, store, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
 
-                    // Cached before anyone is told, since a waiter may go straight back to the
+                    // Stored before anyone is told, since a waiter may go straight back to the
                     // cache -- and only on success, because what a failed download produced is not
                     // the file.
-                    if (!error && cache_key)
-                        _cache_attachment(url, *cache_key, *found->second.plain);
+                    if (!error && store)
+                        store(*found->second.plain);
 
-                    // Lifted out before the callbacks run: one of them may ask for this same
-                    // attachment again, and it must find a finished transfer rather than joining
-                    // one that is about to be erased.
+                    // Lifted out before the callbacks run: one of them may ask for this same file
+                    // again, and it must find a finished transfer rather than joining one that is
+                    // about to be erased.
                     auto entry = std::move(found->second);
                     _in_flight.erase(found);
 
                     for (const auto& w : entry.waiting)
-                        _report(w,
-                                error,
-                                error ? std::vector<std::byte>{} : *entry.plain);
+                        _report(w, error, error ? std::vector<std::byte>{} : *entry.plain);
                 });
             });
 }

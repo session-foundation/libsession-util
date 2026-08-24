@@ -804,6 +804,7 @@ class Client {
             std::function<void(const AttachmentProgress&)> on_progress,
             failable_function<void(std::vector<std::byte>)> cb);
 
+
     // Decides what an arriving message's attachments are worth fetching unasked, sets whether it is
     // shown as a gallery, and starts whatever it decided on.  Does nothing without a cache
     // directory: the point of fetching early is to have the file to hand, and with nowhere to keep
@@ -918,6 +919,40 @@ class Client {
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
             std::function<void(std::optional<std::string> error)> on_done);
+
+    // What a fetch needs to know about the file it is after, independent of who wants it.
+    struct FetchTarget {
+        std::string url;
+        std::vector<std::byte> key, digest;
+        std::optional<int64_t> claimed_size;
+        DownloadKind kind;
+        std::string_view dir;  // cache::ATTACHMENT_DIR or cache::PROFILE_DIR
+    };
+
+    // Serves a file from the cache, joins a fetch of it already running, or starts one.
+    //
+    // The joining is what this exists for.  Two things want the same file routinely -- an arrival
+    // starts a download and the display then asks for the very thing being downloaded -- so a second
+    // request attaches to the first, picking up its progress from wherever it has reached, rather
+    // than fetching the same bytes twice and caching them twice.
+    //
+    // `on_hit` runs when the cache answered and `store` after a fetch completes, both on the loop.
+    // They are the whole of the difference between a cached attachment, which is indexed and
+    // evictable, and a cached picture, which is neither.
+    void _fetch_cached(
+            FetchTarget target,
+            std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
+            failable_function<void(std::vector<std::byte>)> cb,
+            std::function<void(const std::string& name)> on_hit,
+            std::function<void(std::span<const std::byte>)> store);
+
+    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.
+    std::function<void(std::span<const std::byte>)> _store_picture(std::string url);
+
+    // Fetches a picture we have just learned the url of, so that it is to hand before anything asks
+    // to draw it.  Unconditional: unlike an attachment there is no setting, because a picture is
+    // small and is wanted the moment the conversation is shown.
+    void _fetch_picture(int64_t account);
 
     // Starts the download behind save_attachment.  Everything after the row lookup happens off the
     // loop, on the network's thread: the file is decrypted and written there, and nothing about it
