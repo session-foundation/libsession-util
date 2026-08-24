@@ -445,7 +445,9 @@ std::vector<std::byte> legacy_display_pic_decrypt(
 std::vector<std::byte> legacy_decrypt(
         std::span<const std::byte> encrypted,
         std::span<const std::byte, LEGACY_KEY_SIZE> key,
-        std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
+        // Still taken, and still required to be the right length by callers, because every other
+        // client needs one sent; see below for why nothing here reads it.
+        [[maybe_unused]] std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
         size_t unpadded_size) {
 
     // Bounded by what the file server will actually store, so a caller cannot be talked into
@@ -480,17 +482,35 @@ std::vector<std::byte> legacy_decrypt(
     if (!memeql_sec(expected_mac.data(), mac.data(), LEGACY_MAC_SIZE))
         throw std::runtime_error{"Legacy attachment decryption failed: HMAC mismatch"};
 
-    // The digest covers the MAC as well, and is the sender's own claim carried outside the file, so
-    // it is what ties these bytes to the message that pointed at them.
-    std::array<std::byte, LEGACY_DIGEST_SIZE> expected_digest;
-    {
-        sha256_ctx ctx;
-        sha256_init(&ctx);
-        sha256_update(&ctx, encrypted.size(), to_unsigned(encrypted.data()));
-        sha256_digest(&ctx, expected_digest.size(), to_unsigned(expected_digest.data()));
-    }
-    if (!memeql_sec(expected_digest.data(), digest.data(), LEGACY_DIGEST_SIZE))
-        throw std::runtime_error{"Legacy attachment decryption failed: digest mismatch"};
+    // Not verified, deliberately.  The pointer also carries a SHA-256 over the whole blob -- IV,
+    // ciphertext and the MAC above -- which every other Session client requires and checks, and
+    // which is worth nothing here.
+    //
+    // The HMAC just verified covers the same bytes under a key that only the sender has.  The
+    // digest is keyless and travels in the same pointer as that key, so it is not a second opinion
+    // from a second party: anyone able to forge one could forge both, and any alteration that would
+    // fail it -- substituted file, tampered ciphertext, truncation, a rewritten MAC -- fails the
+    // HMAC first and never reaches this. It catches nothing the line above did not already catch,
+    // at the cost of hashing the entire attachment a second time.
+    //
+    // It exists because Session inherited Signal's attachment pointer whole, where a digest served
+    // purposes Session does not have.  We still *send* one, and still require the field to be
+    // present and the right length, because the other clients fail without it -- and iOS does worse
+    // than fail, writing the ciphertext to disk as though it were the file.
+    //
+    // Left here rather than deleted so that the reasoning is visible next to what it is about, and
+    // so restoring it is a matter of removing comment markers if that reasoning ever turns out to
+    // be wrong.
+    //
+    // std::array<std::byte, LEGACY_DIGEST_SIZE> expected_digest;
+    // {
+    //     sha256_ctx ctx;
+    //     sha256_init(&ctx);
+    //     sha256_update(&ctx, encrypted.size(), to_unsigned(encrypted.data()));
+    //     sha256_digest(&ctx, expected_digest.size(), to_unsigned(expected_digest.data()));
+    // }
+    // if (!memeql_sec(expected_digest.data(), digest.data(), LEGACY_DIGEST_SIZE))
+    //     throw std::runtime_error{"Legacy attachment decryption failed: digest mismatch"};
 
     std::vector<std::byte> plaintext;
     plaintext.resize(body_size);

@@ -629,14 +629,18 @@ TEST_CASE("legacy attachment decryption rejects bad input", "[attachments][legac
         CHECK_THROWS(attachment::legacy_decrypt(
                 tampered(LEGACY_BLOB, at), legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size()));
 
-    // A correct file with the wrong digest is refused too: the digest is the message's own claim
-    // about which bytes it meant, so a mismatch means this is not the file that was pointed at.
+    // A correct file with a wrong digest is *accepted*, deliberately: we do not verify it.  The
+    // HMAC checked above covers the same bytes under a key only the sender has, so anything a bad
+    // digest could catch has already failed -- see the reasoning where that check is commented out.
+    //
+    // Asserted rather than left implicit because it is a decision, and the natural instinct on
+    // finding an unverified authenticator is to start verifying it.
     auto wrong_digest = tampered(LEGACY_DIGEST, 5);
-    CHECK_THROWS(attachment::legacy_decrypt(
-            LEGACY_BLOB,
-            legacy_key(),
-            std::span<const std::byte, attachment::LEGACY_DIGEST_SIZE>{wrong_digest},
-            LEGACY_PLAINTEXT.size()));
+    CHECK(attachment::legacy_decrypt(
+                  LEGACY_BLOB,
+                  legacy_key(),
+                  std::span<const std::byte, attachment::LEGACY_DIGEST_SIZE>{wrong_digest},
+                  LEGACY_PLAINTEXT.size()) == to_vector<std::byte>(LEGACY_PLAINTEXT));
 
     // The one a hostile sender controls directly: a size larger than what was decrypted. Refused
     // rather than clamped, since the pointer is then lying about its own file.
