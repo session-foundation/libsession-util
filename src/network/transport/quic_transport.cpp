@@ -145,10 +145,13 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
 // MARK: Internal Logic
 
 void QuicTransport::_recreate_endpoint() {
+    // The optional must CONTAIN the option to have any effect: libquic's optional-taking
+    // handle_ep_opt overload does nothing when the optional is empty, so a default-constructed
+    // std::optional<disable_mtu_discovery>{} silently leaves discovery enabled.
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
             quic::Address{},
-            (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
+            (_config.disable_mtu_discovery ? std::make_optional<quic::opt::disable_mtu_discovery>()
                                            : std::nullopt));
 }
 
