@@ -131,6 +131,14 @@ void Conversation::set_expiry(config::expiration_mode mode, std::chrono::seconds
     _client->loop.call_get([this, mode, timer] { _client->_set_expiry(id, mode, timer); });
 }
 
+void Conversation::set_auto_download(AutoDownload mode, failable_function<void()> cb) {
+    _client->_async([c = _client, id = id, mode] { c->_set_auto_download(id, mode); },
+                    std::move(cb));
+}
+void Conversation::set_auto_download(AutoDownload mode, wait_t) {
+    _client->loop.call_get([this, mode] { _client->_set_auto_download(id, mode); });
+}
+
 // -- Sending ------------------------------------------------------------------------------------
 
 void Conversation::send_message(

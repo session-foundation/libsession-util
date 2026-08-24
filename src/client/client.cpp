@@ -968,7 +968,7 @@ static const auto CONVO_COLUMNS = R"(
            c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
            c.marked_unread, coalesce(ct.blocked, 0), a.name, ct.nickname,
            c.notifications, c.mute_until, c.exp_mode, c.exp_timer,
-           a.profile_pic_url, a.profile_pic_key
+           a.profile_pic_url, a.profile_pic_key, c.auto_download
     {}
 )"_format(SUBJECT_JOIN);
 
@@ -987,7 +987,7 @@ static std::vector<AnyConversation> query_conversations(
     std::vector<AnyConversation> out;
     for (auto [convo, sid, gid, url, room, display_name, activity, preview, unread, priority,
                approved, approved_me, marked_unread, blocked, name, nickname, notifications,
-               mute_until, exp_mode, exp_timer, pic_url, pic_key] :
+               mute_until, exp_mode, exp_timer, pic_url, pic_key, auto_download] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -1010,8 +1010,11 @@ static std::vector<AnyConversation> query_conversations(
                  int,
                  int64_t,
                  std::optional<std::string>,
-                 std::optional<sqlite::blob>>(query, bind...)) {
+                 std::optional<sqlite::blob>,
+                 std::optional<int>>(query, bind...)) {
         Conversation base{client, subject_to_id(convo, sid, gid, url, room)};
+        if (auto_download)
+            base.auto_download = static_cast<AutoDownload>(*auto_download);
         if (pic_url && pic_key) {
             base.picture.url = *pic_url;
             base.picture.key.assign(pic_key->begin(), pic_key->end());
@@ -1258,6 +1261,32 @@ void Client::_set_expiry(
         _sync_conversation(id);
         _touch(id);
     }
+}
+
+void Client::_set_auto_download(const ConversationId& id, AutoDownload mode) {
+    int changed = 0;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+
+        auto convo = find_conversation(c, id);
+        if (!convo)
+            return;
+
+        changed = c.prepared_exec(
+                R"(
+            UPDATE conversations SET auto_download = ?2
+            WHERE id = ?1 AND auto_download IS NOT ?2
+        )",
+                *convo,
+                static_cast<int>(mode));
+        tx.commit();
+    }
+    // No `_sync_conversation`: this one is ours alone.  Every other setting here is derived into a
+    // config on the way out, and putting this in one would publish a decision about this machine's
+    // disk to every other device on the account.
+    if (changed > 0)
+        _touch(id);
 }
 
 void Client::_set_nickname(const ConversationId& id, std::string_view nickname) {

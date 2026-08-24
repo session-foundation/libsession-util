@@ -606,6 +606,7 @@ class Client {
     void _set_mute_until(const ConversationId& id, std::chrono::sys_seconds until);
     void _set_expiry(
             const ConversationId& id, config::expiration_mode mode, std::chrono::seconds timer);
+    void _set_auto_download(const ConversationId& id, AutoDownload mode);
     void _set_nickname(const ConversationId& id, std::string_view nickname);
 
     // One conversation-row column, updated where it differs and re-derived into the config if it

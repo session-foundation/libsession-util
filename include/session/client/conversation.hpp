@@ -107,6 +107,16 @@ class Conversation {
     /// is wired up today, so this is empty for a group or community until that lands.
     config::profile_pic picture;
 
+    /// What to fetch from this conversation without being asked.
+    ///
+    /// Unset means nobody has been asked yet, which is a different thing from having been asked and
+    /// said no: Session asks within a conversation the first time and remembers the answer, and a
+    /// client can only do that if it can tell the two apart.  Nothing is fetched while it is unset.
+    ///
+    /// Device-local and never synced.  Auto-downloading everything on a desktop and nothing on a
+    /// phone is the case this exists for.
+    std::optional<AutoDownload> auto_download;
+
     /// The display name if known, otherwise the conversation's string id — a reasonable default
     /// for a caller that has no better fallback of its own.
     std::string name_or_id() const { return display_name.empty() ? id.to_string() : display_name; }
@@ -214,6 +224,18 @@ class Conversation {
             std::chrono::seconds timer,
             failable_function<void()> cb);
     void set_expiry(config::expiration_mode mode, std::chrono::seconds timer, wait_t);
+
+    /// Sets what this conversation fetches without being asked.
+    ///
+    /// Device-local: unlike every other setting here, this one does not follow the account, because
+    /// it is about what this machine's bandwidth and disk are for.  Auto-downloading everything on
+    /// a desktop and nothing on a phone is the case it exists for.
+    ///
+    /// Calling this is also what records that the question has been asked at all, so a client that
+    /// prompts on first use should call it with whatever answer it was given — `none` included,
+    /// since that is not the same as never having asked, and only the latter should prompt again.
+    void set_auto_download(AutoDownload mode, failable_function<void()> cb);
+    void set_auto_download(AutoDownload mode, wait_t);
 
     // -- Sending ------------------------------------------------------------------------------
 
@@ -464,6 +486,7 @@ class AnyConversation {
     config::expiration_mode exp_mode() const { return base().exp_mode; }
     std::chrono::seconds exp_timer() const { return base().exp_timer; }
     const config::profile_pic& picture() const { return base().picture; }
+    std::optional<AutoDownload> auto_download() const { return base().auto_download; }
     std::string name_or_id() const { return base().name_or_id(); }
 
     /// The kind, or nullptr if it is not that one.  This is how a caller asks a question only one
@@ -495,6 +518,7 @@ class AnyConversation {
     SESSION_CONVO_FORWARD(set_notifications)
     SESSION_CONVO_FORWARD(set_mute_until)
     SESSION_CONVO_FORWARD(set_expiry)
+    SESSION_CONVO_FORWARD(set_auto_download)
     SESSION_CONVO_FORWARD(send_message)
     SESSION_CONVO_FORWARD(clear_messages)
     SESSION_CONVO_FORWARD(delete_conversation)

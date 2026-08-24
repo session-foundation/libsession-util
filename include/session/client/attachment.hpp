@@ -60,6 +60,17 @@ struct OutgoingAttachment {
 /// attachment they are the sender's claims: nothing here has been checked against the file, which
 /// has usually not been fetched at all.  In particular `content_type` and `filename` are chosen by
 /// whoever sent it, so treat them as display hints rather than as facts about the bytes.
+/// What a conversation fetches without being asked.
+///
+/// `image_attachments` rather than "images" because a display picture is an image too and is not
+/// governed by this: it is always fetched, whatever this says.  This is only ever about files sent
+/// with a message.
+enum class AutoDownload : int {
+    none = 0,               ///< Nothing; every attachment waits to be asked for.
+    image_attachments = 1,  ///< Attachments whose content type is an image.
+    all = 2,                ///< Every attachment.
+};
+
 /// How an attachment transfer is going.
 ///
 /// Reported two ways, for the two kinds of transfer: handed directly to whoever called

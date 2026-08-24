@@ -157,3 +157,37 @@ TEST_CASE("Client: every conversation kind starts with its base", "[client][conv
     CHECK(static_cast<const void*>(&community) == static_cast<const Conversation*>(&community));
 }
 
+
+TEST_CASE("Client: auto-download is per conversation and stays here", "[client][convos]") {
+    TempClient c;
+    SenderKeys them;
+    auto id = ConversationId::dm(them.session_id);
+    c->open_dm(id, wait);
+
+    // Unset means nobody has been asked, which is what a client prompts on.  It is not `none`.
+    CHECK_FALSE(c->conversation(id, wait)->auto_download().has_value());
+
+    c->conversation(id, wait)->set_auto_download(AutoDownload::image_attachments, wait);
+    CHECK(c->conversation(id, wait)->auto_download() == AutoDownload::image_attachments);
+
+    // Answering "none" is an answer: it records that the question was asked, so a client that
+    // prompts when unset does not prompt again.
+    c->conversation(id, wait)->set_auto_download(AutoDownload::none, wait);
+    auto after = c->conversation(id, wait)->auto_download();
+    REQUIRE(after.has_value());
+    CHECK(*after == AutoDownload::none);
+
+    // Device-local: nothing about it reaches the config that follows the account.  Checked by
+    // deriving the contact outward and finding the config unchanged -- if this were synced, the
+    // setting above would have dirtied it.
+    auto& contacts = c->core.configs.contacts();
+    TestHelper::sync_contact(*c.client, id);
+    auto before_push = contacts.needs_push();
+    c->conversation(id, wait)->set_auto_download(AutoDownload::all, wait);
+    TestHelper::sync_contact(*c.client, id);
+    CHECK(contacts.needs_push() == before_push);
+
+    // And it survives a restart, being a stored property rather than a session's opinion.
+    c.reopen();
+    CHECK(c->conversation(id, wait)->auto_download() == AutoDownload::all);
+}
