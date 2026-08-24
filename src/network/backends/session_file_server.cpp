@@ -73,7 +73,23 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
         return std::nullopt;
 
     info.scheme = std::string{match->base.substr(0, scheme_end)};
-    info.host = match->base.substr(scheme_end + 3);
+
+    // `to_request` builds a `ServerDestination` from host and port SEPARATELY, so a port left inside
+    // the host reaches the network layer as a valid-looking hostname pointing nowhere.
+    auto authority = match->base.substr(scheme_end + 3);
+    auto port_sep = authority.rfind(':');
+
+    if (port_sep != std::string_view::npos) {
+        // `parse_int` requires the WHOLE string to be consumed, so an authority that merely contains
+        // a colon keeps it as part of the host.
+        uint16_t parsed_port = 0;
+        if (quic::parse_int(authority.substr(port_sep + 1), parsed_port) && parsed_port != 0) {
+            info.port = parsed_port;
+            authority = authority.substr(0, port_sep);
+        }
+    }
+
+    info.host = std::string{authority};
     info.wants_stream_decryption = false;
 
     // Parse fragments if present (p=... and/or d)
@@ -98,13 +114,25 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     return info;
 }
 
+// The port a url does not need to state, because the scheme already implies it.
+static uint16_t default_port_for_scheme(std::string_view scheme) {
+    return (scheme == "https" ? 443 : 80);
+}
+
 std::string generate_download_url(std::string_view file_id, const config::FileServer& config) {
     const auto has_custom_pubkey = (config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex);
 
+    // Omitted when the scheme already implies it, so urls for the default file server are
+    // byte-identical to those any other client produces for it.
+    const auto port_suffix =
+            (config.port == default_port_for_scheme(config.scheme) ? ""
+                                                                   : fmt::format(":{}", config.port));
+
     auto buf = fmt::format(
-            "{}://{}/{}",
+            "{}://{}{}/{}",
             config.scheme,
             config.host,
+            port_suffix,
             fmt::format(file_server::ENDPOINT_FILE_INDIVIDUAL, file_id));
 
     if (config.use_stream_encryption || has_custom_pubkey) {
@@ -203,13 +231,17 @@ Request to_request(
             (download_info->custom_pubkey_hex.has_value() ? *download_info->custom_pubkey_hex
                                                           : config.pubkey_hex);
 
+    // The url's port, not the local config's: the file lives on the SENDER's file server, which the
+    // recipient may never have heard of.
+    uint16_t port = download_info->port.value_or(config.port);
+
     return Request{
             download_id,
             ServerDestination{
                     std::move(scheme),
                     std::move(host),
                     x25519_pubkey::from_hex(std::move(pubkey_hex)),
-                    config.port,
+                    port,
                     std::nullopt,
                     "GET"},
             fmt::format("{}/{}", file_server::ENDPOINT_FILE, file_id),
@@ -369,6 +401,7 @@ LIBSESSION_C_API bool session_file_server_parse_download_url(
 
     copy(out->scheme, info->scheme);
     copy(out->host, info->host);
+    out->port = info->port.value_or(0);  // 0 means the scheme's default
     copy(out->file_id, info->file_id);
     copy(out->custom_pubkey_hex, info->custom_pubkey_hex.value_or(""));
     out->wants_stream_decryption = info->wants_stream_decryption;
@@ -379,6 +412,7 @@ LIBSESSION_C_API bool session_file_server_generate_download_url(
         const char* file_id,
         const char* scheme,
         const char* host,
+        uint16_t port,
         const char* pubkey_hex,
         bool use_stream_encryption,
         char* out_url,
@@ -391,6 +425,8 @@ LIBSESSION_C_API bool session_file_server_generate_download_url(
         config.scheme = scheme;
     if (host)
         config.host = host;
+    if (port != 0)
+        config.port = port;
     if (pubkey_hex)
         config.pubkey_hex = pubkey_hex;
     config.use_stream_encryption = use_stream_encryption;

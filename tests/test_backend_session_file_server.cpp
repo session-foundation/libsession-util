@@ -98,7 +98,7 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              12345,
              true});
     CHECK(url ==
-          "http://example.com/file/"
+          "http://example.com:123/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d");
 
     // Omits the stream encryption fragment when disabled
@@ -111,24 +111,74 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              12345,
              false});
     CHECK(url ==
-          "http://example.com/file/"
+          "http://example.com:123/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000");
 
     // Omits the pubkey when it matches the default pubkey
     url = file_server::generate_download_url(
             "abc123"sv,
             {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, true});
-    CHECK(url == "http://example.com/file/abc123#d");
+    CHECK(url == "http://example.com:123/file/abc123#d");
 
     // Omits all fragments when stream encryption is disabled and the default pubkey is used
     url = file_server::generate_download_url(
             "abc123"sv,
             {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
-    CHECK(url == "http://example.com/file/abc123");
+    CHECK(url == "http://example.com:123/file/abc123");
 
     // Works with other values
     url = file_server::generate_download_url(
             "12345678"sv,
             {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321, false});
-    CHECK(url == "https://example2.com/file/12345678");
+    CHECK(url == "https://example2.com:321/file/12345678");
+
+    // Omits the port when the scheme already implies it, so urls for a default-port server are
+    // unchanged from every previous version
+    url = file_server::generate_download_url(
+            "abc123"sv, {"http", "example.com", 80, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+    CHECK(url == "http://example.com/file/abc123");
+
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"https", "example.com", 443, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+    CHECK(url == "https://example.com/file/abc123");
+
+    // The default file server is unaffected
+    url = file_server::generate_download_url("abc123"sv, file_server::DEFAULT_CONFIG);
+    CHECK(url == fmt::format("http://{}/file/abc123", file_server::DEFAULT_CONFIG.host));
+}
+
+TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
+    // A self-hosted file server on a non-default port. Dropping the port here sent every recipient to
+    // 80/443, which returns a response rather than an error -- so it surfaced as an undecryptable
+    // attachment, far from its cause.
+    constexpr auto custom_pubkey =
+            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv;
+    auto url = file_server::generate_download_url(
+            "abc123"sv, {"http", "192.168.1.2", 8000, std::string{custom_pubkey}, 12345, false});
+    CHECK(url == fmt::format("http://192.168.1.2:8000/file/abc123#p={}", custom_pubkey));
+
+    auto parsed = file_server::parse_download_url(url);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->scheme == "http"sv);
+    // The port is split OUT of the host: `to_request` builds a destination from the two separately, so
+    // a host still carrying ":8000" would be a valid-looking hostname pointing nowhere.
+    CHECK(parsed->host == "192.168.1.2"sv);
+    REQUIRE(parsed->port.has_value());
+    CHECK(*parsed->port == 8000);
+    CHECK(parsed->file_id == "abc123"sv);
+    REQUIRE(parsed->custom_pubkey_hex.has_value());
+    CHECK(*parsed->custom_pubkey_hex == custom_pubkey);
+
+    // No explicit port stays absent rather than being invented, so the caller's default applies
+    parsed = file_server::parse_download_url("https://example.com/file/abc123"sv);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->host == "example.com"sv);
+    CHECK_FALSE(parsed->port.has_value());
+
+    // A colon that is not a port leaves the host alone
+    parsed = file_server::parse_download_url("http://example.com:notaport/file/abc123"sv);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->host == "example.com:notaport"sv);
+    CHECK_FALSE(parsed->port.has_value());
 }
