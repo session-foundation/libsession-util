@@ -1,4 +1,5 @@
 #include "../../src/client/download_cache.hpp"
+#include "../utils.hpp"
 #include "common.hpp"
 
 namespace cache = session::client::cache;
@@ -1239,4 +1240,111 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         // belongs to a save, whether or not the bytes came from the cache.
         CHECK(stores(*net).empty());
     }
+}
+
+TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, wait);
+    c->conversation(convo, wait)->set_auto_download(AutoDownload::all, wait);
+
+    // `last_used` is a millisecond timestamp, and the whole of this test would otherwise run inside
+    // one of them, leaving every row tied and the eviction order arbitrary.  Real uses are spread
+    // out; these have to be spread out by hand.
+    ScopedClockOffset clock{0s};
+    auto later = [t = 0s]() mutable { AdjustedClock::set_offset(t += 1s); };
+
+    auto seed = random::random(32);
+    // Three files, fetched in order, each about the same size on disk.
+    std::vector<std::string> urls;
+    std::vector<int64_t> ids;
+    for (int i = 0; i < 3; i++) {
+        later();
+        std::vector<std::byte> data(3000);
+        random::fill(data);
+        auto [ct, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+        auto file_id = "f{}"_format(i);
+        net->served[file_id] = ct;
+        auto url = network::file_server::generate_download_url(file_id, {}, true);
+        urls.push_back(url);
+
+        deliver(*c, peer, "", from_epoch_ms(1000 + i), "h{}"_format(i), "", std::nullopt,
+                [&, url](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(static_cast<uint64_t>(i + 1));
+                    a->set_url(url);
+                    a->set_key(std::string{
+                            reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(data.size());
+                    a->set_contenttype("image/png");
+                });
+        sync(*c);
+        REQUIRE(serve_downloads(*net, ct) == 1);
+        sync(*c);
+        ids.push_back(c->conversation(convo, wait)->messages(wait)[0].id);
+    }
+
+    auto cached = [&](const std::string& url) {
+        return std::filesystem::exists(cache::path_for(dir.path, cache::ATTACHMENT_DIR, url));
+    };
+    for (const auto& u : urls)
+        REQUIRE(cached(u));
+
+    // Reach for the *oldest* one, which makes it the most recently used.  Under oldest-first
+    // eviction it would still be first to go; under least-recently-used it is last.
+    later();
+    c->attachment_data(ids[0], 0, nullptr, [](auto, auto) {});
+    sync(*c);
+
+    // Now a limit that only two of the three fit under.
+    auto one = std::filesystem::file_size(cache::path_for(dir.path, cache::ATTACHMENT_DIR, urls[0]));
+    c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), wait);
+
+    // Nothing happens until something is added, which is the only moment the total can grow.
+    CHECK(cached(urls[1]));
+
+    // A fourth arrival pushes it over and evicts.
+    later();
+    std::vector<std::byte> more(3000);
+    random::fill(more);
+    auto [more_ct, more_key] = attachment::encrypt(seed, more, attachment::Domain::ATTACHMENT);
+    net->served["f3"] = more_ct;
+    auto more_url = network::file_server::generate_download_url("f3", {}, true);
+    deliver(*c, peer, "", from_epoch_ms(2000), "h3", "", std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(9);
+                a->set_url(more_url);
+                a->set_key(std::string{
+                        reinterpret_cast<const char*>(more_key.data()), more_key.size()});
+                a->set_size(more.size());
+                a->set_contenttype("image/png");
+            });
+    sync(*c);
+    REQUIRE(serve_downloads(*net, more_ct) == 1);
+    sync(*c);
+
+    // The one just fetched is kept -- a download that completed and immediately vanished would read
+    // as a failure.
+    CHECK(cached(more_url));
+    // The one that was read most recently is kept, though it is the oldest by arrival.
+    CHECK(cached(urls[0]));
+    // The one nobody has touched since it arrived is gone.
+    CHECK_FALSE(cached(urls[1]));
+
+    // The index agrees with the directory rather than describing files that are no longer there.
+    auto rows = c->core.database().conn().prepared_get<int64_t>(
+            "SELECT count(*) FROM attachment_cache");
+    size_t on_disk = 0;
+    for (const auto& e :
+         std::filesystem::directory_iterator{dir.path / cache::ATTACHMENT_DIR})
+        if (!e.path().filename().string().ends_with(cache::PARTIAL_SUFFIX))
+            on_disk++;
+    CHECK(static_cast<size_t>(rows) == on_disk);
 }

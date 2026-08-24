@@ -740,6 +740,11 @@ class Client {
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
     void _touch_cached(const std::string& name);
 
+    // Removes least-recently-used entries until the cache fits its limit, never touching `keep` --
+    // which is whatever was just written, so that a download cannot complete and immediately
+    // vanish.  Does nothing when no limit is set.
+    void _evict_cache(const std::string& keep);
+
     void _attachment_data(
             int64_t message_id,
             size_t index,

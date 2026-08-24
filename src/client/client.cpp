@@ -3662,14 +3662,52 @@ void Client::_cache_attachment(
     if (ec)
         return;
 
+    auto name = file.filename().string();
     core.database().conn().prepared_exec(
             R"(
         INSERT INTO attachment_cache (name, size, last_used) VALUES (?1, ?2, ?3)
         ON CONFLICT (name) DO UPDATE SET size = ?2, last_used = ?3
     )",
-            file.filename().string(),
+            name,
             static_cast<int64_t>(on_disk),
             epoch_ms(clock_now_ms()));
+
+    // Checked when something is added, which is the only moment the total can grow.
+    _evict_cache(name);
+}
+
+void Client::_evict_cache(const std::string& keep) {
+    auto c = core.database().conn();
+
+    auto limit = core.globals.get_integer(CACHE_LIMIT_KEY);
+    if (!limit)
+        return;
+
+    auto total = c.prepared_get<std::optional<int64_t>>(
+                          "SELECT sum(size) FROM attachment_cache")
+                         .value_or(0);
+    if (total <= *limit)
+        return;
+
+    // Oldest use first.  `keep` is excluded rather than relying on it sorting last: it does, having
+    // just been used, but a cache limit smaller than a single file would otherwise delete the
+    // download that provoked the eviction, which reads as the fetch having silently failed.  Better
+    // to sit over the limit by one file than to throw away what was just asked for.
+    for (auto [name, size] : c.prepared_results<std::string, int64_t>(
+                 R"(
+        SELECT name, size FROM attachment_cache WHERE name IS NOT ?1 ORDER BY last_used
+    )",
+                 keep)) {
+        if (total <= *limit)
+            break;
+
+        // The row is an index, not the truth: a file that is already gone still costs a row, and
+        // removing it is as much progress as unlinking one.
+        std::error_code ec;
+        std::filesystem::remove(_cache_dir / cache::ATTACHMENT_DIR / name, ec);
+        c.prepared_exec("DELETE FROM attachment_cache WHERE name = ?", name);
+        total -= size;
+    }
 }
 
 void Client::_touch_cached(const std::string& name) {
