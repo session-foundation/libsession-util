@@ -465,6 +465,7 @@ class Client {
     /// database's: with an unencrypted database the key sits in plaintext beside them.
     void set_cache_dir(std::filesystem::path dir);
 
+
     /// A conversation's picture, decrypted and ready to decode.
     ///
     /// Served from the cache when it is there, and fetched, decrypted and cached when it is not.
@@ -710,6 +711,11 @@ class Client {
     //
     // The stream scheme decrypts as it arrives; both legacy ones have to accumulate, because their
     // authentication covers the whole ciphertext and cannot be checked until all of it is here.
+    //
+    // Anything that goes wrong stops the transfer rather than being noted while the rest is
+    // received and thrown away.  The stream scheme is what makes that worth doing: it authenticates
+    // each chunk as it arrives, so a failure surfaces when the bad chunk does -- which may be the
+    // first or may be most of the way in, but is not "once the whole file is here".
     //
     // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment adds
     // its own index.  `on_done` fires exactly once, with the failure if there was one.

@@ -548,6 +548,19 @@ std::vector<std::byte> legacy_decrypt(
             throw std::runtime_error{
                     "Legacy attachment decryption failed: claimed size {}B exceeds the {}B decrypted"_format(
                             unpadded_size, plaintext.size())};
+
+        // And everything past the claimed length must actually be padding.  Session pads with zero
+        // bytes, so a non-zero one there is file content the sender did not declare -- which
+        // truncating to the claim would hand back as a quietly incomplete file rather than an
+        // error.  A size is an exact statement, not a hint: under-reporting is as wrong as
+        // over-reporting, and only one of the two used to be caught.
+        for (auto it = plaintext.begin() + unpadded_size; it != plaintext.end(); ++it)
+            if (*it != std::byte{0})
+                throw std::runtime_error{
+                        "Legacy attachment decryption failed: {}B decrypted but the sender claimed "
+                        "{}B, and what follows is not padding"_format(
+                                plaintext.size(), unpadded_size)};
+
         plaintext.resize(unpadded_size);
     }
 

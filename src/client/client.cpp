@@ -599,6 +599,7 @@ void Client::set_cache_dir(std::filesystem::path dir) {
     _cache_dir = std::move(dir);
 }
 
+
 const b32& Client::_cache_encryption_key() {
     if (!_cache_key) {
         auto& key = _cache_key.emplace();
@@ -3142,13 +3143,17 @@ void Client::_download_decrypted(
         std::optional<attachment::Decryptor> decryptor;
         std::optional<std::string> failure;
         int64_t received = 0;
+        int64_t delivered = 0;
     };
     auto state = std::make_shared<DownloadState>();
 
     if (stream) {
         std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
         std::ranges::copy(key, k.begin());
-        state->decryptor.emplace(k, [on_plain](std::span<const std::byte> plain) {
+        // Counted so the claimed size can be held to.  The stream format strips its own padding, so
+        // what comes out here is the file and nothing else.
+        state->decryptor.emplace(k, [state, on_plain](std::span<const std::byte> plain) {
+            state->delivered += static_cast<int64_t>(plain.size());
             on_plain(plain);
         });
     }
@@ -3164,30 +3169,44 @@ void Client::_download_decrypted(
     req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
     req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
 
-    req.on_data = [state, stream, on_progress, throttle](
+    // Kept so that a transfer we have already decided against can be stopped rather than merely
+    // ignored: the alternative is receiving a file to the end so as to throw it away.
+    auto cancel = req.cancelled;
+
+    req.on_data = [state, stream, on_progress, throttle, cancel](
                           const network::file_metadata& meta, std::span<const std::byte> data) {
         if (state->failure)
             return;
+        // Asks for the transfer to stop, and today only asks: the download path does not consult
+        // the flag -- only uploads do -- so the rest of the file arrives and is dropped by the
+        // guard above before we report the failure.  Set anyway, because it is the right request to
+        // make and the plumbing is the part that is missing.
+        //
+        // Worth having once it works: the stream scheme authenticates each chunk as it arrives, so
+        // a failure surfaces when the bad chunk does, wherever in the file that is, and everything
+        // after it is bandwidth spent on a file already known to be unusable.
+        auto give_up = [&](std::string why) {
+            state->failure = std::move(why);
+            cancel->store(true);
+        };
         try {
             state->received += static_cast<int64_t>(data.size());
 
             // Enforced against bytes actually arriving rather than against anything the sender or
             // the server claimed, so an over-long transfer is cut off rather than accumulated.
-            if (state->received > static_cast<int64_t>(attachment::LEGACY_MAX_ENCRYPTED_SIZE)) {
-                state->failure = "download is larger than the file server's maximum";
-                return;
-            }
+            if (state->received > static_cast<int64_t>(attachment::LEGACY_MAX_ENCRYPTED_SIZE))
+                return give_up("download is larger than the file server's maximum");
 
             if (stream) {
                 if (!state->decryptor->update(data))
-                    state->failure = "decryption failed";
+                    return give_up("decryption failed");
             } else
                 state->buffered.insert(state->buffered.end(), data.begin(), data.end());
 
             if (on_progress && throttle->allow())
                 on_progress(state->received, meta.size, std::nullopt);
         } catch (const std::exception& e) {
-            state->failure = e.what();
+            give_up(e.what());
         }
     };
 
@@ -3220,6 +3239,16 @@ void Client::_download_decrypted(
                 case Scheme::stream:
                     if (!state->decryptor->finalize())
                         throw std::runtime_error{"download ended mid-stream"};
+                    // The claim is exact or it is wrong: the file server is told the precise byte
+                    // count at upload and refuses anything else, so there is no reason to accept a
+                    // file that turns out to be a different size from the one described.  Nothing
+                    // else checks this for a stream attachment -- the format strips its own padding
+                    // and never consults the pointer -- so without it a sender can describe one
+                    // file and deliver another.
+                    if (claimed_size && state->delivered != *claimed_size)
+                        throw std::runtime_error{
+                                "attachment is {}B but its sender said {}B"_format(
+                                        state->delivered, *claimed_size)};
                     break;
 
                 case Scheme::plaintext:

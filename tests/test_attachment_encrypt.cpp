@@ -745,3 +745,25 @@ TEST_CASE("Display picture decryption -- the legacy GCM scheme", "[attachments][
     // Too short to hold a nonce and a tag is refused rather than read past.
     CHECK_THROWS(attachment::legacy_display_pic_decrypt(blob.subspan(0, 27), key));
 }
+
+TEST_CASE("legacy attachment decryption holds the sender to the size they claimed",
+          "[attachments][legacy][size]") {
+    // Over-reporting has always failed: the claim exceeds what came out.
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() + 1));
+
+    // Under-reporting used to succeed, handing back a file quietly cut short.  A size is an exact
+    // statement: what follows it has to be the padding it claims to be.
+    CHECK_THROWS(attachment::legacy_decrypt(
+            LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() - 1));
+
+    // The honest claim still works, and the padding that legitimately follows it is dropped.
+    CHECK(attachment::legacy_decrypt(
+                  LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size()) ==
+          to_vector<std::byte>(LEGACY_PLAINTEXT));
+
+    // Zero still means "the sender never said", which only clients predating the field do, and
+    // leaves the padding in place rather than guessing.
+    CHECK(attachment::legacy_decrypt(LEGACY_BLOB, legacy_key(), legacy_digest(), 0).size() >=
+          LEGACY_PLAINTEXT.size());
+}

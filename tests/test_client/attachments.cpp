@@ -890,3 +890,65 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     // ... and being terminal, it is refused rather than attempted again.
     CHECK_FALSE(c->retry_send(id, wait));
 }
+
+TEST_CASE("Client: a stream attachment must be the size its sender claimed",
+          "[client][attachments][size]") {
+    // The pointer's size is exact -- the file server is told the byte count up front and refuses
+    // anything else -- so a file that decrypts to a different length is not a file we asked for.
+    // Nothing else catches this for a stream attachment: the format strips its own padding and
+    // never consults the pointer, so before this the claim was simply ignored.
+    // One short, one long: over-reporting and under-reporting are both lies.
+    int64_t claimed = GENERATE(8999, 9001);
+
+
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+
+    std::vector<std::byte> plaintext(9000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+            [&, claimed](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/1#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                // A lie in one direction or the other; the truth is 9000.
+                a->set_size(static_cast<uint32_t>(claimed));
+                a->set_filename("payload.bin");
+            },
+            42);
+    sync(*c);
+
+    auto msg_id = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait)[0].id;
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_size", 7);
+    std::filesystem::create_directories(dir);
+    auto dest = dir / "saved.bin";
+
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg_id, 0, dest, nullptr, [&](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
+
+    sync(*c);
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+
+    // Reported as a failure rather than saved short or saved long.
+    auto err = waiter.get();
+    REQUIRE(err.has_value());
+    CHECK(err->find("sender said") != std::string::npos);
+
+    // And nothing is left on disk that could be mistaken for the file.
+    CHECK_FALSE(std::filesystem::exists(dest));
+    CHECK_FALSE(std::filesystem::exists(dest.string() + ".part"));
+
+    std::filesystem::remove_all(dir);
+}
