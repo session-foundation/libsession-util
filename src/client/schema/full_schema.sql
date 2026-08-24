@@ -281,7 +281,18 @@ CREATE TABLE message_attachments (
     width INTEGER,
     height INTEGER,
 
-    -- Where the file is on the file server, the key it is encrypted with, and its encrypted size.
+    -- Where the file is on the file server, the key it is encrypted with, and how long the file
+    -- itself is.
+    --
+    -- The last of those is the smallest of three different sizes and none of the other two: what
+    -- the server stores is bigger (IV, MAC or stream framing), and what decryption yields is also
+    -- bigger, since Session pads to hide the true length on top of whatever the cipher pads.  This
+    -- is what is left after both, and `legacy_decrypt` resizes down to it -- which is why it cannot
+    -- be either of the others and still do that job.
+    --
+    -- A claim by the sender, believed by nothing: it is checked against what actually arrives, and
+    -- decryption throws if it exceeds that.
+    --
     -- Set together when an upload succeeds, or read together out of an arriving pointer.
     url TEXT,
     key BLOB,
