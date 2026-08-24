@@ -3147,15 +3147,31 @@ void Client::_download_decrypted(
     };
     auto state = std::make_shared<DownloadState>();
 
+    network::DownloadRequest req;
+    auto cancel = req.cancelled;
+
     if (stream) {
         std::array<std::byte, attachment::ENCRYPT_KEY_SIZE> k;
         std::ranges::copy(key, k.begin());
-        // Counted so the claimed size can be held to.  The stream format strips its own padding, so
-        // what comes out here is the file and nothing else.
-        state->decryptor.emplace(k, [state, on_plain](std::span<const std::byte> plain) {
-            state->delivered += static_cast<int64_t>(plain.size());
-            on_plain(plain);
-        });
+        // The stream format pads at the front, with a marker decryption already verifies, so what
+        // comes out here is the file and nothing else -- its length is a fact about the data rather
+        // than the sender's word for it.  Counting as it emerges means a file longer than its
+        // sender said is known the moment it passes that length, rather than at the end.
+        //
+        // Too short cannot be known here; that is what the check at completion is for.
+        state->decryptor.emplace(
+                k, [state, on_plain, claimed_size, cancel](std::span<const std::byte> plain) {
+                    if (state->failure)
+                        return;
+                    state->delivered += static_cast<int64_t>(plain.size());
+                    if (claimed_size && state->delivered > *claimed_size) {
+                        state->failure = "attachment is longer than the {}B its sender said"_format(
+                                *claimed_size);
+                        cancel->store(true);
+                        return;
+                    }
+                    on_plain(plain);
+                });
     }
 
     auto throttle = std::make_shared<update_throttle>(_high_freq_dispatch_interval);
@@ -3164,16 +3180,11 @@ void Client::_download_decrypted(
     if (on_progress)
         on_progress(0, 0, std::nullopt);
 
-    network::DownloadRequest req;
     req.download_url = url;
     req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
     req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
 
-    // Kept so that a transfer we have already decided against can be stopped rather than merely
-    // ignored: the alternative is receiving a file to the end so as to throw it away.
-    auto cancel = req.cancelled;
-
-    req.on_data = [state, stream, on_progress, throttle, cancel](
+    req.on_data =[state, stream, on_progress, throttle, cancel](
                           const network::file_metadata& meta, std::span<const std::byte> data) {
         if (state->failure)
             return;
