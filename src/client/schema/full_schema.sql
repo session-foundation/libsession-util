@@ -111,6 +111,17 @@ CREATE TABLE conversations (
     -- mode is none, and is a duration rather than a moment, so seconds either way.
     exp_mode INTEGER NOT NULL DEFAULT 0,
     exp_timer INTEGER NOT NULL DEFAULT 0,   -- seconds
+    -- What to fetch without being asked, for this conversation: 0 nothing, 1 images, 2 everything.
+    --
+    -- NULL is the fourth state and the reason this is nullable: nobody has been asked yet.  Session
+    -- asks within a conversation the first time and remembers the answer, which a client can only
+    -- do if "never asked" is distinguishable from "asked, said no".
+    --
+    -- Device-local, deliberately, and so absent from every config: whether to spend this machine's
+    -- bandwidth and disk is a property of the machine.  Auto-downloading everything on a desktop
+    -- and nothing on a phone is the case this exists for, and syncing it would make that
+    -- impossible.  Nothing in the reconcile reads or writes it.
+    auto_download INTEGER,
     CHECK ((dm IS NOT NULL) + (closed_group IS NOT NULL) + (community IS NOT NULL) = 1)
 ) STRICT;
 
