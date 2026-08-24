@@ -1,14 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
-#include <set>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "session/types.hpp"
 
 /// A cache of files we downloaded, on disk, encrypted under one key of our own.
 ///
@@ -21,10 +19,14 @@
 /// backups, in disk images, and in whoever's hands the machine does.  That is also why the padding
 /// is kept -- see `attachment::Encryptor`'s key-taking constructor.
 ///
-/// Entirely files, with no database rows of its own.  What is still referenced is already recorded
-/// -- `accounts.profile_pic_url` and `message_attachments.url` -- so a second record of it would be
-/// a second thing to keep in step, and the one that gets out of step is the one that decides what
-/// to delete.
+/// The two halves are kept differently, because only one of them expires.  A cached picture is just
+/// a file: what still references it is already recorded in `accounts.profile_pic_url`, and a second
+/// record of it would be a second thing to keep in step.  A cached attachment additionally has a
+/// row in `attachment_cache`, because eviction has to answer "what is the total, and what was used
+/// longest ago" without stat-ing the whole directory to find out.
+///
+/// That row is an index over the file rather than a second copy of the truth, and either can be
+/// missing the other after a crash: a sweep reconciles both directions.
 namespace session::client::cache {
 
 /// The subdirectory a kind of download lives in.  Separate so that a sweep of one cannot consider
@@ -67,18 +69,18 @@ void write(
 /// what is *not* referenced, and a download that has not finished is not referenced yet.
 inline constexpr std::string_view PARTIAL_SUFFIX = ".part";
 
-/// Unlinks everything in `dir/kind` that `referenced` does not name, and says how many went.
+/// The names of the finished files in `dir/kind`, in no particular order.
 ///
-/// Compare and converge rather than deleting a file when the row naming it goes: those rows go by
-/// cascade when a conversation is deleted, and no code of ours runs to see it.  Listing what is
-/// still referenced and unlinking the difference survives that, and also collects what a crash
-/// mid-download left behind -- which collecting paths before a delete never would.
+/// Filesystem only, reading nothing else, so this half of a sweep can run off the event loop --
+/// which is the point of it being its own function.  Walking a directory of many thousands of files
+/// is the slow part; deciding what to do about them is a handful of queries.
 ///
-/// Only safe because the directory is ours outright: "anything not in the list" is a statement
-/// about a place nothing else writes to.
-size_t sweep(
-        const std::filesystem::path& dir,
-        std::string_view kind,
-        const std::set<std::string>& referenced_urls);
+/// In-progress writes are left out, since a download that has not finished is not yet referenced by
+/// anything and a sweep would take it for garbage.
+std::vector<std::string> list(const std::filesystem::path& dir, std::string_view kind);
+
+/// Unlinks a file `list` named.  True if it went, false if it was already gone -- which is not an
+/// error: between listing a name and acting on it, eviction may have removed it anyway.
+bool remove(const std::filesystem::path& dir, std::string_view kind, std::string_view name);
 
 }  // namespace session::client::cache

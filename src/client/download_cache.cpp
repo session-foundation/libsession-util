@@ -94,32 +94,24 @@ void write(
     std::filesystem::rename(tmp, file);
 }
 
-size_t sweep(
-        const std::filesystem::path& dir,
-        std::string_view kind,
-        const std::set<std::string>& referenced_urls) {
-    auto kind_dir = dir / kind;
+std::vector<std::string> list(const std::filesystem::path& dir, std::string_view kind) {
+    std::vector<std::string> names;
+
     std::error_code ec;
-    if (!std::filesystem::is_directory(kind_dir, ec))
-        return 0;
-
-    std::set<std::string> keep;
-    for (const auto& url : referenced_urls)
-        keep.insert(path_for(dir, kind, url).filename().string());
-
-    size_t removed = 0;
-    for (const auto& entry : std::filesystem::directory_iterator{kind_dir, ec}) {
+    for (const auto& entry : std::filesystem::directory_iterator{dir / kind, ec}) {
         auto name = entry.path().filename().string();
-        // A download still running has no url referencing it yet, and unlinking it mid-write would
-        // make the fetch fail for a reason nothing could explain.
+        // A download still running is not garbage, it is unfinished, and unlinking it mid-write
+        // would make the fetch fail for a reason nothing could explain.
         if (name.ends_with(PARTIAL_SUFFIX))
             continue;
-        if (keep.contains(name))
-            continue;
-        if (std::filesystem::remove(entry.path(), ec))
-            removed++;
+        names.push_back(std::move(name));
     }
-    return removed;
+    return names;
+}
+
+bool remove(const std::filesystem::path& dir, std::string_view kind, std::string_view name) {
+    std::error_code ec;
+    return std::filesystem::remove(dir / kind / name, ec);
 }
 
 }  // namespace session::client::cache

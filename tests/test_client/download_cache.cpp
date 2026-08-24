@@ -101,7 +101,7 @@ TEST_CASE("Cache: a corrupted entry is a miss, not a throw", "[client][cache]") 
     CHECK_FALSE(std::filesystem::exists(file));
 }
 
-TEST_CASE("Cache: sweeping keeps what is still referenced", "[client][cache]") {
+TEST_CASE("Cache: listing offers up what a sweep may consider", "[client][cache]") {
     TempDir dir;
     auto key = a_key();
 
@@ -123,18 +123,31 @@ TEST_CASE("Cache: sweeping keeps what is still referenced", "[client][cache]") {
         out << "half a file";
     }
 
-    // The referencing url carries a fragment, as a stored one may: it still has to match.
-    CHECK(cache::sweep(dir.path, cache::PROFILE_DIR, {kept + "#pubkey=aa"}) == 1);
+    auto listed = cache::list(dir.path, cache::PROFILE_DIR);
+    std::set<std::string> names{listed.begin(), listed.end()};
 
-    CHECK(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, kept)));
+    // Two finished files and not the third: what is offered up is only what a sweep may act on.
+    CHECK(names.size() == 2);
+    CHECK(names.contains(
+            cache::path_for(dir.path, cache::PROFILE_DIR, kept).filename().string()));
+    CHECK_FALSE(names.contains(partial.filename().string()));
+
+    // The referencing url carries a fragment, as a stored one may, and still names the same file --
+    // which is what lets a caller decide by url what to keep by name.
+    CHECK(names.contains(cache::path_for(dir.path, cache::PROFILE_DIR, kept + "#pubkey=aa")
+                                 .filename()
+                                 .string()));
+
+    auto drop_name = cache::path_for(dir.path, cache::PROFILE_DIR, dropped).filename().string();
+    CHECK(cache::remove(dir.path, cache::PROFILE_DIR, drop_name));
     CHECK_FALSE(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, dropped)));
+    CHECK(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, kept)));
     CHECK(std::filesystem::exists(partial));
 
-    // Sweeping again has nothing left to do.
-    CHECK(cache::sweep(dir.path, cache::PROFILE_DIR, {kept}) == 0);
+    // Removing what is already gone is the ordinary outcome of two sweeps racing, not an error.
+    CHECK_FALSE(cache::remove(dir.path, cache::PROFILE_DIR, drop_name));
 
-    // Sweeping a kind with nothing referenced empties it; a directory that does not exist is not an
-    // error.
-    CHECK(cache::sweep(dir.path, cache::PROFILE_DIR, {}) == 1);
-    CHECK(cache::sweep(dir.path, cache::ATTACHMENT_DIR, {}) == 0);
+    // A directory that was never created lists as empty rather than throwing: a client that has
+    // cached no attachments has no attachments directory.
+    CHECK(cache::list(dir.path, cache::ATTACHMENT_DIR).empty());
 }

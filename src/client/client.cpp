@@ -597,6 +597,97 @@ bool Client::delete_message(int64_t message_id, wait_t) {
 
 void Client::set_cache_dir(std::filesystem::path dir) {
     _cache_dir = std::move(dir);
+    _sweep_cache();
+}
+
+Client::~Client() {
+    // Before the loop it hands its listing back to, and before the members that listing is about.
+    if (_sweeper.joinable())
+        _sweeper.join();
+}
+
+void Client::_sweep_cache() {
+    if (_cache_dir.empty())
+        return;
+
+    if (_sweeper.joinable())
+        _sweeper.join();
+
+    // Split so that the walk -- the slow half, which reads nothing but the directory -- stays off
+    // the loop, and the deciding -- the quick half, which reads the database -- stays on it.  That
+    // split is also the whole of the concurrency argument: a file is written and its row inserted
+    // by one loop job, so a reconcile running on the loop cannot land between the two and take a
+    // freshly cached file for an orphan.  Files that appear after the listing are simply not in it.
+    _sweeper = std::thread{[this, dir = _cache_dir] {
+        auto attachments = cache::list(dir, cache::ATTACHMENT_DIR);
+        auto pictures = cache::list(dir, cache::PROFILE_DIR);
+
+        // `call_get`, not `call`: the destructor joins this thread to know the sweep is over, and a
+        // thread that had only posted the job would finish while the job was still queued.
+        loop.call_get([this, &attachments, &pictures] {
+            try {
+                _reconcile_cache(std::move(attachments), std::move(pictures));
+            } catch (const std::exception& e) {
+                log::warning(cat, "Cache sweep failed: {}", e.what());
+            }
+            return 0;
+        });
+    }};
+}
+
+void Client::_reconcile_cache(
+        std::vector<std::string> attachments, std::vector<std::string> pictures) {
+    auto c = core.database().conn();
+
+    // An attachment file without a row cannot be found by a lookup or counted by eviction, so it is
+    // not a cache entry at all -- it is a file taking up room under a name nobody can resolve.
+    size_t orphans = 0;
+    for (const auto& name : attachments)
+        if (!c.prepared_get<int64_t>(
+                    "SELECT EXISTS(SELECT 1 FROM attachment_cache WHERE name = ?)", name) &&
+            cache::remove(_cache_dir, cache::ATTACHMENT_DIR, name))
+            orphans++;
+
+    // The other direction, which is not cosmetic: eviction totals `size` over the rows, so a row
+    // naming a file that is gone makes the cache look fuller than it is and evicts live files to
+    // get back under a limit it was never over.
+    //
+    // Rows the listing covers are fine by definition.  The rest are checked against the disk rather
+    // than assumed missing, because a row inserted after the listing was taken is legitimately
+    // absent from it and dropping it would strand the file it names.  Collected before deleting
+    // any, rather than deleted as they are found: this is a read of the table it would modify.
+    std::set<std::string> listed{attachments.begin(), attachments.end()};
+    std::vector<std::string> stale;
+    for (auto name : c.prepared_results<std::string>("SELECT name FROM attachment_cache")) {
+        std::error_code ec;
+        if (!listed.contains(name) &&
+            !std::filesystem::exists(_cache_dir / cache::ATTACHMENT_DIR / name, ec))
+            stale.push_back(std::move(name));
+    }
+    for (const auto& name : stale)
+        c.prepared_exec("DELETE FROM attachment_cache WHERE name = ?", name);
+
+    // A picture is referenced by an account naming its url and by nothing else, so the referenced
+    // set is that column.  Recomputed here rather than passed in, so that an account that appeared
+    // while the walk was running counts as referencing what it names.
+    std::set<std::string> keep;
+    for (auto url : c.prepared_results<std::string>(
+                 "SELECT profile_pic_url FROM accounts WHERE profile_pic_url IS NOT NULL"))
+        keep.insert(cache::path_for(_cache_dir, cache::PROFILE_DIR, url).filename().string());
+
+    size_t unreferenced = 0;
+    for (const auto& name : pictures)
+        if (!keep.contains(name) && cache::remove(_cache_dir, cache::PROFILE_DIR, name))
+            unreferenced++;
+
+    if (orphans || !stale.empty() || unreferenced)
+        log::info(
+                cat,
+                "Cache sweep: dropped {} untracked attachment(s), {} row(s) for missing files, {} "
+                "unreferenced picture(s)",
+                orphans,
+                stale.size(),
+                unreferenced);
 }
 
 

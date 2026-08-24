@@ -119,6 +119,8 @@ class Client {
         _init();
     }
 
+    ~Client();
+
     // -- Conversations and messages ---------------------------------------------------------------
     //
     // None of these touches the database on the calling thread: they hand the work to Core's event
@@ -488,6 +490,12 @@ class Client {
     /// listing the directory and unlinking what is not in the list, which is only safe somewhere
     /// nothing else writes.  Point this at a directory with other things in it and they will go.
     ///
+    /// Calling this starts one such pass, in the background, against what the database says should
+    /// be there.  It is a net for what no code of ours was running to see -- a crash between writing
+    /// a file and recording it, a contact whose row went by cascade -- so it is done once, here,
+    /// rather than on a timer: those are things that happen while we are not looking, and this is
+    /// the moment we look.  It runs off the event loop and reports only to the log.
+    ///
     /// Contents are encrypted under a key generated once and kept in the database, so they outlive
     /// the message or config entry whose key originally opened them — and so the files are not
     /// readable by whoever ends up with the disk.  That protection is only as good as the
@@ -770,6 +778,25 @@ class Client {
     // attachment there is no size limit and no expiry, so a picture nobody points at is reclaimed
     // only by someone noticing that nobody points at it.
     void _drop_unused_picture(sqlite::Connection& c, std::string_view url);
+
+    // Starts one pass of reconciling the cache directories against the database, in the background.
+    //
+    // A net, not a mechanism.  Everything that caches a file records it in the same breath, and
+    // everything that stops referencing one drops it.  What collects here is what no code of ours
+    // was running to see: a crash between writing a file and recording it, an account row that went
+    // by cascade, a database restored from a backup older than the directory.  Nothing else can
+    // ever attribute those files to anything, so nothing else can ever remove them.
+    void _sweep_cache();
+
+    // The deciding half of `_sweep_cache`, on the loop.  Takes the directory listings because
+    // taking them is the slow part and does not belong here.
+    void _reconcile_cache(
+            std::vector<std::string> attachments, std::vector<std::string> pictures);
+
+    // Runs the listing half of a sweep.  Joined before anything it touches goes away, which is why
+    // it hands its result back with `call_get`: joining a thread that had merely *posted* a job
+    // would not wait for the job.
+    std::thread _sweeper;
 
     void _attachment_data(
             int64_t message_id,

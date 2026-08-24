@@ -1348,3 +1348,92 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
             on_disk++;
     CHECK(static_cast<size_t>(rows) == on_disk);
 }
+
+TEST_CASE("Client: the sweep reconciles the cache with what the database says", "[client][evict]") {
+    TempCacheDir dir;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+    auto seed = random::random(32);
+
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    c->open_dm(convo, wait);
+    c->conversation(convo, wait)->set_auto_download(AutoDownload::all, wait);
+
+    std::vector<std::byte> data(2000);
+    random::fill(data);
+    auto [ct, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+    net->served["real"] = ct;
+    auto url = network::file_server::generate_download_url("real", {}, true);
+
+    deliver(*c, peer, "", from_epoch_ms(1000), "hh", "", std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(url);
+                a->set_key(
+                        std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(data.size());
+                a->set_contenttype("image/png");
+            });
+    sync(*c);
+    REQUIRE(serve_downloads(*net, ct) == 1);
+    sync(*c);
+
+    auto real_name = cache::path_for(dir.path, cache::ATTACHMENT_DIR, url).filename().string();
+    REQUIRE(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / real_name));
+
+    // What a crash between writing a file and recording it leaves: a file no row names.
+    auto orphan_name =
+            cache::path_for(dir.path, cache::ATTACHMENT_DIR, "http://fs.example/file/ghost")
+                    .filename()
+                    .string();
+    std::ofstream{dir.path / cache::ATTACHMENT_DIR / orphan_name, std::ios::binary}
+            << "no row names this";
+
+    // An in-progress write, which is not garbage but unfinished.
+    auto partial = "{}{}"_format(orphan_name, cache::PARTIAL_SUFFIX);
+    std::ofstream{dir.path / cache::ATTACHMENT_DIR / partial, std::ios::binary} << "half";
+
+    // And the other direction: a row naming a file that is not there.  Not cosmetic -- eviction
+    // totals `size` over the rows, so this one makes the cache look 10 MB fuller than it is.
+    std::string stale_name = "deadbeef";
+    c->core.loop().call_get([&] {
+        c->core.database().conn().prepared_exec(
+                "INSERT INTO attachment_cache (name, size, last_used) VALUES (?, ?, ?)",
+                stale_name,
+                int64_t{10'000'000},
+                int64_t{1});
+        return 0;
+    });
+
+    // Reopened, which is when a client sweeps: the leaks above are exactly what survives a restart.
+    c.reopen();
+    c->set_cache_dir(dir.path);
+
+    // Reopened *again* rather than waited on, because destruction is what a sweep is guaranteed
+    // against: the destructor joins the sweeper, and the sweeper does not finish until the reconcile
+    // it posted has run.  A `sync` here would only prove the loop was idle, which it is well before
+    // the listing is done.  This one is given no cache directory, so it does not sweep in turn.
+    c.reopen();
+
+    CHECK(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / real_name));
+    CHECK_FALSE(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / orphan_name));
+    CHECK(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / partial));
+
+    auto rows = c->core.loop().call_get([&] {
+        return c->core.database().conn().prepared_get<int64_t>(
+                "SELECT count(*) FROM attachment_cache WHERE name = ?", stale_name);
+    });
+    CHECK(rows == 0);
+
+    // The tracked file kept its row: reconciling is not an excuse to rebuild the index.
+    auto kept = c->core.loop().call_get([&] {
+        return c->core.database().conn().prepared_get<int64_t>(
+                "SELECT count(*) FROM attachment_cache WHERE name = ?", real_name);
+    });
+    CHECK(kept == 1);
+}
