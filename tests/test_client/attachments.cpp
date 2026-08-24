@@ -957,3 +957,79 @@ TEST_CASE("Client: a stream attachment must be the size its sender claimed",
 
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("Client: two askers for one attachment share one download", "[client][attachments][join]") {
+    // A conversation opening while its attachments are being fetched asks for bytes that are not in
+    // the cache yet.  Without joining, that starts a second download of the same file: the cache is
+    // still empty, so a display sees a miss and fetches it again.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(9000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    net->served["shared"] = ciphertext;
+
+    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("shared", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            42);
+    sync(*c);
+    auto msg_id = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait)[0].id;
+
+    std::vector<std::optional<std::vector<std::byte>>> got(2);
+    std::vector<std::vector<AttachmentProgress>> seen(2);
+    for (int i = 0; i < 2; i++)
+        c->attachment_data(
+                msg_id, 0,
+                [&, i](const AttachmentProgress& p) { seen[i].push_back(p); },
+                [&, i](std::optional<std::string> err, std::vector<std::byte> d) {
+                    REQUIRE_FALSE(err.has_value());
+                    got[i] = std::move(d);
+                });
+    sync(*c);
+
+    // One transfer, not two.
+    REQUIRE(net->downloads.size() == 1);
+
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    sync(*c);
+
+    // Both askers get the whole file.
+    for (int i = 0; i < 2; i++) {
+        REQUIRE(got[i]);
+        CHECK(*got[i] == plaintext);
+        // ...and both were told how it was going, not only the one that started it.
+        CHECK_FALSE(seen[i].empty());
+        CHECK(seen[i].back().result == 0);
+        CHECK(seen[i].back().message_id == msg_id);
+    }
+
+    // The second asker joined midway and was told where it had got to straight away, rather than
+    // being left with nothing until the next chunk.
+    CHECK_FALSE(seen[1].empty());
+
+    // And having finished, a third ask is served from the cache with no download at all.
+    net->downloads.clear();
+    std::optional<std::vector<std::byte>> third;
+    c->attachment_data(msg_id, 0, nullptr,
+                       [&](std::optional<std::string> err, std::vector<std::byte> d) {
+                           REQUIRE_FALSE(err.has_value());
+                           third = std::move(d);
+                       });
+    sync(*c);
+    CHECK(net->downloads.empty());
+    REQUIRE(third);
+    CHECK(*third == plaintext);
+}

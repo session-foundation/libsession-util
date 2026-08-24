@@ -81,6 +81,19 @@ struct TempClient {
     Client& operator*() { return *client; }
 };
 
+/// A cache directory that removes itself, so a failing assertion cannot leave one behind.
+struct TempCacheDir {
+    std::filesystem::path path{
+            std::filesystem::temp_directory_path() /
+            fmt::format("{}", random::unique_id("test_cache", 8))};
+
+    TempCacheDir() { std::filesystem::create_directories(path); }
+    ~TempCacheDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+};
+
 inline b33 own_sid(Client& c) {
     b33 out;
     std::ranges::copy(c.core.globals.session_id(), out.begin());

@@ -180,7 +180,21 @@ CREATE TABLE messages (
     -- Which of the two it is has to survive, not just that it happened: deleting for everyone is
     -- still offerable on a message already deleted here, and the two are different things to draw.
     -- The direction that completes the picture is `outgoing`, so there is no column for it.
-    deleted INTEGER
+    deleted INTEGER,
+
+    -- Whether this message is *shown* as a gallery rather than as a list of attachments.
+    --
+    -- A decision, which is why it is stored: it is made when the message is processed -- on if the
+    -- conversation was auto-downloading then -- and the conversation's setting may have changed
+    -- since, so it cannot be recomputed later and mean the same thing.  A client may set or clear
+    -- it afterwards.
+    --
+    -- Whether a message *can* be shown that way is a separate question, derived and not stored:
+    -- today it is "has attachments, and every one of them is an image", but that is our rule to
+    -- change -- to particular formats, or a size ceiling -- and a stored answer would be a stale
+    -- one after any such change.  So a message whose stored decision no longer agrees with the
+    -- current rule simply has the decision dropped, rather than being honoured or migrated.
+    gallery INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 -- Delivery is at-least-once, so a redelivered message must not duplicate.  This also catches what

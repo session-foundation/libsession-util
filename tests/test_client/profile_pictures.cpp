@@ -10,19 +10,6 @@ namespace cache = session::client::cache;
 
 namespace {
 
-// A temporary cache directory that removes itself.
-struct TempCacheDir {
-    std::filesystem::path path{
-            std::filesystem::temp_directory_path() /
-            fmt::format("{}", session::random::unique_id("test_piccache", 8))};
-
-    TempCacheDir() { std::filesystem::create_directories(path); }
-    ~TempCacheDir() {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-};
-
 // Encrypts as a client did before the stream scheme: AES-256-GCM, nonce prepended, tag appended.
 // Written here rather than in libsession because nothing of ours produces this format any more --
 // it exists only to be read -- and a test that encrypted with our own code would be checking that

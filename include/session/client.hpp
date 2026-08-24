@@ -342,6 +342,37 @@ class Client {
     void delete_message_everywhere(int64_t message_id, failable_function<void(bool deleted)> cb);
     bool delete_message_everywhere(int64_t message_id, wait_t);
 
+    /// Shows, or stops showing, a message as a gallery.
+    ///
+    /// Returns false, having done nothing, if the message does not exist or is not
+    /// `gallery_viewable` — a message that cannot be shown that way cannot be asked to be, so the
+    /// stored decision can never disagree with the rule that governs it.  Clearing is always
+    /// allowed.
+    ///
+    /// Starts nothing.  Turning gallery mode on for a conversation that does not auto-download
+    /// leaves its images unfetched, and getting them is the caller's move — `attachment_data` for
+    /// each — because a setter that reached for the network would surprise whoever called it.
+    void set_gallery(int64_t message_id, bool gallery, failable_function<void(bool set)> cb);
+    bool set_gallery(int64_t message_id, bool gallery, wait_t);
+
+    /// An attachment's contents, decrypted and whole.
+    ///
+    /// For showing a file rather than keeping it: a gallery needs the bytes, and `save_attachment`
+    /// would have it write files it then reads back and deletes.
+    ///
+    /// Served from the cache when it is there, and fetched *and cached* when it is not — which is
+    /// the difference from `save_attachment`, which reads the cache but never fills it.  A save has
+    /// a home of its own to put the file in; a display does not, and would otherwise re-fetch on
+    /// every scroll.
+    ///
+    /// Not subject to the auto-download size limit.  That governs what arrives unasked, and this is
+    /// asked for.
+    void attachment_data(
+            int64_t message_id,
+            size_t index,
+            std::function<void(const AttachmentProgress&)> on_progress,
+            failable_function<void(std::vector<std::byte>)> cb);
+
     /// Removes one deleted message's leftover row.  The conversation-wide form, and the reason a
     /// deletion leaves a row at all — including how this can bring a message back — are on
     /// `Conversation::purge_deleted`.
@@ -623,6 +654,61 @@ class Client {
     // hold, and deletes it.
     void _on_unsend_request(
             std::span<const std::byte, 33> sender, const SessionProtos::UnsendRequest& req);
+    // A download that is already happening, and everyone waiting on it.
+    //
+    // Keyed by the cache name -- the hashed base url -- because that is what identifies the *file*,
+    // so two messages quoting the same attachment share one transfer rather than racing to write
+    // one cache entry twice.
+    //
+    // Without this, a conversation opening while its attachments are auto-downloading would fetch
+    // every one of them a second time: the cache is still empty, so a display asking for bytes sees
+    // a miss and starts its own.  Joining instead means a display never has to know whether
+    // something is already under way -- it asks for the bytes and gets them, whoever started it.
+    //
+    // Only transfers that *accumulate* are in here, which means everything except a save.  A save
+    // streams decrypted bytes to the destination as they arrive and keeps none of them -- which is
+    // what stops a large file sitting in memory -- so by the time a second caller could join, the
+    // first half of the file has already gone to disk and is not ours to hand over.  A save may
+    // therefore join something already accumulating, and costs nothing extra when it does, but is
+    // never itself joinable: a display asking during a save fetches the file again.
+    //
+    // **Only ever touched on the loop.**  Download callbacks arrive on the network thread, so
+    // everything that reads or writes this hops first; the application's own callbacks then hop
+    // again, out through the dispatcher.
+    struct InFlight {
+        // The last figures reported, so somebody joining midway can be told where it has got to
+        // rather than being left with nothing to draw until the next chunk lands.
+        int64_t done = 0, total = 0;
+        std::shared_ptr<std::vector<std::byte>> plain;
+        std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
+        std::vector<failable_function<void(std::vector<std::byte>)>> waiting;
+    };
+    std::unordered_map<std::string, InFlight> _in_flight;
+
+    // What an attachment row says about where its file is and how to open it.
+    struct StoredPointer {
+        std::string url;
+        std::vector<std::byte> key, digest;
+        std::optional<int64_t> size;
+    };
+    // Throws if there is no such attachment, or if its sender gave no url.
+    StoredPointer _attachment_pointer(int64_t message_id, size_t index);
+
+    // Writes `data` into the attachment cache under `url`, and records it.  The row is an index
+    // over the file, so it is written after the file exists.
+    void _cache_attachment(
+            const std::string& url, std::span<const std::byte, 32> key,
+            std::span<const std::byte> data);
+    // Marks a cache entry as used now, which is what makes eviction least-recently-used.
+    void _touch_cached(const std::string& name);
+
+    void _attachment_data(
+            int64_t message_id,
+            size_t index,
+            std::function<void(const AttachmentProgress&)> on_progress,
+            failable_function<void(std::vector<std::byte>)> cb);
+
+    bool _set_gallery(int64_t message_id, bool gallery);
     bool _purge_deleted_message(int64_t message_id);
     size_t _purge_deleted(const ConversationId& id);
     std::optional<std::string> _message_debug(int64_t message_id);

@@ -108,6 +108,24 @@ struct Message {
     /// whose storage server did not report a hash.
     std::optional<std::string> hash;
 
+    /// Whether this message *can* be shown as a gallery rather than as a list of attachments.
+    ///
+    /// Derived, never stored, and the rule is ours: today it is "has attachments, and every one of
+    /// them is an image", but it may narrow to particular formats or gain a size ceiling.  Deriving
+    /// it means a change to that rule takes effect on old messages too, rather than leaving stored
+    /// answers from whatever the rule used to be.
+    bool gallery_viewable = false;
+    /// Whether it *is* being shown that way.
+    ///
+    /// Stored, because it is a decision rather than a property: it is made when the message is
+    /// processed — on if the conversation was auto-downloading then — and the conversation's setting
+    /// may have changed since, so recomputing it later would not give the same answer.
+    ///
+    /// Never true when `gallery_viewable` is false: a stored decision that no longer agrees with
+    /// the current rule is dropped rather than honoured, so a message that qualified under an older
+    /// definition stops claiming to.
+    bool gallery = false;
+
     /// Set once the message has been deleted, saying how far the deletion went.  The row survives
     /// so that a redelivery cannot resurrect it, and so that a message deleted only here can still
     /// be deleted everywhere afterwards.
