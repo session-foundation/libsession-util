@@ -2180,14 +2180,90 @@ UPDATE accounts
 
     // Read back rather than compared against the argument: under `message` a null url leaves the
     // old one in place, so what the account now points at is not what was passed in.
-    if (changed && was) {
+    if (changed) {
         auto now = c.prepared_maybe_get<std::string>(
                 "SELECT profile_pic_url FROM accounts WHERE id = ?", account);
-        if (now != was)
-            _drop_unused_picture(c, *was);
+        if (now != was) {
+            if (was)
+                _drop_unused_picture(c, *was);
+            // `call_soon`, not `call`: this runs inside the reconcile's transaction, and `call`
+            // runs inline when it is already on the loop, so the fetch would take a *different*
+            // pooled connection and read the url this update is in the middle of replacing --
+            // fetching the picture we are on our way to discarding.  `call_soon` always queues, so
+            // it runs after the commit and sees what was actually written.
+            // `call_soon`, not `call`: this runs inside the reconcile's transaction, and `call`
+            // runs inline when it is already on the loop, which would put a network fetch inside
+            // the write transaction and read the row through a second pooled connection that
+            // cannot see it yet.
+            if (now)
+                _prefetch_picture(c, account, *now);
+        }
     }
 
     return changed;
+}
+
+void Client::_prefetch_picture(sqlite::Connection& c, int64_t account, const std::string& url) {
+    // Nowhere to keep it: fetching now would only mean fetching again when it is asked for.
+    if (_cache_dir.empty())
+        return;
+
+    try {
+        // Read here, on the connection that is *in* the transaction, and handed to the fetch as
+        // values.  The fetch itself runs later and cannot read any of this back: the write it is
+        // reacting to belongs to a transaction that commits somewhere above us, and a second pooled
+        // connection sees the row either as it was or not at all.
+        //
+        // `blob_guts<b32>` rather than a loose byte string: a display picture key is 32 bytes under
+        // both schemes, so anything else is not a key we could decrypt with, and rejecting it here
+        // is the same answer the download would give later.
+        auto row = c.prepared_maybe_get<sqlite::blob_guts<b33>, sqlite::blob_guts<b32>>(
+                "SELECT session_id, profile_pic_key FROM accounts "
+                "WHERE id = ? AND profile_pic_key IS NOT NULL",
+                account);
+        if (!row)
+            return;
+
+        auto& [sid, key] = *row;
+
+        loop.call_soon([this,
+                        id = ConversationId::dm(sid),
+                        url,
+                        key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
+            _fetch_picture(id, std::move(url), std::move(key));
+        });
+    } catch (const std::exception& e) {
+        // Best-effort by nature: nothing asked for this, so nothing is owed an error, and this is
+        // inside somebody's transaction -- letting it out would undo the profile update that
+        // prompted it.  The picture is fetched anyway the first time something asks for it.
+        log::warning(cat, "Could not start a profile picture fetch: {}", e.what());
+    }
+}
+
+void Client::_fetch_picture(
+        const ConversationId& id, std::string url, std::vector<std::byte> key) {
+    try {
+        std::function<void(int64_t, int64_t, std::optional<int>)> progress;
+        if (_cbs->display_picture_progress)
+            progress = _dispatch_progress(
+                    [this, id](int64_t done, int64_t total, std::optional<int> r) {
+                        _cbs->display_picture_progress(id, done, total, r);
+                    });
+
+        // No handler for the bytes: this is not fetching *for* anyone, it is putting the file where
+        // whoever asks next will find it.  Nobody is waiting on an answer to be told it is not
+        // coming, and a picture that will not come down now is tried again the moment something
+        // asks for it.
+        _fetch_cached(
+                {url, std::move(key), {}, std::nullopt, DownloadKind::display_pic,
+                 cache::PROFILE_DIR},
+                std::move(progress),
+                nullptr,
+                nullptr,
+                _store_picture(url));
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not fetch a profile picture: {}", e.what());
+    }
 }
 
 void Client::_drop_unused_picture(sqlite::Connection& c, std::string_view url) {

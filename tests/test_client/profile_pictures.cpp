@@ -242,7 +242,6 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
     // client would ever look at it again.
     auto second = publish("new_pic", std::chrono::sys_seconds{2000s});
     sync(*c);
-
     CHECK_FALSE(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, first)));
 
     // ...and the new one still fetches, so what went was the stale file and not the directory.
@@ -253,4 +252,55 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
     sync(*c);
     REQUIRE(got);
     CHECK(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, second)));
+}
+
+TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictures]") {
+    TempCacheDir dir;
+
+    std::vector<std::pair<ConversationId, std::optional<int>>> reported;
+    callbacks cbs;
+    cbs.display_picture_progress =
+            [&](const ConversationId& id, int64_t, int64_t, std::optional<int> r) {
+                reported.emplace_back(id, r);
+            };
+
+    TempClient c{std::move(cbs)};
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> image(1500);
+    session::random::fill(image);
+    auto seed = session::random::random(32);
+    auto [ct, key] = attachment::encrypt(seed, image, attachment::Domain::PROFILE_PIC);
+    net->served["auto_pic"] = ct;
+    auto url = network::file_server::generate_download_url("auto_pic", {}, true);
+
+    auto them = "05" + std::string(64, 'c');
+    auto id = dm_from_hex(them);
+
+    // Nobody has asked for anything: the url arriving in a config is the whole of the trigger.
+    set_picture(c, them, url, key);
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    CHECK(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, url)));
+
+    // Watched from the outside, which is what a list of conversations needs to draw a placeholder:
+    // the 0/0 that says it began, and a terminal result.
+    REQUIRE(reported.size() >= 2);
+    CHECK(reported.front().first == id);
+    CHECK_FALSE(reported.front().second.has_value());
+    CHECK(reported.back().second == 0);
+
+    // And the display, arriving afterwards, is served from the cache rather than fetching the same
+    // picture a second time.
+    std::optional<std::vector<std::byte>> got;
+    c->profile_picture(id, [&](std::optional<std::string>, auto pic) { got = std::move(pic); });
+    sync(*c);
+
+    CHECK(net->downloads.empty());
+    REQUIRE(got);
+    CHECK(*got == image);
 }

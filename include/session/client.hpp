@@ -949,10 +949,19 @@ class Client {
     // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.
     std::function<void(std::span<const std::byte>)> _store_picture(std::string url);
 
-    // Fetches a picture we have just learned the url of, so that it is to hand before anything asks
-    // to draw it.  Unconditional: unlike an attachment there is no setting, because a picture is
-    // small and is wanted the moment the conversation is shown.
-    void _fetch_picture(int64_t account);
+    // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
+    // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a
+    // picture is small and is wanted the moment the conversation is shown.
+    //
+    // Takes the connection because it must read the key on the one whose transaction just wrote it,
+    // and hands the fetch values rather than an account to look up again: the write it is reacting
+    // to is not visible to any other connection until a commit that happens above this call.
+    void _prefetch_picture(sqlite::Connection& c, int64_t account, const std::string& url);
+
+    // Fetches a display picture into the cache for nobody in particular, reporting to
+    // `display_picture_progress` as it goes.
+    void _fetch_picture(
+            const ConversationId& id, std::string url, std::vector<std::byte> key);
 
     // Starts the download behind save_attachment.  Everything after the row lookup happens off the
     // loop, on the network's thread: the file is decrypted and written there, and nothing about it
