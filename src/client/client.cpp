@@ -2044,6 +2044,79 @@ void Client::_reconcile_all() {
     _reconcile_convo_volatile();
 }
 
+bool Client::_update_profile(
+        sqlite::Connection& c,
+        int64_t account,
+        const std::optional<std::string_view>& name,
+        const std::optional<std::string_view>& pic_url,
+        const std::optional<std::span<const std::byte>>& pic_key,
+        int64_t updated,
+        ProfileSource source) {
+
+    auto was = c.prepared_maybe_get<std::string>(
+            "SELECT profile_pic_url FROM accounts WHERE id = ?", account);
+
+    // `IS NOT` rather than `!=`: these columns are NULL until a profile is known, and `NULL != 'x'`
+    // is NULL, so `!=` would never fire for the first name or picture we learn.
+    bool changed =
+            source == ProfileSource::config
+                    ? c.prepared_exec(
+                              R"(
+UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
+WHERE id = ?1
+  AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
+)",
+                              account,
+                              name,
+                              pic_url,
+                              pic_key,
+                              updated) > 0
+                    : c.prepared_exec(
+                              R"(
+UPDATE accounts
+   SET name = coalesce(?2, name),
+       profile_pic_url = coalesce(?3, profile_pic_url),
+       profile_pic_key = coalesce(?4, profile_pic_key),
+       profile_updated = ?5
+ WHERE id = ?1
+   AND (name, profile_pic_url, profile_pic_key, profile_updated)
+       IS NOT (coalesce(?2, name),
+               coalesce(?3, profile_pic_url),
+               coalesce(?4, profile_pic_key),
+               ?5)
+)",
+                              account,
+                              name,
+                              pic_url,
+                              pic_key,
+                              updated) > 0;
+
+    // Read back rather than compared against the argument: under `message` a null url leaves the
+    // old one in place, so what the account now points at is not what was passed in.
+    if (changed && was) {
+        auto now = c.prepared_maybe_get<std::string>(
+                "SELECT profile_pic_url FROM accounts WHERE id = ?", account);
+        if (now != was)
+            _drop_unused_picture(c, *was);
+    }
+
+    return changed;
+}
+
+void Client::_drop_unused_picture(sqlite::Connection& c, std::string_view url) {
+    if (url.empty() || _cache_dir.empty())
+        return;
+
+    // Cheap, and the cost of being wrong is a contact's picture disappearing for no reason they or
+    // we could explain.
+    if (c.prepared_get<int64_t>(
+                "SELECT EXISTS(SELECT 1 FROM accounts WHERE profile_pic_url = ?)", url))
+        return;
+
+    std::error_code ec;
+    std::filesystem::remove(cache::path_for(_cache_dir, cache::PROFILE_DIR, url), ec);
+}
+
 void Client::_reconcile_contacts() {
     auto& contacts = core.configs.contacts();
     auto me = core.globals.session_id();
@@ -2080,7 +2153,7 @@ void Client::_reconcile_contacts() {
             auto id = ConversationId::dm(sid);
             auto account = identity_id(c, id);
 
-            std::optional<std::string> pic_url;
+            std::optional<std::string_view> pic_url;
             std::optional<std::span<const std::byte>> pic_key;
             if (!entry.profile_picture.empty()) {
                 pic_url = entry.profile_picture.url;
@@ -2093,18 +2166,15 @@ void Client::_reconcile_contacts() {
             bool renamed = false;
             if (epoch_seconds(entry.profile_updated) >=
                 c.prepared_get<int64_t>("SELECT profile_updated FROM accounts WHERE id = ?", account))
-                renamed = c.prepared_exec(
-                                  R"(
-UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
-WHERE id = ?1
-  AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
-)",
-                                  account,
-                                  entry.name.empty() ? std::optional<std::string>{}
-                                                     : std::optional<std::string>{entry.name},
-                                  pic_url,
-                                  pic_key,
-                                  epoch_seconds(entry.profile_updated)) > 0;
+                renamed = _update_profile(
+                        c,
+                        account,
+                        entry.name.empty() ? std::optional<std::string_view>{}
+                                           : std::optional<std::string_view>{entry.name},
+                        pic_url,
+                        pic_key,
+                        epoch_seconds(entry.profile_updated),
+                        ProfileSource::config);
 
             // Pro flags are the profile's claim about itself, so they follow the profile.
             c.prepared_exec(
@@ -2529,25 +2599,21 @@ void Client::_reconcile_user_profile() {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
-        std::optional<std::string> pic_url;
+        std::optional<std::string_view> pic_url;
         std::optional<std::span<const std::byte>> pic_key;
         if (!pic.empty()) {
             pic_url = pic.url;
             pic_key = std::span<const std::byte>{pic.key};
         }
 
-        profile_changed =
-                c.prepared_exec(
-                        R"(
-UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
-WHERE id = ?1
-  AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
-)",
-                        identity_id(c, me),
-                        name ? std::optional<std::string>{*name} : std::nullopt,
-                        pic_url,
-                        pic_key,
-                        epoch_seconds(profile.get_profile_updated())) > 0;
+        profile_changed = _update_profile(
+                c,
+                identity_id(c, me),
+                name ? std::optional<std::string_view>{*name} : std::nullopt,
+                pic_url,
+                pic_key,
+                epoch_seconds(profile.get_profile_updated()),
+                ProfileSource::config);
 
         // The config is what says a conversation exists -- a conversation is not defined by having
         // messages in it, or emptying one would lose it, and reimporting an account would lose every
@@ -4423,37 +4489,14 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         // UserProfile config rather than to anything observed on the wire, and `name` here is used
         // to name the conversation partner.
         //
-        // `IS NOT` rather than `!=`: the column is NULL until a name is known, and `NULL != 'x'`
-        // is NULL, so `!=` would never fire for the first name we learn.
         // Only when what they sent is at least as new as what we hold, which is the same test the
         // Contacts config reconcile makes and against the same column: a message that took a week
         // to arrive must not undo a profile change made since.
-        //
-        // Fields the message did not carry are left alone rather than cleared.  Not every message
-        // carries a profile at all, so an absent picture is a silence, not a statement that they
-        // removed it; removal reaches us through the config, which does say so.
         if (!outgoing && data.has_profile() &&
             profile_stamp >= c.prepared_get<int64_t>(
                                      "SELECT profile_updated FROM accounts WHERE id = ?", sender))
-            renamed = c.prepared_exec(
-                              R"(
-                UPDATE accounts
-                   SET name = coalesce(?2, name),
-                       profile_pic_url = coalesce(?3, profile_pic_url),
-                       profile_pic_key = coalesce(?4, profile_pic_key),
-                       profile_updated = ?5
-                 WHERE id = ?1
-                   AND (name, profile_pic_url, profile_pic_key, profile_updated)
-                       IS NOT (coalesce(?2, name),
-                               coalesce(?3, profile_pic_url),
-                               coalesce(?4, profile_pic_key),
-                               ?5)
-            )",
-                              sender,
-                              name,
-                              pic_url,
-                              pic_key,
-                              profile_stamp) > 0;
+            renamed = _update_profile(
+                    c, sender, name, pic_url, pic_key, profile_stamp, ProfileSource::message);
 
         tx.commit();
     }

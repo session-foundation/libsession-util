@@ -196,3 +196,61 @@ TEST_CASE("Client: a picture that will not decrypt is an error, not an absence",
     // And nothing was cached, so asking again tries again rather than serving the failure forever.
     CHECK_FALSE(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, url)));
 }
+
+TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][pictures]") {
+    TempCacheDir dir;
+    TempClient c;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    auto seed = session::random::random(32);
+    auto them = "05" + std::string(64, 'b');
+    auto id = dm_from_hex(them);
+
+    // Descending from our own history rather than pushed fresh each time: two rivals at the same
+    // seqno merge to the union, and a test about a picture being *replaced* needs the second to
+    // supersede the first.
+    auto publish = [&](std::string_view file_id, std::chrono::sys_seconds when) {
+        std::vector<std::byte> image(1000);
+        session::random::fill(image);
+        auto [ct, key] = attachment::encrypt(seed, image, attachment::Domain::PROFILE_PIC);
+        net->served[std::string{file_id}] = ct;
+        auto url = network::file_server::generate_download_url(file_id, {}, true);
+
+        auto pushed = contacts_update_from_another_device(*c.client, [&](config::Contacts& theirs) {
+            auto e = theirs.get_or_construct(them);
+            e.set_name("Padmé");
+            e.profile_updated = when;
+            e.profile_picture = config::profile_pic{url, {key.begin(), key.end()}};
+            theirs.set(e);
+        });
+        merge_contacts(*c.client, pushed);
+        return url;
+    };
+
+    auto first = publish("old_pic", std::chrono::sys_seconds{1000s});
+
+    // Fetched, so there is something on disk to reclaim.
+    c->profile_picture(id, [](auto, auto) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, first)));
+
+    // They change it.  Nothing about the old file is referenced any more, and nothing else in the
+    // client would ever look at it again.
+    auto second = publish("new_pic", std::chrono::sys_seconds{2000s});
+    sync(*c);
+
+    CHECK_FALSE(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, first)));
+
+    // ...and the new one still fetches, so what went was the stale file and not the directory.
+    std::optional<std::vector<std::byte>> got;
+    c->profile_picture(id, [&](std::optional<std::string>, auto pic) { got = std::move(pic); });
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(got);
+    CHECK(std::filesystem::exists(cache::path_for(dir.path, cache::PROFILE_DIR, second)));
+}

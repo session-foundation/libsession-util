@@ -745,6 +745,32 @@ class Client {
     // vanish.  Does nothing when no limit is set.
     void _evict_cache(const std::string& keep);
 
+    // Where a profile reached us from, which is what a field it does not carry means.
+    enum class ProfileSource {
+        config,   // States the whole profile: no picture means they have none.
+        message,  // Mentions one in passing: no picture means it did not say, so keep what we have.
+    };
+
+    // Writes a profile onto an account and returns whether anything changed, dropping the cached
+    // picture the account has stopped using.
+    //
+    // One helper rather than the same UPDATE at each place a profile arrives from: the cleanup
+    // belongs wherever the url changes, and a site that omitted it would strand a file that nothing
+    // afterwards can attribute to anyone.
+    bool _update_profile(
+            sqlite::Connection& c,
+            int64_t account,
+            const std::optional<std::string_view>& name,
+            const std::optional<std::string_view>& pic_url,
+            const std::optional<std::span<const std::byte>>& pic_key,
+            int64_t updated,
+            ProfileSource source);
+
+    // Unlinks a cached profile picture unless some account still names that url.  Unlike an
+    // attachment there is no size limit and no expiry, so a picture nobody points at is reclaimed
+    // only by someone noticing that nobody points at it.
+    void _drop_unused_picture(sqlite::Connection& c, std::string_view url);
+
     void _attachment_data(
             int64_t message_id,
             size_t index,
