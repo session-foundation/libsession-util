@@ -549,18 +549,15 @@ std::vector<std::byte> legacy_decrypt(
                     "Legacy attachment decryption failed: claimed size {}B exceeds the {}B decrypted"_format(
                             unpadded_size, plaintext.size())};
 
-        // And everything past the claimed length must actually be padding.  Session pads with zero
-        // bytes, so a non-zero one there is file content the sender did not declare -- which
-        // truncating to the claim would hand back as a quietly incomplete file rather than an
-        // error.  A size is an exact statement, not a hint: under-reporting is as wrong as
-        // over-reporting, and only one of the two used to be caught.
-        for (auto it = plaintext.begin() + unpadded_size; it != plaintext.end(); ++it)
-            if (*it != std::byte{0})
-                throw std::runtime_error{
-                        "Legacy attachment decryption failed: {}B decrypted but the sender claimed "
-                        "{}B, and what follows is not padding"_format(
-                                plaintext.size(), unpadded_size)};
-
+        // What follows the claimed length is *not* checked, and cannot be.  Our own encryptor pads
+        // with zeroes, but session-android's PaddingInputStream does not: its bulk read reports
+        // having produced `length` padding bytes without writing anything into the buffer, so the
+        // padding is whatever the caller's buffer already held.  Only its single-byte read() emits
+        // 0x00, and nothing reads a file a byte at a time.
+        //
+        // So an attachment from Android is padded with arbitrary bytes, and requiring zeroes here
+        // would reject every one of them.  Under-reporting therefore still truncates silently; the
+        // legacy format gives us nothing to catch it with.
         plaintext.resize(unpadded_size);
     }
 

@@ -752,10 +752,13 @@ TEST_CASE("legacy attachment decryption holds the sender to the size they claime
     CHECK_THROWS(attachment::legacy_decrypt(
             LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() + 1));
 
-    // Under-reporting used to succeed, handing back a file quietly cut short.  A size is an exact
-    // statement: what follows it has to be the padding it claims to be.
-    CHECK_THROWS(attachment::legacy_decrypt(
-            LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() - 1));
+    // Under-reporting is *not* caught, and cannot be: the bytes past the claim would have to be
+    // recognisable as padding, and session-android's padding is whatever its read buffer happened
+    // to contain (PaddingInputStream reports bulk padding without writing it).  So a sender who
+    // under-reports gets a silently truncated file, and the legacy format offers no way to tell.
+    CHECK(attachment::legacy_decrypt(
+                  LEGACY_BLOB, legacy_key(), legacy_digest(), LEGACY_PLAINTEXT.size() - 1)
+                  .size() == LEGACY_PLAINTEXT.size() - 1);
 
     // The honest claim still works, and the padding that legitimately follows it is dropped.
     CHECK(attachment::legacy_decrypt(
