@@ -224,6 +224,39 @@ END;
 -- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
 -- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
 -- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
+-- from 002_attachment_cache.sql
+--
+-- An index over the files in the attachment cache directory, so that "how much disk is this using"
+-- and "what has gone longest without being wanted" are queries rather than a directory walk on
+-- every download.
+--
+-- Deliberately only an index: the disk is what is actually true.  A crash between writing a file
+-- and recording it, or between unlinking one and forgetting it, leaves this describing a directory
+-- that no longer matches -- so eviction checks what it is about to remove rather than trusting a
+-- row, and the sweep reconciles in both directions: rows without files are dropped, files without
+-- rows are adopted at their size on disk.
+--
+-- `name` is the file's name, which is the hashed base url -- the same value `cache::path_for`
+-- produces -- so a row can be matched to a file, and to a `message_attachments.url`, without
+-- storing either the path or the url.
+--
+-- `size` is bytes on disk, encrypted and padded, because that is what the cache limit is a limit
+-- on.  `last_used` is touched on a cache hit as well as on write, which is what makes eviction
+-- least-recently-*used* rather than oldest-first: something opened weekly should not lose to
+-- something downloaded once and never looked at again.
+--
+-- Display pictures are not in here at all.  They are never evicted -- a contact you have not spoken
+-- to in years should not lose the last picture you had of them -- and are freed only when superseded,
+-- which is a question about what still references them rather than about size or age.
+CREATE TABLE attachment_cache (
+    name TEXT PRIMARY KEY NOT NULL,
+    size INTEGER NOT NULL,
+    last_used INTEGER NOT NULL      -- ms since epoch
+) STRICT;
+
+CREATE INDEX attachment_cache_lru ON attachment_cache(last_used);
+
+
 CREATE TABLE message_raw_content (
     message INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     content BLOB NOT NULL
