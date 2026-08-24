@@ -717,6 +717,48 @@ void Client::_profile_picture(
             });
 }
 
+namespace {
+    // Device-local, so `globals` rather than a config: how much disk to spend, and what is worth
+    // fetching unasked, are properties of this machine and not of the account.
+    constexpr auto CACHE_LIMIT_KEY = "client:attachment_cache_limit";
+    constexpr auto AUTO_DL_MAX_KEY = "client:auto_download_max_size";
+}  // namespace
+
+// Absent rather than sentinel: "no limit" is the key not being there, so nothing has to reserve a
+// magic value or decide whether 0 means unlimited or refuse-everything.
+static void set_limit(core::Globals& g, std::string_view key, std::optional<int64_t> bytes) {
+    if (bytes)
+        g.set(key, *bytes);
+    else
+        g.erase(key);
+}
+
+void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, failable_function<void()> cb) {
+    _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
+}
+void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, wait_t) {
+    loop.call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
+}
+void Client::attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb) {
+    _async([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); }, std::move(cb));
+}
+std::optional<int64_t> Client::attachment_cache_limit(wait_t) {
+    return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
+}
+
+void Client::set_auto_download_max_size(std::optional<int64_t> bytes, failable_function<void()> cb) {
+    _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
+}
+void Client::set_auto_download_max_size(std::optional<int64_t> bytes, wait_t) {
+    loop.call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
+}
+void Client::auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb) {
+    _async([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); }, std::move(cb));
+}
+std::optional<int64_t> Client::auto_download_max_size(wait_t) {
+    return loop.call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
+}
+
 void Client::display_name(failable_function<void(std::string)> cb) {
     _async([this] { return std::string{core.configs.user_profile().get_name().value_or("")}; },
            std::move(cb));
@@ -1789,6 +1831,61 @@ bool Client::_delete_message_everywhere(int64_t message_id) {
 // The two purges below are the only thing here that removes a message row outright rather than
 // emptying it, so both are written to be incapable of touching anything a deletion did not leave:
 // the predicate is part of the statement, not a check made before it.
+void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) {
+    // Nowhere to put it: fetching early exists to have the file to hand later, and without a cache
+    // the download would be decrypted, held, and dropped.
+    if (_cache_dir.empty())
+        return;
+
+    auto convo = _conversation(convo_id);
+    if (!convo)
+        return;
+
+    // Unset means nobody has been asked yet, which is not consent.  Nothing is fetched until a
+    // client has put the question to somebody.
+    auto mode = convo->auto_download();
+    if (!mode || *mode == AutoDownload::none)
+        return;
+
+    auto msg = _message(message_id);
+    if (!msg || msg->attachments.empty())
+        return;
+
+    // A gallery is the display this arrived ready for, so it is decided now rather than left to
+    // whoever opens the conversation: the setting may have changed by then, and the answer is meant
+    // to describe how the message arrived.
+    if (msg->gallery_viewable)
+        _set_gallery(message_id, true);
+
+    auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY);
+
+    for (const auto& a : msg->attachments) {
+        if (*mode == AutoDownload::image_attachments &&
+            !(a.content_type && a.content_type->starts_with("image/")))
+            continue;
+
+        // The sender's claim, and all we have before fetching anything.  A sender who under-reports
+        // is not caught here -- what catches that is the transfer being held to the size it
+        // declared -- but this is what stops us starting a download nobody wanted.
+        if (max_size && (!a.size || *a.size > *max_size))
+            continue;
+
+        // No completion handler: this wants the cache filled and nothing else, and whoever
+        // eventually displays the file joins the transfer rather than starting another.
+        //
+        // Progress is broadcast rather than handed to a caller, because there is no caller: a
+        // display that opens midway learns from this that something is already happening.
+        _attachment_data(
+                message_id,
+                a.index,
+                [this, convo_id](const AttachmentProgress& p) {
+                    if (const auto& h = _cbs->attachment_progress)
+                        h(convo_id, p);
+                },
+                nullptr);
+    }
+}
+
 bool Client::_set_gallery(int64_t message_id, bool gallery) {
     // Asked of the message rather than of the row: `gallery_viewable` is about the attachments, and
     // `_message` is what assembles those.  It also applies the same drop of a stale decision that
@@ -4329,6 +4426,9 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _emit_conversation_added(convo_id);
     if (inserted) {
         _reveal_note_to_self(convo_id);
+        // Before the message is announced, so that a display reacting to it already sees whether
+        // this is a gallery rather than being told once and corrected a moment later.
+        _auto_download(convo_id, client_id);
         _emit_message(true, convo_id, client_id);
     }
     if (inserted || renamed)

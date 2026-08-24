@@ -1,4 +1,7 @@
+#include "../../src/client/download_cache.hpp"
 #include "common.hpp"
+
+namespace cache = session::client::cache;
 
 TEST_CASE("Client: an arriving message records the files it names", "[client][attachments]") {
     TempClient c;
@@ -1115,4 +1118,125 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     // The save was told how the transfer it joined was going, not left silent until it finished.
     CHECK_FALSE(saw.empty());
     CHECK(saw.back().result == 0);
+}
+
+TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
+    TempCacheDir dir;
+    std::vector<std::pair<ConversationId, AttachmentProgress>> progress;
+    callbacks cbs;
+    cbs.attachment_progress = [&](const ConversationId& id, const AttachmentProgress& p) {
+        progress.emplace_back(id, p);
+    };
+    TempClient c{cbs};
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, wait);
+
+    std::vector<std::byte> image(4000), doc(4000);
+    random::fill(image);
+    random::fill(doc);
+    auto seed = random::random(32);
+    auto [image_ct, image_key] = attachment::encrypt(seed, image, attachment::Domain::ATTACHMENT);
+    auto [doc_ct, doc_key] = attachment::encrypt(seed, doc, attachment::Domain::ATTACHMENT);
+    net->served["img"] = image_ct;
+    net->served["doc"] = doc_ct;
+
+    auto arrive = [&](std::string hash, bool with_doc) {
+        deliver(*c, peer, "", from_epoch_ms(1000), hash, "", std::nullopt,
+                [&](SessionProtos::DataMessage& data) {
+                    auto* a = data.add_attachments();
+                    a->set_id(1);
+                    a->set_url(network::file_server::generate_download_url("img", {}, true));
+                    a->set_key(std::string{
+                            reinterpret_cast<const char*>(image_key.data()), image_key.size()});
+                    a->set_size(image.size());
+                    a->set_contenttype("image/png");
+                    if (with_doc) {
+                        auto* b = data.add_attachments();
+                        b->set_id(2);
+                        b->set_url(network::file_server::generate_download_url("doc", {}, true));
+                        b->set_key(std::string{
+                                reinterpret_cast<const char*>(doc_key.data()), doc_key.size()});
+                        b->set_size(doc.size());
+                        b->set_contenttype("application/pdf");
+                    }
+                });
+        sync(*c);
+    };
+
+    SECTION("unasked means nothing is fetched") {
+        // Never having been asked is not consent, and is what a client prompts on.
+        REQUIRE_FALSE(c->conversation(convo, wait)->auto_download().has_value());
+        arrive("h1", false);
+        CHECK(net->downloads.empty());
+        CHECK(progress.empty());
+        CHECK_FALSE(c->conversation(convo, wait)->messages(wait)[0].gallery);
+    }
+
+    SECTION("images only fetches the image and leaves the document") {
+        c->conversation(convo, wait)->set_auto_download(AutoDownload::image_attachments, wait);
+        arrive("h2", true);
+        REQUIRE(net->downloads.size() == 1);
+        CHECK(net->downloads[0].download_url.find("img") != std::string::npos);
+
+        // Not a gallery: one of its attachments is not an image, so it cannot be shown as one.
+        auto m = c->conversation(convo, wait)->messages(wait)[0];
+        CHECK_FALSE(m.gallery_viewable);
+        CHECK_FALSE(m.gallery);
+    }
+
+    SECTION("all fetches both, and an all-image message opens as a gallery") {
+        c->conversation(convo, wait)->set_auto_download(AutoDownload::all, wait);
+        arrive("h3", true);
+        CHECK(net->downloads.size() == 2);
+
+        // Two attachments, one of them a pdf: still not gallery viewable even though both were
+        // fetched.  What is downloaded and what can be displayed as a gallery are different
+        // questions.
+        CHECK_FALSE(c->conversation(convo, wait)->messages(wait)[0].gallery);
+
+        arrive("h4", false);
+        auto m = c->conversation(convo, wait)->messages(wait)[0];
+        CHECK(m.gallery_viewable);
+        CHECK(m.gallery);
+    }
+
+    SECTION("a size limit refuses what is too big, before fetching it") {
+        c->conversation(convo, wait)->set_auto_download(AutoDownload::all, wait);
+        c->set_auto_download_max_size(1000, wait);
+        arrive("h5", false);
+        CHECK(net->downloads.empty());
+
+        // Raising it lets the next one through, so the limit is read per message rather than
+        // remembered from startup.
+        c->set_auto_download_max_size(std::nullopt, wait);
+        arrive("h6", false);
+        CHECK(net->downloads.size() == 1);
+    }
+
+    SECTION("the fetch is reported, cached, and never told to the sender") {
+        c->conversation(convo, wait)->set_auto_download(AutoDownload::all, wait);
+        arrive("h7", false);
+        REQUIRE(net->downloads.size() == 1);
+        REQUIRE(serve_downloads(*net, image_ct) == 1);
+        sync(*c);
+
+        // Broadcast, since nobody asked for it and there is no caller to hand a report to.
+        REQUIRE_FALSE(progress.empty());
+        CHECK(progress.back().first == convo);
+        CHECK(progress.back().second.result == 0);
+
+        // In the cache, so opening the conversation costs nothing...
+        CHECK(std::filesystem::exists(
+                cache::path_for(dir.path, cache::ATTACHMENT_DIR,
+                                network::file_server::generate_download_url("img", {}, true))));
+
+        // ...and the sender is *not* told, because nobody has saved anything.  That notification
+        // belongs to a save, whether or not the bytes came from the cache.
+        CHECK(stores(*net).empty());
+    }
 }

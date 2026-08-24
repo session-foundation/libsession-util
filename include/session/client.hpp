@@ -521,6 +521,44 @@ class Client {
             const ConversationId& id,
             failable_function<void(std::optional<std::vector<std::byte>>)> cb);
 
+    /// How much disk the cached attachments may occupy in total, or nullopt for no limit.
+    ///
+    /// Measured as bytes on disk, so it counts what caching actually costs: the files are encrypted
+    /// and padded, which makes the total larger than the same attachments would be as plain files.
+    /// That is the right way round for a disk limit — 5GB means 5GB of disk.
+    ///
+    /// Display pictures are not counted and are never evicted for this.  They are one small file
+    /// per contact, replaced rather than accumulated, and a contact you have not spoken to in years
+    /// should not lose the last picture you had of them; freeing them is the reference sweep's job.
+    ///
+    /// Going over evicts least-recently-*used* entries until it fits — used rather than oldest, so
+    /// something opened weekly does not lose to something downloaded once and never looked at.
+    ///
+    /// Persisted and device-local: a limit set in a settings screen should outlive the process, and
+    /// how much disk to spend is a property of this machine rather than of the account.  Unlike
+    /// `set_cache_dir`, which is the application's to decide every run — a stored path would be the
+    /// wrong one the moment the database moved.
+    void set_attachment_cache_limit(std::optional<int64_t> bytes, failable_function<void()> cb);
+    void set_attachment_cache_limit(std::optional<int64_t> bytes, wait_t);
+    void attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb);
+    std::optional<int64_t> attachment_cache_limit(wait_t);
+
+    /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
+    ///
+    /// Compared against the size in the pointer, which is the file's own length — so a limit of 2MB
+    /// admits files up to 2MB, with no allowance for padding or framing.  That is a claim by the
+    /// sender, and one that is separately held to: a transfer whose contents turn out to be a
+    /// different size from what was declared fails.
+    ///
+    /// Only ever applies to automatic downloads.  `save_attachment` and `attachment_data` are
+    /// somebody asking for one particular file, and are never refused for being large.
+    ///
+    /// Persisted and device-local, for the same reasons as the cache limit.
+    void set_auto_download_max_size(std::optional<int64_t> bytes, failable_function<void()> cb);
+    void set_auto_download_max_size(std::optional<int64_t> bytes, wait_t);
+    void auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb);
+    std::optional<int64_t> auto_download_max_size(wait_t);
+
     // -- Our own account ----------------------------------------------------------------------
     //
     // These read and write the UserProfile config, which follows the account between devices.  They
@@ -707,6 +745,12 @@ class Client {
             size_t index,
             std::function<void(const AttachmentProgress&)> on_progress,
             failable_function<void(std::vector<std::byte>)> cb);
+
+    // Decides what an arriving message's attachments are worth fetching unasked, sets whether it is
+    // shown as a gallery, and starts whatever it decided on.  Does nothing without a cache
+    // directory: the point of fetching early is to have the file to hand, and with nowhere to keep
+    // it the download would be thrown away.
+    void _auto_download(const ConversationId& convo, int64_t message_id);
 
     bool _set_gallery(int64_t message_id, bool gallery);
     bool _purge_deleted_message(int64_t message_id);
