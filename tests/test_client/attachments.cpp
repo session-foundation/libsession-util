@@ -193,14 +193,12 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     std::filesystem::create_directories(dir);
     auto dest = dir / "saved.bin";
 
-    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
+    std::vector<AttachmentProgress> reports;
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
             msg_id, 0, dest,
-            [&](size_t i, int64_t d, int64_t tot, std::optional<int> r) {
-                reports.emplace_back(i, d, tot, r);
-            },
+            [&](const AttachmentProgress& p) { reports.push_back(p); },
             [&](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
             });
@@ -226,11 +224,18 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     // ...and nothing is left behind that could be mistaken for it.
     CHECK_FALSE(std::filesystem::exists(dest.string() + ".part"));
 
-    // Progress reported as a send does: an opening 0/0, then exactly one terminal result.
+    // Progress reported as a send does: an opening 0/0 that says it has begun, then exactly one
+    // terminal result.  Each report says which attachment of which message it is about, since a
+    // caller may be watching several.
     REQUIRE(reports.size() >= 2);
-    CHECK(std::get<3>(reports.front()) == std::nullopt);
-    CHECK(std::get<1>(reports.front()) == 0);
-    CHECK(std::get<3>(reports.back()) == 0);
+    CHECK_FALSE(reports.front().result.has_value());
+    CHECK(reports.front().done == 0);
+    CHECK(reports.front().total == 0);
+    CHECK(reports.back().result == 0);
+    for (const auto& r : reports) {
+        CHECK(r.message_id == msg_id);
+        CHECK(r.index == 0);
+    }
 
     // And the sender is told, since nothing said otherwise.
     sync(*c);

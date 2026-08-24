@@ -908,7 +908,7 @@ void Client::save_attachment(
         int64_t message_id,
         size_t index,
         std::filesystem::path dest,
-        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+        std::function<void(const AttachmentProgress&)> on_progress,
         failable_function<void(std::filesystem::path)> cb,
         bool notify_sender,
         bool replace) {
@@ -3303,7 +3303,7 @@ void Client::_save_attachment(
         int64_t message_id,
         size_t index,
         std::filesystem::path dest,
-        std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+        std::function<void(const AttachmentProgress&)> on_progress,
         failable_function<void(std::filesystem::path)> cb,
         bool notify_sender,
         bool replace) {
@@ -3352,15 +3352,15 @@ void Client::_save_attachment(
     state->dest = std::move(dest);
     state->partial = open_partial(state->out, state->dest);
 
-    // The download reports unindexed; a caller watching several attachments needs to know which, so
-    // the index is bound in before the shared hop.
-    std::function<void(int64_t, int64_t, std::optional<int>)> indexed;
+    // The download reports only numbers; which attachment they are about is this layer's to say, so
+    // the identity is filled in before the shared hop.
+    std::function<void(int64_t, int64_t, std::optional<int>)> identified;
     if (on_progress)
-        indexed = [on_progress = std::move(on_progress), index](
-                          int64_t done, int64_t total, std::optional<int> r) {
-            on_progress(index, done, total, r);
+        identified = [on_progress = std::move(on_progress), message_id, index](
+                             int64_t done, int64_t total, std::optional<int> r) {
+            on_progress(AttachmentProgress{message_id, index, done, total, r});
         };
-    auto report = _dispatch_progress(std::move(indexed));
+    auto report = _dispatch_progress(std::move(identified));
 
     _download_decrypted(
             *url,

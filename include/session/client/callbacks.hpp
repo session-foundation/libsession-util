@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <optional>
+#include <session/client/attachment.hpp>
 #include <session/client/conversation.hpp>
 #include <session/client/conversation_id.hpp>
 #include <session/client/handler.hpp>
@@ -74,6 +75,30 @@ struct callbacks {
     /// the rest.  What deletes messages is a delete-before instruction, which can take any number
     /// of them at once and is not otherwise describable as a sequence of removals.
     std::function<void(const ConversationId&)> history_replaced;
+
+    /// An attachment is being fetched that nobody asked for — see `Conversation::auto_download`.
+    ///
+    /// Only for background fetches.  A `save_attachment` reports to the caller that started it, and
+    /// does not come through here: this handler means "something is happening you did not ask for",
+    /// which is exactly what a display has no other way of learning.
+    ///
+    /// The first report of a transfer arrives when it is *started*, before anything has been sent
+    /// to a server, carrying 0 of 0 — so a row can show that a fetch is beginning rather than
+    /// appearing to do nothing until the first bytes land.  Exactly one report carries a `result`.
+    ///
+    /// Reports are rate limited (see `set_dispatch_interval`) to keep the cost off the application's
+    /// thread.  That is all the limiting is for: how often a spinner turns is the application's own
+    /// business, and it should not be reading motion into the arrival of these.
+    std::function<void(const ConversationId&, const AttachmentProgress&)> attachment_progress;
+
+    /// The same, for a display picture, which belongs to a conversation rather than to a message —
+    /// so it carries no message or index and gets its own handler rather than a struct with two
+    /// fields that are never filled in.
+    ///
+    /// Display pictures are always fetched, with no setting to turn that off, so this fires for
+    /// every one that is not already cached.
+    std::function<void(const ConversationId&, int64_t done, int64_t total, std::optional<int> result)>
+            display_picture_progress;
 };
 
 }  // namespace session::client

@@ -60,6 +60,29 @@ struct OutgoingAttachment {
 /// attachment they are the sender's claims: nothing here has been checked against the file, which
 /// has usually not been fetched at all.  In particular `content_type` and `filename` are chosen by
 /// whoever sent it, so treat them as display hints rather than as facts about the bytes.
+/// How an attachment transfer is going.
+///
+/// Reported two ways, for the two kinds of transfer: handed directly to whoever called
+/// `save_attachment`, and — for a download nobody asked for — broadcast through
+/// `callbacks::attachment_progress`, since a background fetch has no caller to hand anything to.
+struct AttachmentProgress {
+    int64_t message_id;
+    size_t index;
+
+    /// Encrypted bytes so far, and how many are expected.  Encrypted rather than the file's own
+    /// size because that is what is actually being moved and therefore what a proportion should be
+    /// computed from; the two differ by padding and framing.
+    ///
+    /// `total` is 0 until the server has said how big it is, which is not known when a transfer
+    /// starts — so the first report of any transfer is 0 of 0, meaning "beginning".
+    int64_t done = 0;
+    int64_t total = 0;
+
+    /// Unset while it is running, 0 once the file is here and verified, and otherwise the status of
+    /// whatever went wrong.  Exactly one report per transfer carries a value.
+    std::optional<int> result;
+};
+
 struct Attachment {
     /// Position within the message's attachment list.  This is the index `send_message`'s upload
     /// handler reports progress against, and what `save_attachment` takes.

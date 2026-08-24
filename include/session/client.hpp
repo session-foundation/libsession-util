@@ -430,9 +430,7 @@ class Client {
             int64_t message_id,
             size_t index,
             std::filesystem::path dest,
-            std::function<
-                    void(size_t index, int64_t done, int64_t total, std::optional<int> result)>
-                    on_progress,
+            std::function<void(const AttachmentProgress&)> on_progress,
             failable_function<void(std::filesystem::path saved_to)> cb,
             bool notify_sender = true,
             bool replace = false);
@@ -739,7 +737,7 @@ class Client {
             int64_t message_id,
             size_t index,
             std::filesystem::path dest,
-            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_progress,
+            std::function<void(const AttachmentProgress&)> on_progress,
             failable_function<void(std::filesystem::path saved_to)> cb,
             bool notify_sender,
             bool replace);
