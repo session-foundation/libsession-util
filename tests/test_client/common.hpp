@@ -218,9 +218,15 @@ struct Recorder {
     }
 };
 
-/// Waits for anything Client deferred with call_soon -- the coalesced conversation_updated -- to
-/// have run.  Jobs run in the order they were queued, so a job queued afterwards that we wait on
-/// cannot finish first.
+/// Waits for work Client deferred onto the loop -- the coalesced conversation_updated -- to have
+/// run, by queueing a job behind it and waiting on that.
+///
+/// **This does not settle everything.**  `process_job_queue` swaps the queue out and drains only
+/// what was in it, so a `call_soon` issued from *within* a job lands in the next batch and needs
+/// another `sync` to run.  Worse, a job that a transaction queued may run before that transaction
+/// commits, since the commit happens further up the stack than the job knows about -- so a second
+/// connection can see the row as it was, or not at all.  A test that waits on state written that
+/// way is testing the scheduler.  Wait on the observable outcome instead.
 inline void sync(Client& c) {
     c.core.loop().call_get([] { return 0; });
 }
