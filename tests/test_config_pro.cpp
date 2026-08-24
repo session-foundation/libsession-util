@@ -22,8 +22,6 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        // Config never persists the proof version (see ProConfig::load); a loaded proof is v0.
-        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
@@ -34,7 +32,6 @@ TEST_CASE("Pro", "[config][pro]") {
 
         // C
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
-        pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
         pro.proof.expiry_ts = pro_cpp.proof.expiry_at.time_since_epoch().count();
         std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
@@ -80,7 +77,6 @@ TEST_CASE("Pro", "[config][pro]") {
         session::config::ProConfig loaded_pro = {};
         CHECK(loaded_pro.load(encoded));
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
-        CHECK(loaded_pro.proof.version == session::ProProofVersion_v0);  // never persisted
         CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
         CHECK(loaded_pro.proof.rotating_pubkey ==
               pro_cpp.proof.rotating_pubkey);  // derived from seed

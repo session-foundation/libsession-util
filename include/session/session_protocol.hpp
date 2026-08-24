@@ -52,8 +52,6 @@ inline constexpr int STANDARD_PINNED_CONVERSATION_LIMIT = 5;
 /// envelope.
 inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
 
-enum ProProofVersion { ProProofVersion_v0 };
-
 /// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
 /// for all timestamps within one such period and a fresh one at each boundary.
 inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
@@ -83,6 +81,11 @@ inline constexpr auto PRO_RENEWAL_BOUNDARY_MIN_VALIDITY = 5min;
 // Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
 // endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
 // bytes.
+//
+// BUILD_PROOF_DOMAIN is also what pins a proof to its format: the `_v0` in it is part of the signed
+// bytes, so a proof of some future format signed under its own domain simply fails verification
+// here. That is why a proof carries no version field of its own -- and why this literal is a wire
+// constant that must not be "tidied up" along with any C++ renaming.
 inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
 inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
 inline constexpr std::string_view GET_PRO_STATUS_DOMAIN = "ProGetProStatus_";
@@ -99,13 +102,19 @@ enum class ProStatus {
     InvalidUserSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     Valid = SESSION_PROTOCOL_PRO_STATUS_VALID,      // Proof is verified; has not expired
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
+    // Nothing could be evaluated, so whatever is in DecodedPro::proof is not to be trusted. Today
+    // this means the message carried no proof we can read: either the sender attached none, or it
+    // is in a format this client does not know -- a new proof format is a new field/message rather
+    // than a version bump on the existing one, so to an older client it simply does not appear as
+    // `proof`. Deliberately the general "unusable proof" answer rather than a reason-specific one,
+    // so a future unreadable-proof case needs no new status and no caller has to learn one. Such a
+    // message is delivered as non-pro rather than dropped, so a future proof format costs the
+    // sender their Pro affordances on old clients instead of costing them the whole message.
+    Invalid = SESSION_PROTOCOL_PRO_STATUS_INVALID,
 };
 
 class ProProof {
   public:
-    /// Version of the proof set by the Session Pro Backend
-    std::uint8_t version;
-
     /// Opaque revocation tag identifying this proof (from the Session Pro backend)
     b32 revocation_tag;
 
@@ -227,9 +236,8 @@ class ProProof {
             std::span<const std::byte> master_seed, std::chrono::sys_seconds now);
 
     bool operator==(const ProProof& other) const {
-        return version == other.version && revocation_tag == other.revocation_tag &&
-               rotating_pubkey == other.rotating_pubkey && expiry_at == other.expiry_at &&
-               sig == other.sig;
+        return revocation_tag == other.revocation_tag && rotating_pubkey == other.rotating_pubkey &&
+               expiry_at == other.expiry_at && sig == other.sig;
     }
 };
 

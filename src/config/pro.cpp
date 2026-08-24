@@ -25,10 +25,9 @@ bool ProConfig::load(std::string_view bt_encoded) {
         auto seed = d.require_span<std::byte, crypto_sign_ed25519_SEEDBYTES>("r");
         auto sig = d.require_span<std::byte, sizeof(proof.sig)>("s");
 
-        // The config proof format is v0 by definition (a future format takes a new key, not an
-        // in-dict version marker -- an opaque value can't carry a version that describes itself
-        // across a per-key merge).
-        proof.version = ProProofVersion_v0;
+        // A future proof format would take a new config key rather than an in-dict version marker
+        // (an opaque per-key-merged value can't carry a version describing itself), so there is
+        // nothing to select here -- this key holds exactly the proof format below.
         proof.expiry_at = std::chrono::sys_seconds{std::chrono::seconds{expiry}};
         std::memcpy(proof.revocation_tag.data(), tag.data(), proof.revocation_tag.size());
         std::memcpy(proof.sig.data(), sig.data(), proof.sig.size());

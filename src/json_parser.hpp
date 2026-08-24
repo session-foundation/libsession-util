@@ -12,6 +12,7 @@
 #include <session/types.hpp>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace session::json {
 
@@ -37,6 +38,12 @@ std::pair<bool, std::string_view> is(const nlohmann::json& v) {
         return {v.is_boolean(), "a boolean"};
     else if constexpr (std::integral<T>)
         // is_number_integer() (not is_number()) so a fractional value is rejected, not truncated.
+        return {v.is_number_integer(), "an integer"};
+    else if constexpr (std::is_enum_v<T>)
+        // A (scoped) enum reads as its underlying integer -- nlohmann's default serializer converts
+        // through the underlying type (extract's get_to) -- so callers can request the enum
+        // directly rather than reading an integer and casting. No caller does today: this arrived
+        // for the proof `version` read, which no longer exists.
         return {v.is_number_integer(), "an integer"};
     else if constexpr (is_one_of<T, std::string, std::string_view>)
         return {v.is_string(), "a string"};

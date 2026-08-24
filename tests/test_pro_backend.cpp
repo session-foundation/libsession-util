@@ -144,7 +144,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             nlohmann::json j;
             j["status"] = "ok";
             j["result"] = {
-                    {"version", 0},
                     {"expiry_ts", unix_ts},
                     {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
                     {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
@@ -186,7 +185,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 auto result_cpp = parse_pro_proof(json);
 
                 // Validate C and CPP variants
-                REQUIRE(result.proof.version == result_cpp.proof.version);
                 REQUIRE(std::memcmp(
                                 result.proof.revocation_tag.data,
                                 result_cpp.proof.revocation_tag.data(),
@@ -811,7 +809,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     }
     SECTION("pro proof") {
         ProProof proof;
-        proof.version = 0;
         std::memset(proof.revocation_tag.data(), 0x11, proof.revocation_tag.size());
         std::memcpy(proof.rotating_pubkey.data(), rotating_pk.data(), 32);
         proof.expiry_at = expiry;
