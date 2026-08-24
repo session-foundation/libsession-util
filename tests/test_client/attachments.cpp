@@ -1033,3 +1033,86 @@ TEST_CASE("Client: two askers for one attachment share one download", "[client][
     REQUIRE(third);
     CHECK(*third == plaintext);
 }
+
+TEST_CASE("Client: saving joins a fetch already under way", "[client][attachments][join]") {
+    // The direction that *can* combine: something is being accumulated for the cache -- a gallery,
+    // or the auto-downloader -- and a save asks for the same file.  Waiting on it costs nothing,
+    // since that buffer is committed either way, and fetching it twice would be two transfers of
+    // one file.
+    //
+    // (The reverse cannot: a save streams to disk and keeps nothing, so a display arriving midway
+    // has no way to be given the half already written.)
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto net = std::make_shared<MockNetwork>();
+    c->core.set_network(net);
+    c->set_cache_dir(dir.path);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+
+    std::vector<std::byte> plaintext(9000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    net->served["both"] = ciphertext;
+
+    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("both", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            42);
+    sync(*c);
+    auto msg_id = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait)[0].id;
+
+    // A display asks first, so the file is being accumulated.
+    std::optional<std::vector<std::byte>> shown;
+    c->attachment_data(msg_id, 0, nullptr,
+                       [&](std::optional<std::string> err, std::vector<std::byte> d) {
+                           REQUIRE_FALSE(err.has_value());
+                           shown = std::move(d);
+                       });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+
+    // Now a save of the same attachment, while that is still in flight.
+    auto dest = dir.path / "saved.png";
+    std::vector<AttachmentProgress> saw;
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg_id, 0, dest,
+            [&](const AttachmentProgress& p) { saw.push_back(p); },
+            [&](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
+    sync(*c);
+
+    // Still one transfer: the save waited rather than asking for the same bytes again.
+    CHECK(net->downloads.size() == 1);
+
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+    sync(*c);
+
+    // Both callers got what they asked for: the display its bytes, the save its file.
+    REQUIRE(shown);
+    CHECK(*shown == plaintext);
+    REQUIRE(std::filesystem::exists(dest));
+    CHECK(std::filesystem::file_size(dest) == plaintext.size());
+    {
+        std::ifstream in{dest, std::ios::binary};
+        std::vector<std::byte> got(plaintext.size());
+        in.read(reinterpret_cast<char*>(got.data()), got.size());
+        CHECK(!!(got == plaintext));
+    }
+
+    // The save was told how the transfer it joined was going, not left silent until it finished.
+    CHECK_FALSE(saw.empty());
+    CHECK(saw.back().result == 0);
+}
