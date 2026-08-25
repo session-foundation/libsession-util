@@ -35,9 +35,6 @@ namespace {
 
     inline auto cat = log::Cat("network");
 
-    constexpr auto file_server = "filev2.getsession.org"sv;
-    constexpr auto file_server_pubkey =
-            "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
     config::FileServer build_file_server_config(const config::Config& main_config) {
