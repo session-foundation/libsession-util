@@ -135,7 +135,8 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
     // Omits the port when the scheme already implies it, so urls for a default-port server are
     // unchanged from every previous version
     url = file_server::generate_download_url(
-            "abc123"sv, {"http", "example.com", 80, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            "abc123"sv,
+            {"http", "example.com", 80, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
     CHECK(url == "http://example.com/file/abc123");
 
     url = file_server::generate_download_url(
@@ -149,9 +150,9 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
 }
 
 TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
-    // A self-hosted file server on a non-default port. Dropping the port here sent every recipient to
-    // 80/443, which returns a response rather than an error -- so it surfaced as an undecryptable
-    // attachment, far from its cause.
+    // A self-hosted file server on a non-default port. Dropping the port here sent every recipient
+    // to 80/443, which returns a response rather than an error -- so it surfaced as an
+    // undecryptable attachment, far from its cause.
     constexpr auto custom_pubkey =
             "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv;
     auto url = file_server::generate_download_url(
@@ -161,8 +162,8 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     auto parsed = file_server::parse_download_url(url);
     REQUIRE(parsed.has_value());
     CHECK(parsed->scheme == "http"sv);
-    // The port is split OUT of the host: `to_request` builds a destination from the two separately, so
-    // a host still carrying ":8000" would be a valid-looking hostname pointing nowhere.
+    // The port is split OUT of the host: `to_request` builds a destination from the two separately,
+    // so a host still carrying ":8000" would be a valid-looking hostname pointing nowhere.
     CHECK(parsed->host == "192.168.1.2"sv);
     REQUIRE(parsed->port.has_value());
     CHECK(*parsed->port == 8000);
@@ -176,8 +177,9 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     CHECK(parsed->host == "example.com"sv);
     CHECK_FALSE(parsed->port.has_value());
 
-    // An IPv6 literal keeps every colon it came with: the trailing one is a port separator only when a
-    // number follows it, which is the case the whole-string `parse_int` above exists to distinguish.
+    // An IPv6 literal keeps every colon it came with: the trailing one is a port separator only
+    // when a number follows it, which is the case the whole-string `parse_int` above exists to
+    // distinguish.
     parsed = file_server::parse_download_url("http://[::1]/file/abc123"sv);
     REQUIRE(parsed.has_value());
     CHECK(parsed->host == "[::1]"sv);

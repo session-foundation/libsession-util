@@ -42,8 +42,8 @@ LIBSESSION_EXPORT bool session_file_server_parse_download_url(
 /// - `scheme` -- [in] the scheme for the target file server, uses the default file server scheme if
 /// null.
 /// - `host` -- [in] the host for the target file server, uses the default file server host if null.
-/// - `port` -- [in] the port for the target file server, uses the default file server port if 0. Only
-/// written into the url when the scheme does not already imply it.
+/// - `port` -- [in] the port for the target file server, uses the default file server port if 0.
+/// Only written into the url when the scheme does not already imply it.
 /// - `pubkey_hex` -- [in] the pubkey for the target file server (in hex), uses the default file
 /// server pubkey if null.
 /// - `use_stream_encryption` -- [in] flag indicating whether the file should use stream encryption.

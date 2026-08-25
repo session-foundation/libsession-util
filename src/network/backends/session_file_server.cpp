@@ -74,15 +74,15 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 
     info.scheme = std::string{match->base.substr(0, scheme_end)};
 
-    // `to_request` builds a `ServerDestination` from host and port SEPARATELY, so a port left inside
-    // the host reaches the network layer as a valid-looking hostname pointing nowhere.
+    // `to_request` builds a `ServerDestination` from host and port SEPARATELY, so a port left
+    // inside the host reaches the network layer as a valid-looking hostname pointing nowhere.
     auto authority = match->base.substr(scheme_end + 3);
     auto port_sep = authority.rfind(':');
 
     if (port_sep != std::string_view::npos) {
-        // An IPv6 literal is full of colons, so the LAST one is only a port separator when what follows
-        // it is a number. `parse_int` requires the whole string to be consumed, which is what makes
-        // `[::1]` keep its colons and `[::1]:8000` give up just the port.
+        // An IPv6 literal is full of colons, so the last one separates a port only when a number
+        // follows it. `parse_int` must consume the whole string, which is what lets `[::1]` keep
+        // its colons while `[::1]:8000` gives up just the port.
         uint16_t parsed_port = 0;
         if (quic::parse_int(authority.substr(port_sep + 1), parsed_port) && parsed_port != 0) {
             info.port = parsed_port;
@@ -126,8 +126,9 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
     // Omitted when the scheme already implies it, so urls for the default file server are
     // byte-identical to those any other client produces for it.
     const auto port_suffix =
-            (config.port == default_port_for_scheme(config.scheme) ? ""
-                                                                   : fmt::format(":{}", config.port));
+            (config.port == default_port_for_scheme(config.scheme)
+                     ? ""
+                     : fmt::format(":{}", config.port));
 
     auto buf = fmt::format(
             "{}://{}{}/{}",
