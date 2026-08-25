@@ -176,9 +176,16 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     CHECK(parsed->host == "example.com"sv);
     CHECK_FALSE(parsed->port.has_value());
 
-    // A colon that is not a port leaves the host alone
-    parsed = file_server::parse_download_url("http://example.com:notaport/file/abc123"sv);
+    // An IPv6 literal keeps every colon it came with: the trailing one is a port separator only when a
+    // number follows it, which is the case the whole-string `parse_int` above exists to distinguish.
+    parsed = file_server::parse_download_url("http://[::1]/file/abc123"sv);
     REQUIRE(parsed.has_value());
-    CHECK(parsed->host == "example.com:notaport"sv);
+    CHECK(parsed->host == "[::1]"sv);
     CHECK_FALSE(parsed->port.has_value());
+
+    parsed = file_server::parse_download_url("http://[::1]:8000/file/abc123"sv);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->host == "[::1]"sv);
+    REQUIRE(parsed->port.has_value());
+    CHECK(*parsed->port == 8000);
 }

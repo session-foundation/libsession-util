@@ -80,8 +80,9 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     auto port_sep = authority.rfind(':');
 
     if (port_sep != std::string_view::npos) {
-        // `parse_int` requires the WHOLE string to be consumed, so an authority that merely contains
-        // a colon keeps it as part of the host.
+        // An IPv6 literal is full of colons, so the LAST one is only a port separator when what follows
+        // it is a number. `parse_int` requires the whole string to be consumed, which is what makes
+        // `[::1]` keep its colons and `[::1]:8000` give up just the port.
         uint16_t parsed_port = 0;
         if (quic::parse_int(authority.substr(port_sep + 1), parsed_port) && parsed_port != 0) {
             info.port = parsed_port;
