@@ -1,0 +1,43 @@
+name: libession-util Windows with MSVC build test
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - build-msvc-on-gh-workflow
+
+  pull_request:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022]
+    env:
+      SIGNAL_ENV: production
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - run: git config --global core.autocrlf false
+
+      - name: Checkout git repo
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.3.1
+        if: runner.os == 'Windows'
+
+      - name: build libsession-util on Windows with MSVC
+        shell: bash
+        run: mkdir build && cd build && cmake ../  -DCMAKE_CONFIGURATION_TYPES=Release -DCMAKE_BUILD_TYPE=Release -DSUBMODULE_CHECK=OFF -DLOCAL_MIRROR=https://oxen.rocks/deps -DENABLE_ONIONREQ=OFF && ls -la && pwd && make -j16
