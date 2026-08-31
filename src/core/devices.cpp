@@ -42,6 +42,10 @@ static auto cat = log::Cat("core.dev");
 
 static constexpr auto dev_key = "device_unique_id"sv;
 
+// Set by Globals when it *generates* an account, and cleared once the device group exists.  A
+// restored account never sets it: its group, if it has one, belongs to devices we have not met yet.
+static constexpr auto establish_key = "devices_establish_group"sv;
+
 void Devices::init() {
     if (core.globals.get_blob_to(dev_key, self_id))
         log::info(cat, "Loaded existing unique device id: {}", self_id);
@@ -50,6 +54,61 @@ void Devices::init() {
         core.globals.set(dev_key, self_id);
         log::info(cat, "Generated new unique device id: {}", self_id);
     }
+
+    // Here rather than where the account is created, for two reasons: this component initialises
+    // after Globals, so `self_id` does not exist yet at that point, and the flag is persisted, so
+    // an account created by a run that died before reaching this still gets its group.
+    establish_group();
+}
+
+void Devices::_mark_group_owed() {
+    core.globals.set(establish_key, int64_t{1});
+}
+
+void Devices::establish_group() {
+    if (!core.globals.have_account())
+        return;
+    if (!core.globals.get_integer(establish_key).value_or(0))
+        return;
+
+    // Not inside a transaction of our own: both of these open one.  `active_device_keys` also
+    // generates this device's keys if it has none, which is the case being bootstrapped here.
+    auto keys = active_device_keys();
+    auto& key = keys.front();
+    active_account_keys();  // Mints the account's first shared seed if there is not one yet.
+
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+
+    // `broadcast_needed` rather than a bumped seqno is what marks this for pushing: seqno tracks
+    // changes to our *info*, and nothing about our info has changed -- we have gone from being no
+    // device at all to being a registered one, which is a state transition.
+    //
+    // The descriptive fields are left empty deliberately.  An application sets them through
+    // update_info() whenever it gets around to it, and that bumps the seqno normally; a group whose
+    // sole device has no description is honest about what we know, where inventing one would not
+    // be.
+    c.prepared_exec(
+            R"(INSERT INTO devices
+                (unique_id, state, seqno, timestamp, device_type, description, version,
+                 pubkey_mlkem768, pubkey_x25519, broadcast_needed)
+               VALUES (?1, ?2, 1, ?3, '', '', 0, ?4, ?5, 1)
+               ON CONFLICT(unique_id) DO UPDATE SET
+                   state = ?2,
+                   broadcast_needed = 1,
+                   pubkey_mlkem768 = ?4,
+                   pubkey_x25519 = ?5)",
+            self_id,
+            static_cast<int>(device::State::Registered),
+            epoch_seconds(clock_now_s()),
+            std::as_bytes(std::span{key.mlkem768_pub}),
+            std::as_bytes(std::span{key.x25519_pub}));
+
+    core.globals.set(establish_key, int64_t{0});
+
+    tx.commit();
+
+    log::info(cat, "Established device group with this device ({}) as its only member", self_id);
 }
 
 std::string Devices::device_id() const {

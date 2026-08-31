@@ -79,6 +79,10 @@ class Globals final : detail::CoreComponent {
     // Derives and caches the key material for `seed`, and stores the seed if `persist`.
     void _adopt_seed(const cleared_b32& seed, bool persist);
 
+    // Records that a freshly *generated* account owes a device group.  Not called for a restored
+    // account: that one may already have a group belonging to devices we have not met.
+    void _mark_new_account();
+
   public:
     /// Whether this account has an identity yet.
     ///

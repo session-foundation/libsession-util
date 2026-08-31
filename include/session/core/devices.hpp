@@ -131,10 +131,16 @@ class Devices final : detail::CoreComponent {
   public:
   private:
     friend class Core;
+    friend class Globals;
     friend class session::TestHelper;
     explicit Devices(Core& c) : detail::CoreComponent{c} {}
 
     void init() override;
+
+    // Records that this account owes a device group, for `establish_group()` to act on.  Called by
+    // Globals when it generates an account, which is before this component has initialised -- hence
+    // a stored flag rather than doing the work there.
+    void _mark_group_owed();
 
     std::array<std::byte, 32> self_id;
 
@@ -190,6 +196,26 @@ class Devices final : detail::CoreComponent {
     //
     // The state and pk_* fields of the input value are ignored.
     void update_info(const device::Info& info);
+
+    // Creates the account's device group with this device as its only member, if one is owed.
+    //
+    // Owed means the account was *generated* here rather than restored: a brand new account has no
+    // group and nothing else will ever make one, whereas a restored account may already have a
+    // group belonging to devices that are merely offline, and inventing a second one would orphan
+    // them.  `Globals` records which happened; this acts on that record and clears it, so it runs
+    // exactly once per account and survives a crash between creating the account and getting here.
+    //
+    // Does nothing if this device is already registered, so it is safe to call at any time.
+    //
+    // Registering ourselves is what breaks the deadlock the rest of this class sits behind:
+    // `needs_push()` only reports a device group push for a registered device, and the only other
+    // thing that registers one is receiving a group message we can decrypt -- which cannot happen
+    // until some device has pushed one.
+    //
+    // Also mints the account's first shared key seed, since the group payload carries it.  That is
+    // not the same as *publishing* PFS keys: nothing goes to Namespace::AccountPubkeys here, and
+    // until it does no other account treats this one as supporting v2 encryption.
+    void establish_group();
 
     // Stores the X25519 + MLKEM768 keys that make up an "X-Wing" key
     struct XWingKeys {

@@ -167,6 +167,7 @@ void Globals::init() {
         log::info(cat, "Generated new Session account seed");
         _adopt_seed(generate_seed(), true);
         core.configs.initialise_new_account();
+        _mark_new_account();
     } else {
         // defer_account, and nothing stored: the application chooses an identity before this
         // account can do anything.  Nothing else in Core needs the seed at init time -- Devices
@@ -185,7 +186,20 @@ void Globals::create_account() {
     log::info(cat, "Generated new Session account seed");
     _adopt_seed(generate_seed(), true);
     core.configs.initialise_new_account();
+    _mark_new_account();
     tx.commit();
+
+    // After the commit, not inside it: establishing the group opens transactions of its own, and
+    // this connection is thread-unique, so nesting would fail.  Safe to defer -- the flag written
+    // above is what survives a crash here, and Devices::init() acts on it next time.
+    core.devices.establish_group();
+}
+
+// A generated account owes a device group; a restored one does not, since it may already have one
+// belonging to devices that are simply offline.  Recorded rather than acted on here because Devices
+// initialises after this component and has no device id yet during init.
+void Globals::_mark_new_account() {
+    core.devices._mark_group_owed();
 }
 
 void Globals::restore_account(const predefined_seed& seed) {

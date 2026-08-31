@@ -16,6 +16,21 @@ using namespace session;
 using namespace session::core;
 using namespace std::literals;
 
+namespace {
+
+/// A Core whose account was *restored* rather than generated, and which therefore owes no device
+/// group: this is the state a device is in before it has joined one.
+///
+/// A plain `TempCore` generates its account, which now establishes a group with itself as the only
+/// member -- so anything asserting on an unregistered device has to say which of the two it means.
+TempCore restored_core() {
+    std::array<std::byte, 32> seed{};
+    random::fill(seed);
+    return TempCore{core::predefined_seed{std::span<const std::byte, 32>{seed}}};
+}
+
+}  // namespace
+
 TEST_CASE("Devices - identity", "[core][devices]") {
     TempCore c;
 
@@ -38,7 +53,7 @@ TEST_CASE("Devices - identity", "[core][devices]") {
 }
 
 TEST_CASE("Devices - initial state", "[core][devices]") {
-    TempCore c;
+    auto c = restored_core();
 
     SECTION("device_info defaults") {
         auto [info, is_registered] = c->devices.device_info();
@@ -59,7 +74,7 @@ TEST_CASE("Devices - initial state", "[core][devices]") {
 }
 
 TEST_CASE("Devices - update_info and same_user_fields", "[core][devices]") {
-    TempCore c;
+    auto c = restored_core();
 
     SECTION("update_info persists fields and sets seqno=1") {
         device::Info info{};
@@ -285,7 +300,9 @@ TEST_CASE("Devices - device group payload padding", "[core][devices]") {
 }
 
 TEST_CASE("Devices - account keys", "[core][devices]") {
-    TempCore c;
+    // Restored: two sections here are about what the rotation timers say for a device that is *not*
+    // in a group, and a generated account is in one from the moment it exists.
+    auto c = restored_core();
 
     SECTION("active_account_keys returns at least one key with correct sizes") {
         auto keys = c->devices.active_account_keys();
@@ -367,7 +384,9 @@ TEST_CASE("Devices - account keys", "[core][devices]") {
 }
 
 TEST_CASE("Devices - build_link_request", "[core][devices]") {
-    TempCore c;
+    // Restored, not generated: asking to join a group only makes sense for a device that adopted
+    // an existing account's seed.  A device that generated the account *is* the group.
+    auto c = restored_core();
 
     SECTION("returns non-empty message and 21-entry SAS") {
         auto result = c->devices.build_link_request();
@@ -434,5 +453,67 @@ TEST_CASE("Devices - build_account_pubkey_message", "[core][devices]") {
                             sig.size() == 64 && xed25519::verify(sig.first<64>(), x25519_pub, body);
                 });
         CHECK(sig_valid);
+    }
+}
+
+TEST_CASE("Devices - establishing the group", "[core][devices]") {
+
+    SECTION("a generated account establishes a group with itself") {
+        TempCore c;
+
+        auto [info, registered] = c->devices.device_info();
+        CHECK(registered);
+        CHECK(info.state == device::State::Registered);
+        CHECK(info.id == c->devices.device_info().first.id);
+
+        // Exactly one device, and it is us.
+        auto devs = c->devices.devices(true, true, true);
+        REQUIRE(devs.size() == 1);
+        CHECK(devs.begin()->first == info.id);
+
+        // The whole point: a registered device is one that `needs_push` will speak for.  Before
+        // this existed, nothing ever registered a device, so nothing was ever owed a push and no
+        // group could come into being.
+        CHECK(c->devices.needs_push().device_group);
+
+        // The group payload carries the account's shared key seeds, so one is minted here.
+        auto keys = c->devices.active_account_keys();
+        REQUIRE(keys.size() == 1);
+        CHECK_FALSE(keys.front().rotated.has_value());
+    }
+
+    SECTION("a restored account does not") {
+        auto c = restored_core();
+
+        auto [info, registered] = c->devices.device_info();
+        CHECK_FALSE(registered);
+        CHECK(c->devices.devices(true, true, true).empty());
+        CHECK_FALSE(c->devices.needs_push().device_group);
+    }
+
+    SECTION("it survives a restart, and does not happen twice") {
+        std::optional<std::array<std::byte, 32>> first_id;
+        int64_t first_seqno = 0;
+        auto path = std::filesystem::temp_directory_path() /
+                    fmt::format("{}.db", random::unique_id("test_estab", 7));
+        {
+            Core c{path};
+            auto [info, registered] = c.devices.device_info();
+            REQUIRE(registered);
+            first_id = info.id;
+            first_seqno = info.seqno;
+        }
+        {
+            // Reopened: the flag was cleared the first time, so this must not re-register or
+            // re-mint anything -- a second establish would bump the seqno and mint a second key.
+            Core c{path};
+            auto [info, registered] = c.devices.device_info();
+            CHECK(registered);
+            CHECK(info.id == *first_id);
+            CHECK(info.seqno == first_seqno);
+            CHECK(c.devices.active_account_keys().size() == 1);
+        }
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
     }
 }
