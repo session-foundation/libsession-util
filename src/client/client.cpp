@@ -116,6 +116,20 @@ static bool is_terminal(core::MessageSendStatus status) {
     }
 }
 
+// Parses a session ID as a protobuf carries one -- hex, in a syncTarget or a quote's author -- or
+// nullopt if the string is not one.
+//
+// Both the length and the hex-ness have to be checked before converting: `from_hex` on a string
+// that is not hex writes garbage rather than reporting anything, so an unchecked call turns a
+// malformed field into a plausible-looking account.
+static std::optional<b33> parse_session_id(std::string_view hex) {
+    if (hex.size() != 66 || !oxenc::is_hex(hex))
+        return std::nullopt;
+    b33 out;
+    oxenc::from_hex(hex.begin(), hex.end(), reinterpret_cast<char*>(out.data()));
+    return out;
+}
+
 // Returns the accounts row id for a session ID, creating it if this is the first time we have seen
 // the account.  Must be called inside the caller's transaction.
 static int64_t account_id(sqlite::Connection& c, std::span<const std::byte, 33> session_id) {
@@ -4540,7 +4554,8 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     b33 convo_with = msg.sender_session_id;
     if (outgoing && data.has_synctarget()) {
         const auto& target = data.synctarget();
-        if (target.size() != 66 || !oxenc::is_hex(target)) {
+        auto parsed = parse_session_id(target);
+        if (!parsed) {
             log::warning(
                     cat,
                     "Dropping message {}: syncTarget is not a session ID: {}",
@@ -4548,7 +4563,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                     target);
             return;
         }
-        oxenc::from_hex(target.begin(), target.end(), reinterpret_cast<char*>(convo_with.data()));
+        convo_with = *parsed;
     }
 
     if (convo_with[0] != std::byte{0x05}) {
@@ -4649,12 +4664,33 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         // the swarm hash cannot: that copy is stored before it has one.  A sender that set no msgid
         // leaves NULL there, and SQLite treats NULLs as distinct, so those fall back to the swarm
         // hash alone -- enough for a redelivery, not enough for a sender who stored twice.
+        // What this replies to, if anything.  Stored as the sender addressed it -- their author and
+        // timestamp -- and resolved to a local message only on read.
+        //
+        // A quote whose author is not a session id we can parse is dropped rather than failing the
+        // message: an unusable reference is worth less than the message carrying it.  The author is
+        // interned like any other, since in a group it may be someone we have no other row for.
+        std::optional<int64_t> reply_author;
+        std::optional<int64_t> reply_ts;
+        std::optional<int64_t> reply_msgid;
+        if (data.has_quote()) {
+            const auto& q = data.quote();
+            auto author = parse_session_id(q.author());
+            if (author && (*author)[0] == std::byte{0x05}) {
+                reply_author = account_id(c, *author);
+                reply_ts = static_cast<int64_t>(q.msgtimestamp());
+                if (q.has_msgid())
+                    reply_msgid = q.msgid();
+            } else
+                log::warning(cat, "Ignoring a quote with an unparseable author");
+        }
+
         inserted = c.prepared_exec(
                            R"(
             INSERT OR IGNORE INTO messages
                 (conversation, msgid, swarm_hash, sender, outgoing, timestamp, body,
-                 send_state)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 send_state, reply_author, reply_timestamp, reply_msgid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )",
                            convo.id,
                            msgid,
@@ -4666,7 +4702,10 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                            // Retrieving it from a swarm is proof it got there, whichever device
                            // put it there.
                            outgoing ? std::optional<int>{static_cast<int>(SendState::sent)}
-                                    : std::optional<int>{}) > 0;
+                                    : std::optional<int>{},
+                           reply_author,
+                           reply_ts,
+                           reply_msgid) > 0;
         if (inserted) {
             client_id = c.sql.getLastInsertRowid();
             c.prepared_exec(
