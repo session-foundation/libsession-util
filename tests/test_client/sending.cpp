@@ -16,7 +16,7 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(convo, "general kenobi", wait);
+    auto id = c->send_message(convo, {.body = "general kenobi"}, wait);
 
     // A store to the recipient's swarm and one to our own, both into the default namespace, with
     // something in them.
@@ -58,7 +58,7 @@ TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), "into the void", wait);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "into the void"}, wait);
 
     // The swarm refusing the store is what a failure is, rather than us declining to attempt one.
     auto sent = stores(*net);
@@ -72,7 +72,9 @@ TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
 TEST_CASE("Client: sending to a non-DM conversation is rejected", "[client][send]") {
     TempClient c;
     constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-    CHECK_THROWS_AS(c->send_message(ConversationId::group(gid), "hi", wait), std::invalid_argument);
+    CHECK_THROWS_AS(
+            c->send_message(ConversationId::group(gid), {.body = "hi"}, wait),
+            std::invalid_argument);
 }
 
 TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[client][send]") {
@@ -87,7 +89,7 @@ TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[cli
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), "did this land?", wait);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "did this land?"}, wait);
     CHECK(c->message(id, wait)->send_state == SendState::sending);
 
     c.reopen();
@@ -215,7 +217,7 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
     // for `send_state` rather than for the sync copy's.
     TestHelper::seed_pfs_nak(c->core, peer);
 
-    auto id = c->send_message(ConversationId::dm(peer), "hello", wait);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "hello"}, wait);
     sync(*c);
     r.order.clear();
     r.msg_updated.clear();
@@ -332,7 +334,7 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), "two ways", wait);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "two ways"}, wait);
 
     // Which swarm a store is bound for is the pubkey it names, so the two copies can be answered
     // independently and in either order.
@@ -371,7 +373,7 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     auto convo = c->open_dm(ConversationId::dm(me), wait);
     CHECK(convo.id == ConversationId::dm(me));
 
-    auto id = c->send_message(ConversationId::dm(me), "note to self", wait);
+    auto id = c->send_message(ConversationId::dm(me), {.body = "note to self"}, wait);
     CHECK(c->message(id, wait)->body == "note to self");
     CHECK(c->conversation(ConversationId::dm(me), wait)->last_message() == "note to self");
 

@@ -45,7 +45,7 @@ TEST_CASE("Client: answering a request accepts it", "[client][requests]") {
     r.order.clear();
 
     // There is no separate accept: writing to someone is what approving them is.
-    c->send_message(id, "hello yourself", wait);
+    c->send_message(id, {.body = "hello yourself"}, wait);
     sync(*c);
 
     CHECK(c->message_requests(wait).empty());
@@ -87,7 +87,7 @@ TEST_CASE("Client: writing first leaves us awaiting their approval", "[client][r
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
 
-    c->send_message(id, "are you there?", wait);
+    c->send_message(id, {.body = "are you there?"}, wait);
     sync(*c);
 
     // The mirror of a request: we are in *their* requests list, and nothing they could be sent
@@ -109,7 +109,7 @@ TEST_CASE("Client: note to self is never a message request", "[client][requests]
     TempClient c;
     auto me = self_convo(*c.client);
 
-    c->send_message(me, "a note", wait);
+    c->send_message(me, {.body = "a note"}, wait);
     sync(*c);
 
     CHECK(c->message_requests(wait).empty());

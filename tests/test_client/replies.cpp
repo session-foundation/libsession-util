@@ -387,3 +387,68 @@ TEST_CASE("Client: many distinct reply targets load correctly", "[client][replie
     }
     CHECK(checked == n);
 }
+
+TEST_CASE("Client: a sent reply names what it answers", "[client][replies][send]") {
+    TempClient c;
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+    auto convo = ConversationId::dm(me);
+
+    auto first = c->send_message(convo, {.body = "the original"}, wait);
+    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, wait);
+    sync(*c);
+
+    auto msg = c->message(second, wait);
+    REQUIRE(msg);
+    REQUIRE(msg->reply);
+    CHECK(msg->reply->author == me);
+    REQUIRE(msg->reply->message_id.has_value());
+    CHECK(*msg->reply->message_id == first);
+
+    // Our own reply resolves through the same rule as an incoming one, so the message comes with
+    // it rather than only the reference.
+    REQUIRE(msg->reply->message);
+    CHECK(msg->reply->message->body == "the original");
+}
+
+TEST_CASE("Client: a sent reply puts a quote on the wire", "[client][replies][send]") {
+    TempClient c;
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+    auto convo = ConversationId::dm(me);
+
+    auto first = c->send_message(convo, {.body = "the original"}, wait);
+    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, wait);
+    sync(*c);
+
+    // What was stored is what goes out, so the wire form is checkable from the raw content.
+    auto dump = c->message_debug(second, wait);
+    REQUIRE(dump);
+    CHECK(dump->find("quote") != std::string::npos);
+    CHECK(dump->find("msgTimestamp") != std::string::npos);
+    // The snippet is deliberately absent: current clients do not send one, and one that arrives
+    // would not be trusted.
+    CHECK(dump->find("text") == std::string::npos);
+}
+
+TEST_CASE("Client: reply_to must name a message in this conversation", "[client][replies][send]") {
+    TempClient c;
+    SenderKeys peer;
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto mine = c->send_message(ConversationId::dm(me), {.body = "a note"}, wait);
+
+    // Nonexistent, and in another conversation: both are caller error, and both are refused on the
+    // calling thread rather than accepted and then silently dropped.
+    CHECK_THROWS_AS(
+            c->send_message(ConversationId::dm(me), {.body = "x", .reply_to = 999999}, wait),
+            std::invalid_argument);
+
+    c->open_dm(ConversationId::dm(peer.session_id), wait);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    CHECK_THROWS_AS(
+            c->send_message(
+                    ConversationId::dm(peer.session_id), {.body = "x", .reply_to = mine}, wait),
+            std::invalid_argument);
+}

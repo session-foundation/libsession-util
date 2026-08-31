@@ -142,47 +142,26 @@ void Conversation::set_auto_download(AutoDownload mode, wait_t) {
 // -- Sending ------------------------------------------------------------------------------------
 
 void Conversation::send_message(
-        std::string_view body, failable_function<void(int64_t message_id)> cb) {
-    _client->_require_dm("send_message", id);
-    _client->_async(
-            [c = _client, id = id, body = std::string{body}] { return c->_send_message(id, body); },
-            std::move(cb));
-}
-int64_t Conversation::send_message(std::string_view body, wait_t) {
-    _client->_require_dm("send_message", id);
-    return _client->loop.call_get([this, body] { return _client->_send_message(id, body); });
-}
-
-void Conversation::send_message(
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
-        upload_progress on_upload,
+        OutgoingMessage msg, upload_progress on_upload,
         failable_function<void(int64_t message_id)> cb) {
-    _client->_require_dm("send_message", id);
-    _client->_require_readable(attachments);
+    _client->_require_sendable("send_message", id, msg);
     _client->_async(
-            [c = _client,
-             id = id,
-             body = std::string{body},
-             attachments = std::move(attachments),
-             on_upload = std::move(on_upload)] {
-                return c->_send_message(id, body, attachments, on_upload);
+            [c = _client, id = id, msg = std::move(msg), on_upload = std::move(on_upload)] {
+                return c->_send_message(id, msg, on_upload);
             },
             std::move(cb));
 }
-int64_t Conversation::send_message(
-        std::string_view body, std::vector<OutgoingAttachment> attachments, wait_t) {
-    return send_message(body, std::move(attachments), nullptr, wait);
+void Conversation::send_message(
+        OutgoingMessage msg, failable_function<void(int64_t message_id)> cb) {
+    send_message(std::move(msg), nullptr, std::move(cb));
 }
-int64_t Conversation::send_message(
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
-        upload_progress on_upload,
-        wait_t) {
-    _client->_require_dm("send_message", id);
-    _client->_require_readable(attachments);
+int64_t Conversation::send_message(OutgoingMessage msg, wait_t) {
+    return send_message(std::move(msg), nullptr, wait);
+}
+int64_t Conversation::send_message(OutgoingMessage msg, upload_progress on_upload, wait_t) {
+    _client->_require_sendable("send_message", id, msg);
     return _client->loop.call_get([&] {
-        return _client->_send_message(id, body, attachments, std::move(on_upload));
+        return _client->_send_message(id, msg, std::move(on_upload));
     });
 }
 

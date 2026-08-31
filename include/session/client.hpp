@@ -243,30 +243,24 @@ class Client {
     /// See `Conversation::send_message` for what the arguments mean and what `on_upload` reports.
     ///
     /// @throws std::invalid_argument if the conversation is not a DM (groups and communities are
-    /// not implemented yet), or if an attachment cannot be read; thrown on the calling thread,
-    /// before anything is stored or dispatched.
+    /// not implemented yet), if an attachment cannot be read, or if `reply_to` names a message that
+    /// does not exist or belongs to another conversation; thrown on the calling thread, before
+    /// anything is stored or dispatched.
     void send_message(
             const ConversationId& id,
-            std::string_view body,
+            OutgoingMessage msg,
+            Conversation::upload_progress on_upload,
             failable_function<void(int64_t message_id)> cb);
     void send_message(
             const ConversationId& id,
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
-            Conversation::upload_progress on_upload,
+            OutgoingMessage msg,
             failable_function<void(int64_t message_id)> cb);
-    int64_t send_message(const ConversationId& id, std::string_view body, wait_t);
     int64_t send_message(
             const ConversationId& id,
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
+            OutgoingMessage msg,
             Conversation::upload_progress on_upload,
             wait_t);
-    int64_t send_message(
-            const ConversationId& id,
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
-            wait_t);
+    int64_t send_message(const ConversationId& id, OutgoingMessage msg, wait_t);
 
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
@@ -833,12 +827,12 @@ class Client {
             std::optional<MessageCursor> before,
             bool include_deleted);
     std::optional<Message> _message(int64_t id);
-    int64_t _send_message(const ConversationId& id, std::string_view body);
+    int64_t _send_message(const ConversationId& id, const OutgoingMessage& msg);
     int64_t _send_message(
             const ConversationId& id,
-            std::string_view body,
-            const std::vector<OutgoingAttachment>& attachments,
+            const OutgoingMessage& msg,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+
 
     // Uploads the message's first attachment that has no url yet and, when there are none left,
     // finishes the send.  Each upload's completion calls this again, so the chain runs one file at
@@ -1019,6 +1013,16 @@ class Client {
     void _require_dm(std::string_view op, const ConversationId& id);
     void _require_contact(std::string_view op, const ConversationId& id);
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
+
+    // Everything a send must be able to reject before storing anything: the conversation kind, the
+    // attachment files, and the message being replied to.  Together in one place so that a caller
+    // gets one answer rather than discovering the next problem after fixing the first, and so that
+    // every send overload is guarded identically.
+    //
+    // On the calling thread, so caller error surfaces at the call site rather than inside the loop
+    // where a callback form could only log it.
+    void _require_sendable(
+            std::string_view op, const ConversationId& id, const OutgoingMessage& msg);
 
     core::callbacks _core_callbacks();
     void _init();

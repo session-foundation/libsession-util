@@ -63,6 +63,33 @@ enum class Deletion : int {
     everywhere = 2  ///< Deleted here, and asked to be deleted wherever else it reached.
 };
 
+/// A message to send: everything about it that is the caller's to decide.
+///
+/// One struct rather than an overload per combination, so that gaining an optional field costs a
+/// field rather than doubling the overload set — which it had already done once.  Designated
+/// initialisers make a call say which parts it is using:
+///
+///     convo->send_message({.body = "hi"}, wait);
+///     convo->send_message({.body = "look", .attachments = {...}}, on_upload, wait);
+///     convo->send_message({.body = "agreed", .reply_to = other_id}, wait);
+struct OutgoingMessage {
+    std::string body;
+
+    /// Files to send with it.  See the attachment overloads' notes on what sending these costs and
+    /// how progress is reported: with any attachment present, sending becomes two-stage.
+    std::vector<OutgoingAttachment> attachments;
+
+    /// The message this answers, by local id.
+    ///
+    /// An id rather than the author and timestamp the wire wants, because everything beyond the id
+    /// is ours to look up — and a caller holding a message it is looking at has the id and nothing
+    /// else, so asking for the rest would be asking it to guess.
+    ///
+    /// @throws std::invalid_argument, on the calling thread, if this names a message that does not
+    /// exist or that belongs to another conversation.
+    std::optional<int64_t> reply_to;
+};
+
 struct Message;
 
 /// What a message is a reply to.

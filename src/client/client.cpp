@@ -584,6 +584,36 @@ void Client::_require_readable(const std::vector<OutgoingAttachment>& attachment
     }
 }
 
+void Client::_require_sendable(
+        std::string_view op, const ConversationId& id, const OutgoingMessage& msg) {
+    _require_dm(op, id);
+    _require_readable(msg.attachments);
+
+    if (!msg.reply_to)
+        return;
+
+    // Reading the database from the calling thread, which nothing else here does -- but the
+    // alternative is to accept the send, discover inside the loop that the target is not there, and
+    // have only a callback to say so.  A caller naming a message that does not exist has made a
+    // mistake at the call site, and that is where it should be reported.
+    auto found = loop.call_get([this, id, target = *msg.reply_to] {
+        auto c = core.database().conn();
+        return c.prepared_maybe_get<int64_t>(
+                R"(
+            SELECT m.id FROM messages m
+              JOIN conversations c ON c.id = m.conversation
+              JOIN accounts a ON a.id = c.dm
+             WHERE m.id = ? AND a.session_id = ?
+        )",
+                target,
+                id.session_id());
+    });
+    if (!found)
+        throw std::invalid_argument{
+                "{}: reply_to message {} does not exist in this conversation"_format(
+                        op, *msg.reply_to)};
+}
+
 void Client::_require_dm(std::string_view op, const ConversationId& id) {
     // Checked on the calling thread so caller error surfaces at the call site rather than inside
     // the loop, where the callback form would only be able to log it.
@@ -1087,20 +1117,22 @@ bool Client::purge_deleted_message(int64_t message_id, wait_t) {
 
 void Client::send_message(
         const ConversationId& id,
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
+        OutgoingMessage msg,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
         std::function<void(std::optional<std::string>, int64_t)> cb) {
-    _require_dm("send_message", id);
-    _require_readable(attachments);
+    _require_sendable("send_message", id, msg);
 
-    _async([this,
-            id,
-            body = std::string{body},
-            attachments = std::move(attachments),
-            on_upload = std::move(
-                    on_upload)] { return _send_message(id, body, attachments, on_upload); },
+    _async([this, id, msg = std::move(msg), on_upload = std::move(on_upload)] {
+        return _send_message(id, msg, on_upload);
+    },
            std::move(cb));
+}
+
+void Client::send_message(
+        const ConversationId& id,
+        OutgoingMessage msg,
+        std::function<void(std::optional<std::string>, int64_t)> cb) {
+    send_message(id, std::move(msg), nullptr, std::move(cb));
 }
 
 // Callback forms: dispatch and return, delivering the result on the loop thread.
@@ -1142,30 +1174,17 @@ std::optional<Message> Client::message(int64_t id, wait_t) {
     return loop.call_get([this, id] { return _message(id); });
 }
 
-int64_t Client::send_message(const ConversationId& id, std::string_view body, wait_t) {
-    _require_dm("send_message", id);
-    return loop.call_get([this, id, body] { return _send_message(id, body); });
+int64_t Client::send_message(const ConversationId& id, OutgoingMessage msg, wait_t) {
+    return send_message(id, std::move(msg), nullptr, wait);
 }
 
 int64_t Client::send_message(
         const ConversationId& id,
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
-        wait_t) {
-    return send_message(id, body, std::move(attachments), nullptr, wait);
-}
-
-int64_t Client::send_message(
-        const ConversationId& id,
-        std::string_view body,
-        std::vector<OutgoingAttachment> attachments,
+        OutgoingMessage msg,
         Conversation::upload_progress on_upload,
         wait_t) {
-    _require_dm("send_message", id);
-    _require_readable(attachments);
-    return loop.call_get([&] {
-        return _send_message(id, body, attachments, std::move(on_upload));
-    });
+    _require_sendable("send_message", id, msg);
+    return loop.call_get([&] { return _send_message(id, msg, std::move(on_upload)); });
 }
 
 void Client::conversation(
@@ -1210,14 +1229,6 @@ DM Client::open_dm(const ConversationId& id, wait_t) {
 void Client::message(
         int64_t id, std::function<void(std::optional<std::string>, std::optional<Message>)> cb) {
     _async([this, id] { return _message(id); }, std::move(cb));
-}
-
-void Client::send_message(
-        const ConversationId& id,
-        std::string_view body,
-        std::function<void(std::optional<std::string>, int64_t)> cb) {
-    _require_dm("send_message", id);
-    _async([this, id, body = std::string{body}] { return _send_message(id, body); }, std::move(cb));
 }
 
 void Client::save_attachment(
@@ -3231,7 +3242,50 @@ std::optional<std::string> Client::_message_debug(int64_t message_id) {
     return proto::debug_print(content);
 }
 
-int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
+namespace {
+
+// The reference a quote puts on the wire, read from the message being replied to.
+struct WireRef {
+    b33 author;
+    sys_ms timestamp;
+    std::optional<int64_t> msgid;
+};
+
+// Nullopt if the message is gone by the time the send happens: a send is not worth failing over a
+// reference that can simply be omitted.
+std::optional<WireRef> wire_ref(sqlite::Connection& c, int64_t message_id) {
+    auto row = c.prepared_maybe_get<sqlite::blob_guts<b33>, int64_t, std::optional<int64_t>>(
+            R"(
+        SELECT a.session_id, m.timestamp, m.msgid
+        FROM messages m JOIN accounts a ON a.id = m.sender
+        WHERE m.id = ?
+    )",
+            message_id);
+    if (!row)
+        return std::nullopt;
+
+    auto& [author, ts, msgid] = *row;
+    return WireRef{.author = author, .timestamp = from_epoch_ms(ts), .msgid = msgid};
+}
+
+// Writes a quote naming `ref` onto an outgoing DataMessage.
+//
+// Only the reference goes on.  `text` and the quoted attachments are left unset, because current
+// clients do not populate them either, and one that arrives is not to be trusted: a sender can put
+// whatever words they like in someone else's mouth that way.  Receivers render from their own copy
+// of the message, or from nothing.
+void set_quote(SessionProtos::DataMessage& data, const WireRef& ref) {
+    auto* q = data.mutable_quote();
+    q->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(ref.timestamp)));
+    q->set_author(oxenc::to_hex(ref.author.begin(), ref.author.end()));
+    if (ref.msgid)
+        q->set_msgid(*ref.msgid);
+}
+
+}  // namespace
+
+int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& msg) {
+    auto body = msg.body;
     if (id.type() != ConversationId::Type::dm)
         throw std::invalid_argument{
                 "send_message: only DM conversations are supported so far (got type {})"_format(
@@ -3244,8 +3298,18 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     // every party agrees on, unlike a hash of copies that differ.
     auto msgid = new_msgid();
 
+    // Read before the content is built, because the quote goes inside it.  `_require_sendable` has
+    // already established that this message exists and belongs to this conversation.
+    std::optional<WireRef> reply;
+    if (msg.reply_to) {
+        auto c = core.database().conn();
+        reply = wire_ref(c, *msg.reply_to);
+    }
+
     SessionProtos::Content content;
-    fill_outgoing_content(content, now, msgid, body);
+    auto* data = fill_outgoing_content(content, now, msgid, body);
+    if (reply)
+        set_quote(*data, *reply);
 
     // Two artifacts: the copy the recipient gets, and the copy we deposit in our own swarm so that
     // our other devices see it.  They differ only in syncTarget, which is what tells those devices
@@ -3277,8 +3341,8 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
                 R"(
             INSERT INTO messages
                 (conversation, msgid, sender, outgoing, timestamp, body, send_state,
-                 sync_send_state)
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                 sync_send_state, reply_author, reply_timestamp, reply_msgid)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
         )",
                 convo.id,
                 msgid,
@@ -3287,7 +3351,12 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
                 body,
                 static_cast<int>(SendState::pending),
                 to_self ? std::optional<int>{}
-                        : std::optional{static_cast<int>(SendState::pending)});
+                        : std::optional{static_cast<int>(SendState::pending)},
+                // Stored as the wire form, exactly as an incoming reply is, so that our own message
+                // resolves through the same rule as everyone else's rather than a second one.
+                reply ? std::optional{account_id(c, reply->author)} : std::nullopt,
+                reply ? std::optional{epoch_ms(reply->timestamp)} : std::nullopt,
+                reply ? reply->msgid : std::nullopt);
         client_id = c.sql.getLastInsertRowid();
         log::debug(
                 cat, "send_message: stored message {} ({}B content)", client_id, serialised.size());
@@ -3403,12 +3472,13 @@ static std::string infer_content_type(const std::filesystem::path& path) {
 
 int64_t Client::_send_message(
         const ConversationId& id,
-        std::string_view body,
-        const std::vector<OutgoingAttachment>& attachments,
+        const OutgoingMessage& msg,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload) {
+    const auto& attachments = msg.attachments;
     if (attachments.empty())
-        return _send_message(id, body);
+        return _send_message(id, msg);
 
+    auto body = msg.body;
     auto now = clock_now_ms();
     auto self = core.globals.session_id();
     bool to_self = is_me(id.session_id());
@@ -3418,6 +3488,12 @@ int64_t Client::_send_message(
     // rewritten in _finish_attachment_send once they do.  The identifier is not: it belongs to the
     // message rather than to any particular rendering of it, so it is generated here and reused.
     auto msgid = new_msgid();
+
+    std::optional<WireRef> reply;
+    if (msg.reply_to) {
+        auto c = core.database().conn();
+        reply = wire_ref(c, *msg.reply_to);
+    }
 
     SessionProtos::Content content;
     fill_outgoing_content(content, now, msgid, body);
@@ -3438,8 +3514,8 @@ int64_t Client::_send_message(
                 R"(
             INSERT INTO messages
                 (conversation, msgid, sender, outgoing, timestamp, body, send_state,
-                 sync_send_state)
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                 sync_send_state, reply_author, reply_timestamp, reply_msgid)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
         )",
                 convo.id,
                 msgid,
@@ -3448,7 +3524,13 @@ int64_t Client::_send_message(
                 body,
                 static_cast<int>(SendState::uploading),
                 to_self ? std::optional<int>{}
-                        : std::optional{static_cast<int>(SendState::uploading)});
+                        : std::optional{static_cast<int>(SendState::uploading)},
+                // The reference is stored now even though the content that goes out is rewritten
+                // later: `_finish_attachment_send` rebuilds the quote from these columns, so what
+                // is sent and what we show come from the same place.
+                reply ? std::optional{account_id(c, reply->author)} : std::nullopt,
+                reply ? std::optional{epoch_ms(reply->timestamp)} : std::nullopt,
+                reply ? reply->msgid : std::nullopt);
         client_id = c.sql.getLastInsertRowid();
 
         c.prepared_exec(
@@ -4448,14 +4530,26 @@ void Client::_finish_attachment_send(int64_t client_id) {
     {
         auto c = core.database().conn();
 
-        auto row = c.prepared_maybe_get<int64_t, std::string, int64_t, std::optional<MsgId>>(
-                "SELECT conversation, body, timestamp, msgid FROM messages WHERE id = ?",
+        auto row = c.prepared_maybe_get<
+                int64_t,
+                std::string,
+                int64_t,
+                std::optional<MsgId>,
+                std::optional<sqlite::blob_guts<b33>>,
+                std::optional<int64_t>,
+                std::optional<int64_t>>(
+                R"(
+            SELECT m.conversation, m.body, m.timestamp, m.msgid,
+                   ra.session_id, m.reply_timestamp, m.reply_msgid
+            FROM messages m LEFT JOIN accounts ra ON ra.id = m.reply_author
+            WHERE m.id = ?
+        )",
                 client_id);
         if (!row) {
             log::warning(cat, "Cannot finish message {}: it is gone", client_id);
             return;
         }
-        auto [convo_row, msg_body, msg_ts, msg_id] = *row;
+        auto [convo_row, msg_body, msg_ts, msg_id, reply_author, reply_ts, reply_msgid] = *row;
         convo_id = conversation_id_at(c, convo_row);
         body = std::move(msg_body);
         timestamp = msg_ts;
@@ -4464,6 +4558,16 @@ void Client::_finish_attachment_send(int64_t client_id) {
         // make this a different message, and a new identifier here would leave the copy we already
         // showed the user and the copy we send disagreeing about which message they are.
         auto* data = fill_outgoing_content(content, from_epoch_ms(timestamp), msg_id, body);
+
+        // Rebuilt from the row for the same reason as everything else here: what goes out has to be
+        // reconstructible by whatever finds the message, not only by the call that started it.
+        if (reply_author && reply_ts)
+            set_quote(
+                    *data,
+                    WireRef{
+                            .author = *reply_author,
+                            .timestamp = from_epoch_ms(*reply_ts),
+                            .msgid = reply_msgid});
 
         for (auto&& [url, key, size, ctype, fname, caption, flags, width, height] :
              c.prepared_results<

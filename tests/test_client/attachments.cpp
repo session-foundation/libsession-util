@@ -107,10 +107,12 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
 
     auto id = c->send_message(
             ConversationId::dm(me),
-            "",
-            {OutgoingAttachment{.path = photo, .caption = "on the beach"},
-             OutgoingAttachment{.path = doc, .content_type = "application/x-my-own", .width = 4},
-             OutgoingAttachment{.path = mystery, .voice_message = true}}, wait);
+            {.attachments =
+                     {OutgoingAttachment{.path = photo, .caption = "on the beach"},
+                      OutgoingAttachment{
+                              .path = doc, .content_type = "application/x-my-own", .width = 4},
+                      OutgoingAttachment{.path = mystery, .voice_message = true}}},
+            wait);
 
     auto msg = c->message(id, wait);
     REQUIRE(msg.has_value());
@@ -374,7 +376,9 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     }
 
     auto id = c->send_message(
-            ConversationId::dm(me), "here it is", {OutgoingAttachment{.path = source}}, wait);
+            ConversationId::dm(me),
+            {.body = "here it is", .attachments = {OutgoingAttachment{.path = source}}},
+            wait);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
@@ -432,7 +436,9 @@ TEST_CASE("Client: a save does not destroy files it was not asked to touch",
         out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
     }
     auto id = c->send_message(
-            ConversationId::dm(me), "here", {OutgoingAttachment{.path = source}}, wait);
+            ConversationId::dm(me),
+            {.body = "here", .attachments = {OutgoingAttachment{.path = source}}},
+            wait);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
@@ -491,7 +497,9 @@ TEST_CASE("Client: an approved replacement is not renamed out of the way",
         out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
     }
     auto id = c->send_message(
-            ConversationId::dm(me), "here", {OutgoingAttachment{.path = source}}, wait);
+            ConversationId::dm(me),
+            {.body = "here", .attachments = {OutgoingAttachment{.path = source}}},
+            wait);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
@@ -543,8 +551,7 @@ TEST_CASE("Client: saving what we sent someone else does not claim they saved it
 
     auto id = c->send_message(
             ConversationId::dm(peer.session_id),
-            "for you",
-            {OutgoingAttachment{.path = source}},
+            {.body = "for you", .attachments = {OutgoingAttachment{.path = source}}},
             wait);
     sync(*c);
     REQUIRE(accept_stores(*net) >= 1);
@@ -593,8 +600,9 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
 
     auto id = c->send_message(
             ConversationId::dm(peer.session_id),
-            "two of them",
-            {OutgoingAttachment{.path = one}, OutgoingAttachment{.path = two}}, wait);
+            {.body = "two of them",
+             .attachments = {OutgoingAttachment{.path = one}, OutgoingAttachment{.path = two}}},
+            wait);
     sync(*c);
     REQUIRE(accept_stores(*net) == 2);
 
@@ -761,8 +769,9 @@ TEST_CASE(
     CHECK_THROWS_AS(
             c->send_message(
                     ConversationId::dm(me),
-                    "here you go",
-                    {OutgoingAttachment{.path = "/nonexistent/nope.png"}}, wait),
+                    {.body = "here you go",
+                     .attachments = {OutgoingAttachment{.path = "/nonexistent/nope.png"}}},
+                    wait),
             std::invalid_argument);
 
     // Rejected before anything was stored, rather than leaving a message that can never be sent --
@@ -792,8 +801,7 @@ TEST_CASE(
     // would wait forever.
     auto id = c->send_message(
             ConversationId::dm(me),
-            "here you go",
-            {OutgoingAttachment{.path = file}},
+            {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
             [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
                 reports.emplace_back(idx, sent, total, result);
             }, wait);
@@ -833,8 +841,7 @@ TEST_CASE(
     std::vector<std::optional<int>> results;
     auto id = c->send_message(
             ConversationId::dm(me),
-            "here you go",
-            {OutgoingAttachment{.path = file}},
+            {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
             [&](size_t, int64_t, int64_t, std::optional<int> result) {
                 results.push_back(result);
             }, wait);
@@ -863,7 +870,9 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     TestHelper::seed_pfs_nak(c->core, me);
 
     auto id = c->send_message(
-            ConversationId::dm(me), "here you go", {OutgoingAttachment{.path = file}}, wait);
+            ConversationId::dm(me),
+            {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
+            wait);
     sync(*c);
     REQUIRE(c->message(id, wait)->send_state == SendState::failed);
 

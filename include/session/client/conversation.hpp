@@ -239,13 +239,14 @@ class Conversation {
 
     // -- Sending ------------------------------------------------------------------------------
 
-    /// Sends a text message, storing it immediately and dispatching it via Core.  Yields the
-    /// Client message id of the stored row, which is what subsequent `message_updated` handlers
-    /// carry as delivery progresses.
-    void send_message(std::string_view body, failable_function<void(int64_t message_id)> cb);
-    int64_t send_message(std::string_view body, wait_t);
-
-    /// Sends a message carrying files, which turns sending into two stages: each attachment is
+    /// Sends a message, storing it immediately and dispatching it via Core.  Yields the Client
+    /// message id of the stored row, which is what subsequent `message_updated` handlers carry as
+    /// delivery progresses.
+    ///
+    /// See `OutgoingMessage` for what a message can carry.  With no attachments this stores and
+    /// dispatches in one step; with any, sending becomes two stages, described below.
+    ///
+    /// Sending a message carrying files turns sending into two stages: each attachment is
     /// encrypted and uploaded to the file server, and only then is the message — now able to name
     /// where those files live — dispatched to the swarms.
     ///
@@ -289,21 +290,16 @@ class Conversation {
     /// copies.  Re-sending a failed message therefore uploads again.
     ///
     /// @throws std::invalid_argument if any attachment's file cannot be opened or exceeds the file
-    /// server's limit; thrown on the calling thread, before anything is stored or dispatched.
+    /// server's limit, or if `reply_to` names a message that does not exist or belongs to another
+    /// conversation; thrown on the calling thread, before anything is stored or dispatched.
     using upload_progress =
             std::function<void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>;
     void send_message(
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
-            upload_progress on_upload,
+            OutgoingMessage msg, upload_progress on_upload,
             failable_function<void(int64_t message_id)> cb);
-    int64_t send_message(
-            std::string_view body,
-            std::vector<OutgoingAttachment> attachments,
-            upload_progress on_upload,
-            wait_t);
-    int64_t send_message(
-            std::string_view body, std::vector<OutgoingAttachment> attachments, wait_t);
+    void send_message(OutgoingMessage msg, failable_function<void(int64_t message_id)> cb);
+    int64_t send_message(OutgoingMessage msg, upload_progress on_upload, wait_t);
+    int64_t send_message(OutgoingMessage msg, wait_t);
 
     // -- Destroying ---------------------------------------------------------------------------
     //

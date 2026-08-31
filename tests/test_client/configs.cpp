@@ -150,7 +150,7 @@ TEST_CASE("Client: writing a note to self reveals it", "[client][configs]") {
 
     REQUIRE_FALSE(listed(*c.client, me));
 
-    c->send_message(me, "a reminder", wait);
+    c->send_message(me, {.body = "a reminder"}, wait);
 
     // Both halves: it is in our own list, and UserProfile says so, which is what stops the other
     // devices on the account from carrying on hiding it.
@@ -167,7 +167,7 @@ TEST_CASE("Client: revealing note to self keeps a pin it already had", "[client]
     merge_profile(*c.client, pinned);
     REQUIRE(c->conversation(me, wait)->priority() == 7);
 
-    c->send_message(me, "a reminder", wait);
+    c->send_message(me, {.body = "a reminder"}, wait);
 
     // Already visible, so there is nothing to reveal and the pin is left where the user put it.
     CHECK(c->core.configs.user_profile().get_nts_priority() == 7);
@@ -230,7 +230,7 @@ TEST_CASE("Client: a note-to-self timer waits for the conversation", "[client][c
 
     // Writing a note brings the conversation into being, and everything the config was holding for
     // it lands at that moment rather than being lost.
-    c->send_message(me, "a reminder", wait);
+    c->send_message(me, {.body = "a reminder"}, wait);
     REQUIRE(c->conversation(me, wait));
 
     auto [mode, timer] = c->core.database().conn().prepared_get<int, int64_t>(
