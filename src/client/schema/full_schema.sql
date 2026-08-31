@@ -194,7 +194,32 @@ CREATE TABLE messages (
     -- change -- to particular formats, or a size ceiling -- and a stored answer would be a stale
     -- one after any such change.  So a message whose stored decision no longer agrees with the
     -- current rule simply has the decision dropped, rather than being honoured or migrated.
-    gallery INTEGER NOT NULL DEFAULT 0
+    gallery INTEGER NOT NULL DEFAULT 0,
+
+    -- What this message is a reply to, as the sender addressed it: never a local message id.
+    --
+    -- Whether we have the replied-to message changes in *both* directions after this row is
+    -- written -- a reply can arrive before the message it answers, and the target can later be
+    -- deleted or pruned -- so a resolved id would be a second record needing a fix-up pass to stay
+    -- true.  Resolution is done on read instead, through `messages_wire_key`, which exists for
+    -- exactly this.
+    --
+    -- `reply_author` is an accounts FK rather than a session id so that resolution is a join.
+    --
+    -- `reply_msgid` is the sender's `Content.msgId` for the target, and NULL from senders predating
+    -- that field.  Match on timestamp *and* msgid where both are present; with it absent, timestamp
+    -- and author alone are ambiguous exactly when one sender stamped several messages in the same
+    -- millisecond, which is the case msgid exists to fix.  Nothing can be done about that here, so
+    -- the read side takes the lowest matching id: arbitrary, but stable across reads.
+    --
+    -- What the wire also carries and we deliberately do not store: the sender's own snippet of the
+    -- replied-to text and its attachments.  Current clients do not populate them, and a sender can
+    -- forge them -- rendering one would put chosen words on screen attributed to someone else.  We
+    -- render from our own copy of the target or from nothing.  message_raw_content keeps the whole
+    -- protobuf, so this is recoverable if that is ever revisited.
+    reply_author INTEGER REFERENCES accounts(id),
+    reply_timestamp INTEGER,
+    reply_msgid INTEGER
 ) STRICT;
 
 -- Delivery is at-least-once, so a redelivered message must not duplicate.  This also catches what
@@ -209,6 +234,15 @@ CREATE INDEX messages_unread ON messages(conversation, timestamp) WHERE outgoing
 -- Quotes and reactions from clients that set no msgId address their target by author and timestamp
 -- alone.  Needed for as long as such clients exist.
 CREATE INDEX messages_wire_key ON messages(conversation, sender, timestamp);
+
+-- The other direction of the same question: "which messages reply to this one".  Asked whenever a
+-- message changes, because a reply carries a copy of what it answers and so goes stale with it.
+--
+-- Partial because most messages are not replies, which keeps it a fraction of the size of the row
+-- count -- and because a partial index is only consulted for queries whose WHERE matches it, which
+-- is precisely the lookup this serves.
+CREATE INDEX messages_reply_target ON messages(conversation, reply_author, reply_timestamp)
+    WHERE reply_timestamp IS NOT NULL;
 
 -- `count` is a structural fact about the messages table, so triggers can own it outright: there is
 -- no judgement involved in how many rows a conversation has.
