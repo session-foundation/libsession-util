@@ -34,7 +34,7 @@ inline constexpr auto TESTNET_QUIC_FS_ED_PUBKEY =
         "929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602";
 
 // Creates a Network instance pointed at testnet using the current live_router_mode.
-inline std::shared_ptr<session::network::Network> make_testnet_network(
+inline std::unique_ptr<session::network::Network> make_testnet_network(
         std::filesystem::path cache_dir) {
     namespace opt = session::network::opt;
 
@@ -52,7 +52,7 @@ inline std::shared_ptr<session::network::Network> make_testnet_network(
                 opt::quic_file_server_address{session::test::resolve_host(TESTNET_QUIC_FS_HOST)});
     }
 
-    return std::make_shared<session::network::Network>(net_opts);
+    return std::make_unique<session::network::Network>(net_opts);
 }
 
 // Creates a session::TempCore connected to a fresh testnet Network.  A unique temporary directory

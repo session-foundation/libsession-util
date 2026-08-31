@@ -79,11 +79,11 @@ std::vector<SwarmMessage> as_swarm_messages(
 /// A Core with a mock network attached, ready to have a push observed.
 struct PushableCore {
     TempCore core;
-    std::shared_ptr<MockNetwork> net = std::make_shared<MockNetwork>();
+    MockNetwork* net = nullptr;
 
     PushableCore() {
+        net = attach_mock_network(*core);
         net->current_node.remote_pubkey[0] = std::byte{0x01};
-        core->set_network(net);
         net->sent_requests.clear();
     }
 

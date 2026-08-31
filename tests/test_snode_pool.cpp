@@ -14,17 +14,13 @@ class TestSnodePool : public SnodePool {
 
     TestSnodePool(
             config::SnodePool config,
-            std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<oxen::quic::Loop> disk_loop,
+            oxen::quic::Loop& loop,
+            oxen::quic::Loop& disk_loop,
             network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
-            SnodePool(
-                    std::move(config),
-                    std::move(loop),
-                    std::move(disk_loop),
-                    std::move(direct_fetcher)) {}
+            SnodePool(std::move(config), loop, disk_loop, std::move(direct_fetcher)) {}
 
     void reset_state_with_cache(std::vector<service_node> cache) {
-        _loop->call_get([this, cache] {
+        _jq.call_get([this, cache] {
             _snode_cache = cache;
             _snode_strikes.clear();
         });
@@ -37,7 +33,7 @@ class TestSnodePool : public SnodePool {
     }
 
     void debug_queue_post_refresh_callback(std::function<void()> cb) {
-        _loop->call_get([this, cb = std::move(cb)]() mutable {
+        _jq.call_get([this, cb = std::move(cb)]() mutable {
             _after_snode_cache_refresh.push_back(std::move(cb));
         });
     }
@@ -54,7 +50,7 @@ class TestSnodePool : public SnodePool {
     // best-effort.  The return value is what actually makes it safe: it confirms the capacity
     // really is tight rather than letting the test quietly stop exercising the bug.
     bool debug_remove_post_refresh_callback_spare_capacity() {
-        return _loop->call_get([this] {
+        return _jq.call_get([this] {
             auto exact_sized_copy = _after_snode_cache_refresh;
             _after_snode_cache_refresh = std::move(exact_sized_copy);
             return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
@@ -62,7 +58,7 @@ class TestSnodePool : public SnodePool {
     }
 
     size_t pending_post_refresh_callbacks() {
-        return _loop->call_get([this] { return _after_snode_cache_refresh.size(); });
+        return _jq.call_get([this] { return _after_snode_cache_refresh.size(); });
     }
 
     // Called from the test thread, so this also covers `_update_cache` being entered from off the
@@ -71,7 +67,7 @@ class TestSnodePool : public SnodePool {
 
     void debug_on_refresh_complete(std::vector<std::vector<std::byte>> raw_results) {
         auto total_requests = static_cast<uint8_t>(raw_results.size());
-        _loop->call_get([&] {
+        _jq.call_get([&] {
             _on_refresh_complete("test", std::move(raw_results), false, true, total_requests);
         });
     }
@@ -160,7 +156,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
 
     // Should return a result in a different order (since this is random, it's possible that it
@@ -217,7 +213,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     unused_nodes = snode_pool->get_unused_nodes(20);
     std::sort(unused_nodes.begin(), unused_nodes.end());
@@ -257,7 +253,7 @@ TEST_CASE("Network", "[network][update_cache]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
 
     // Should tolerate a post-refresh callback registering another post-refresh callback (which is
     // what a deferred `get_swarm` does when the refresh left the cache empty) rather than
@@ -313,7 +309,7 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     REQUIRE(snode_pool->size() == 20);
 

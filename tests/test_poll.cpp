@@ -69,11 +69,9 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
                                   std::span<const std::string_view>) { received = true; };
 
     TempCore core{cbs};
-    auto mock_net = std::make_shared<MockNetwork>();
+    auto* mock_net = attach_mock_network(*core);
     // Use a fixed non-zero pubkey for the node.
     mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
-
-    core->set_network(mock_net);
 
     // Trigger poll via TestHelper
     TestHelper::poll(*core);
@@ -137,14 +135,12 @@ TEST_CASE(
         "Polling uses per-node last_hash to avoid missing messages on swarm-member switch",
         "[core][poll]") {
     TempCore c;
-    auto mock_net = std::make_shared<MockNetwork>();
+    auto* mock_net = attach_mock_network(*c);
 
     // Two distinct service nodes with different pubkeys.
     network::service_node node_a, node_b;
     node_a.remote_pubkey[0] = std::byte{0xAA};
     node_b.remote_pubkey[0] = std::byte{0xBB};
-
-    c->set_network(mock_net);
 
     // ── First poll: node A, no prior state ──────────────────────────────────────
     mock_net->current_node = node_a;
@@ -209,8 +205,9 @@ TEST_CASE(
 }
 
 TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[core][poll]") {
-    auto mock_net = std::make_shared<MockNetwork>();
-    mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
+    // Attached below, once there is a Core to own it; the callback that reads it does not run
+    // until then either.
+    MockNetwork* mock_net = nullptr;
 
     core::Core* core_ptr = nullptr;
     std::optional<std::string> hash_during_callback;
@@ -229,7 +226,8 @@ TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[co
 
     TempCore core{cbs};
     core_ptr = &*core;
-    core->set_network(mock_net);
+    mock_net = attach_mock_network(*core);
+    mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
 
     cleared_b32 seed_bytes;
     {

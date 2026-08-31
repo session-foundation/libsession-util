@@ -19,9 +19,10 @@ TEST_CASE("Core can hold an optional Network interface", "[core][network]") {
     }
 
     SECTION("Network can be set and retrieved") {
-        auto network = std::make_shared<network::Network>(network::config::Config{});
-        core.set_network(network);
-        CHECK(core.network() == network);
+        auto network = std::make_unique<network::Network>(network::config::Config{});
+        auto* attached = network.get();
+        core.set_network(std::move(network));
+        CHECK(core.network() == attached);
     }
 
     if (std::filesystem::exists(db_path))

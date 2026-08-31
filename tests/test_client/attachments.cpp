@@ -86,8 +86,7 @@ TEST_CASE("Client: an arriving message records the files it names", "[client][at
 
 TEST_CASE("Client: a message reports the attachments it carries", "[client][send][attachments]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_attach", 7);
     std::filesystem::create_directories(dir);
@@ -166,8 +165,7 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
 TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[client][attachments]") {
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     // So the notification below goes out as a v1 send rather than queueing behind a key fetch.
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
 
@@ -262,8 +260,7 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
           "[client][attachments]") {
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
 
     std::vector<std::byte> plaintext(500, std::byte{7});
@@ -355,8 +352,7 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     // through what was stored -- the url, its `d` fragment, the key and the size -- so a
     // disagreement between the two shows up as bytes that do not match.
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
@@ -421,8 +417,7 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
 TEST_CASE("Client: a save does not destroy files it was not asked to touch",
           "[client][attachments]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
@@ -482,8 +477,7 @@ TEST_CASE("Client: a save does not destroy files it was not asked to touch",
 TEST_CASE("Client: an approved replacement is not renamed out of the way",
           "[client][attachments]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
@@ -534,8 +528,7 @@ TEST_CASE("Client: an approved replacement is not renamed out of the way",
 TEST_CASE("Client: saving what we sent someone else does not claim they saved it",
           "[client][attachments]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     SenderKeys peer;
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
@@ -585,8 +578,7 @@ TEST_CASE("Client: saving what we sent someone else does not claim they saved it
 TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attachments]") {
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
@@ -708,8 +700,7 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
 
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
 
     // No `d` fragment on the url, a 64-byte key and a digest: that combination is what tells the
@@ -921,8 +912,7 @@ TEST_CASE("Client: a stream attachment must be the size its sender claimed",
 
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     std::vector<std::byte> plaintext(9000);
     random::fill(plaintext);
@@ -978,8 +968,7 @@ TEST_CASE("Client: two askers for one attachment share one download", "[client][
     TempCacheDir dir;
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     std::vector<std::byte> plaintext(9000);
@@ -1058,8 +1047,7 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     TempCacheDir dir;
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
 
@@ -1139,8 +1127,7 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
     };
     TempClient c{cbs};
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     auto convo = ConversationId::dm(peer.session_id);
@@ -1255,8 +1242,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     TempCacheDir dir;
     TempClient c;
     SenderKeys peer;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     auto convo = ConversationId::dm(peer.session_id);
@@ -1365,8 +1351,7 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     auto seed = random::random(32);
 
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     c->open_dm(convo, wait);

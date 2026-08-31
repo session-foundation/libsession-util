@@ -47,16 +47,13 @@ namespace {
 
 SnodePool::SnodePool(
         config::SnodePool config,
-        std::shared_ptr<oxen::quic::Loop> loop,
-        std::shared_ptr<oxen::quic::Loop> disk_loop,
+        oxen::quic::Loop& loop,
+        oxen::quic::Loop& disk_loop,
         network_fetcher_t direct_fetcher) :
         _config{std::move(config)},
         _loop{loop},
         _disk_loop{disk_loop},
         _direct_fetcher{std::move(direct_fetcher)} {
-
-    if (!_loop || !_disk_loop)
-        throw std::invalid_argument{"Cannot construct a SnodePool with an empty loop/disk_loop"};
 
     if (_config.cache_directory) {
         std::string cache_file_name;
@@ -80,6 +77,12 @@ SnodePool::SnodePool(
         _strikes_file_path = *_config.cache_directory / (cache_file_name + "_strikes");
         _load_from_disk();
     }
+}
+
+SnodePool::~SnodePool() {
+    // Cancels the queue's jobs -- including the delayed refresh and strike-flush ones -- and waits
+    // out whatever is running, so that nothing is part-way through us when the members below go.
+    _jq.stop();
 }
 
 // MARK: Disk I/O Functions
@@ -338,7 +341,7 @@ void SnodePool::_perform_strikes_write(
 // MARK: Refresh Functions
 
 void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) {
-    _loop->call([this, request_id_opt] {
+    _jq.call([this, request_id_opt] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
             return;
@@ -434,12 +437,12 @@ void SnodePool::_launch_next_refresh_request(
         const bool refreshing_from_seed_nodes,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
-    _loop->call([this,
-                 request_id,
-                 index,
-                 refreshing_from_seed_nodes,
-                 use_direct_fetcher,
-                 total_requests] {
+    _jq.call([this,
+              request_id,
+              index,
+              refreshing_from_seed_nodes,
+              use_direct_fetcher,
+              total_requests] {
         if (!_current_snode_cache_refresh_id)
             return;
 
@@ -546,14 +549,10 @@ void SnodePool::_launch_next_refresh_request(
                     "trying again in {}ms.",
                     target_request_id,
                     delay.count());
-            _loop->call_later(delay, [weak_self = weak_from_this(), this] {
+            _jq.call_later(delay, [this] {
                 // We need to wait until after the `call_later` to reset the `refresh_id` (and clear
                 // previous results) as if we don't then additional refreshes could be triggered
                 // during the delay
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
                 _current_snode_cache_refresh_id.reset();
                 _snode_refresh_results.clear();
                 _refresh_snode_cache();
@@ -594,7 +593,10 @@ void SnodePool::_launch_next_refresh_request(
 
         fetcher_to_use(
                 request,
-                [this,
+                // The fetcher hands this to the transport, which outlives us, so unlike our own
+                // jobs this one cannot rely on the queue being stopped and keeps a weak guard.
+                [weak_self = weak_from_this(),
+                 this,
                  request_id,
                  index,
                  target_request_id,
@@ -606,6 +608,10 @@ void SnodePool::_launch_next_refresh_request(
                         int16_t status_code,
                         std::vector<std::pair<std::string, std::string>> /*headers*/,
                         std::optional<std::string> response) {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
                     // If the refresh was cancelled or completed while we were in-flight, do nothing
                     if (!_current_snode_cache_refresh_id ||
                         *_current_snode_cache_refresh_id != request_id) {
@@ -644,21 +650,20 @@ void SnodePool::_launch_next_refresh_request(
                                 "{}ms.",
                                 e.what(),
                                 delay.count());
-                        _loop->call_later(
+                        _jq.call_later(
                                 delay,
-                                [weak_self = weak_from_this(),
+                                [this,
                                  request_id,
                                  index,
                                  refreshing_from_seed_nodes,
                                  use_direct_fetcher,
                                  total_requests] {
-                                    if (auto self = weak_self.lock())
-                                        self->_retry_refresh_request(
-                                                request_id,
-                                                index,
-                                                refreshing_from_seed_nodes,
-                                                use_direct_fetcher,
-                                                total_requests);
+                                    _retry_refresh_request(
+                                            request_id,
+                                            index,
+                                            refreshing_from_seed_nodes,
+                                            use_direct_fetcher,
+                                            total_requests);
                                 });
                         return;
                     }
@@ -709,27 +714,21 @@ void SnodePool::_on_refresh_complete(
             refresh_id,
             raw_results.size());
 
-    _loop->call([this,
-                 refresh_id,
-                 raw_results,
-                 refreshing_from_seed_nodes,
-                 use_direct_fetcher,
-                 total_requests] {
+    _jq.call([this,
+              refresh_id,
+              raw_results,
+              refreshing_from_seed_nodes,
+              use_direct_fetcher,
+              total_requests] {
         // Throw away everything we received and start the requests again after a backoff
-        auto discard_and_retry = [weak_self = weak_from_this(),
+        auto discard_and_retry = [this,
                                   refresh_id,
                                   refreshing_from_seed_nodes,
                                   use_direct_fetcher,
                                   total_requests](std::string_view reason) {
-            auto self = weak_self.lock();
-
-            if (!self)
-                return;
-
-            self->_snode_refresh_results.clear();
-            self->_snode_cache_refresh_failure_count++;
-            auto delay =
-                    self->_config.retry_delay.exponential(self->_snode_cache_refresh_failure_count);
+            _snode_refresh_results.clear();
+            _snode_cache_refresh_failure_count++;
+            auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
 
             log::error(
                     cat,
@@ -737,21 +736,20 @@ void SnodePool::_on_refresh_complete(
                     refresh_id,
                     delay.count(),
                     reason);
-            self->_loop->call_later(
+            _jq.call_later(
                     delay,
-                    [weak_self,
+                    [this,
                      refresh_id,
                      refreshing_from_seed_nodes,
                      use_direct_fetcher,
                      total_requests] {
-                        if (auto self = weak_self.lock())
-                            for (uint8_t i = 0; i < total_requests; ++i)
-                                self->_launch_next_refresh_request(
-                                        refresh_id,
-                                        i,
-                                        refreshing_from_seed_nodes,
-                                        use_direct_fetcher,
-                                        total_requests);
+                        for (uint8_t i = 0; i < total_requests; ++i)
+                            _launch_next_refresh_request(
+                                    refresh_id,
+                                    i,
+                                    refreshing_from_seed_nodes,
+                                    use_direct_fetcher,
+                                    total_requests);
                     });
         };
 
@@ -865,7 +863,7 @@ void SnodePool::_on_refresh_complete(
 void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> nodes) {
     // Use 'call_get' to force this to be synchronous; a plain 'call' would queue when we aren't
     // already on the loop thread, and the captured `nodes` reference would dangle
-    _loop->call_get([this, refresh_id, &nodes] {
+    _jq.call_get([this, refresh_id, &nodes] {
         // Shuffle the nodes so we don't have a specific order
         std::ranges::shuffle(nodes, csrng);
         log::info(
@@ -887,7 +885,7 @@ void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> 
         _refresh_candidate_nodes.clear();
         _snode_cache_refresh_failure_count = 0;
 
-        _disk_loop->call([path = _snode_cache_file_path, cache = _snode_cache] {
+        _disk_loop.call([path = _snode_cache_file_path, cache = _snode_cache] {
             SnodePool::_perform_cache_write(path, cache);
         });
 
@@ -919,12 +917,12 @@ void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> 
 
 void SnodePool::suspend() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _suspended = true;
 
         // Force a strike write immediately if we had one scheduled
         if (_strikes_flush_scheduled)
-            _disk_loop->call([path = _strikes_file_path, strikes = _snode_strikes] {
+            _disk_loop.call([path = _strikes_file_path, strikes = _snode_strikes] {
                 SnodePool::_perform_strikes_write(path, strikes);
             });
         log::info(cat, "Suspended.");
@@ -933,7 +931,7 @@ void SnodePool::suspend() {
 
 void SnodePool::resume() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         if (!_suspended)
             return;
 
@@ -944,24 +942,24 @@ void SnodePool::resume() {
 
 void SnodePool::set_routed_fetcher(
         network_fetcher_t routed_fetcher, fetcher_connectivity_check_t connectivity_check) {
-    _loop->call([this, rf = std::move(routed_fetcher), cc = std::move(connectivity_check)] {
+    _jq.call([this, rf = std::move(routed_fetcher), cc = std::move(connectivity_check)] {
         _routed_fetcher = std::move(rf);
         _routed_fetcher_connectivity_check = std::move(cc);
     });
 }
 
 size_t SnodePool::size() {
-    return _loop->call_get([this] { return _snode_cache.size(); });
+    return _jq.call_get([this] { return _snode_cache.size(); });
 }
 
 void SnodePool::clear_cache() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _snode_cache = {};
         _all_swarms = {};
         _swarm_cache = {};
 
-        _disk_loop->call([path = _snode_cache_file_path] { SnodePool::_clear_disk_cache(path); });
+        _disk_loop.call([path = _snode_cache_file_path] { SnodePool::_clear_disk_cache(path); });
     });
 }
 
@@ -970,7 +968,7 @@ void SnodePool::record_node_failure(const service_node& node, bool permanent) {
 }
 
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
-    _loop->call([this, key, permanent] {
+    _jq.call([this, key, permanent] {
         auto now = clock_now_s();
 
         if (permanent)
@@ -989,18 +987,15 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
         if (!_strikes_flush_scheduled && !_suspended) {
             _strikes_flush_scheduled = true;
 
-            _loop->call_later(SAVE_THROTTLE, [weak_self = weak_from_this()] {
-                if (auto self = weak_self.lock()) {
-                    self->_strikes_flush_scheduled = false;
+            _jq.call_later(SAVE_THROTTLE, [this] {
+                _strikes_flush_scheduled = false;
 
-                    if (self->_suspended)
-                        return;
+                if (_suspended)
+                    return;
 
-                    self->_disk_loop->call(
-                            [path = self->_strikes_file_path, strikes = self->_snode_strikes] {
-                                SnodePool::_perform_strikes_write(path, strikes);
-                            });
-                }
+                _disk_loop.call([path = _strikes_file_path, strikes = _snode_strikes] {
+                    SnodePool::_perform_strikes_write(path, strikes);
+                });
             });
         }
     });
@@ -1011,7 +1006,7 @@ uint16_t SnodePool::node_strike_count(const service_node& node) {
 }
 
 uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
-    return _loop->call_get([this, &key] {
+    return _jq.call_get([this, &key] {
         auto it = _snode_strikes.find(key);
         if (it == _snode_strikes.end())
             return uint16_t{0};
@@ -1031,19 +1026,19 @@ uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
 
 void SnodePool::clear_node_strikes() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _snode_strikes.clear();
         _strikes_flush_scheduled = false;
 
         // Immediately write to disk after clearing the snode strikes
-        _disk_loop->call(
+        _disk_loop.call(
                 [path = _strikes_file_path] { SnodePool::_perform_strikes_write(path, {}); });
     });
 }
 
 void SnodePool::refresh_if_needed(
         const std::vector<service_node>& in_use_nodes, std::function<void()> on_refresh_complete) {
-    _loop->call([this, in_use_nodes, cb = std::move(on_refresh_complete)] {
+    _jq.call([this, in_use_nodes, cb = std::move(on_refresh_complete)] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
             return;
@@ -1104,10 +1099,7 @@ void SnodePool::refresh_if_needed(
         // on_refresh_complete callback immediately)
         if (needs_to_start_refresh)
             if (delay) {
-                _loop->call_later(*delay, [weak_self = weak_from_this()] {
-                    if (auto self = weak_self.lock())
-                        self->_refresh_snode_cache();
-                });
+                _jq.call_later(*delay, [this] { _refresh_snode_cache(); });
             } else
                 _refresh_snode_cache();
         else if (!already_running && cb)
@@ -1120,12 +1112,9 @@ std::vector<service_node> SnodePool::get_unused_nodes(
     // Kick of a cache refresh in the background if needed (call_soon to ensure it is scheduled
     // after whatever called `get_unused_nodes` which may be something trying to make it's own
     // request that we would want to run first)
-    _loop->call_soon([weak_self = weak_from_this(), exclude_nodes] {
-        if (auto self = weak_self.lock())
-            self->refresh_if_needed(exclude_nodes);
-    });
+    _jq.call_soon([this, exclude_nodes] { refresh_if_needed(exclude_nodes); });
 
-    return _loop->call_get([this, count, exclude_nodes] {
+    return _jq.call_get([this, count, exclude_nodes] {
         if (_snode_cache.empty()) {
             log::warning(cat, "Cannot get unused nodes: snode cache is empty.");
             return std::vector<service_node>{};
@@ -1191,7 +1180,7 @@ void SnodePool::get_swarm(
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
-    _loop->call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
+    _jq.call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
         auto filter_by_strikes =
                 [this](std::vector<service_node> nodes) -> std::vector<service_node> {
             // Shuffle everything to start with
@@ -1254,10 +1243,7 @@ void SnodePool::get_swarm(
         }
 
         // Trigger a non-blocking background refresh if the data is stale
-        _loop->call_soon([weak_self = weak_from_this()] {
-            if (auto self = weak_self.lock())
-                self->refresh_if_needed({});
-        });
+        _jq.call_soon([this] { refresh_if_needed({}); });
 
         // Perform the swarm calculation using our local copy of the data
         auto swarm = swarm::get_swarm(swarm_pubkey, _all_swarms);

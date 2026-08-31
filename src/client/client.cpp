@@ -400,8 +400,6 @@ core::callbacks Client::_core_callbacks() {
 }
 
 void Client::_init() {
-    _jobs.reset(new oxen::quic::JobQueue{loop});
-
     // Core's send queue is in-memory, so anything still mid-flight when the last run ended is not
     // resumed and its outcome is unknowable.  Say so rather than guessing either way.
     auto c = core.database().conn();
@@ -535,10 +533,6 @@ void Client::_emit_message(bool added, const ConversationId& id, int64_t message
         _emit_message_alone(false, id, replier);
 }
 
-void Client::JobsDeleter::operator()(oxen::quic::JobQueue* p) const {
-    delete p;
-}
-
 void Client::_touch(const ConversationId& id) {
     if (std::ranges::find(_dirty, id) == _dirty.end())
         _dirty.push_back(id);
@@ -548,7 +542,7 @@ void Client::_touch(const ConversationId& id) {
     // been stored and the conversation has one settled state to report instead of fifty.
     if (!_flush_scheduled) {
         _flush_scheduled = true;
-        _jobs->call_soon([this] { _flush_pending(); });
+        _jq.call_soon([this] { _flush_pending(); });
     }
 }
 

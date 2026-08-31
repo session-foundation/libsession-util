@@ -43,8 +43,7 @@ TEST_CASE("prefetch_pfs_keys throws without network", "[core][pfs]") {
 
 TEST_CASE("prefetch_pfs_keys fetches and caches remote account pubkeys", "[core][pfs]") {
     TempCore c;
-    auto mock_net = std::make_shared<MockNetwork>();
-    c->set_network(mock_net);
+    auto* mock_net = attach_mock_network(*c);
 
     // Build a "remote" account whose pubkeys we want to fetch.
     TempCore remote;
@@ -114,8 +113,7 @@ TEST_CASE("prefetch_pfs_keys fetches and caches remote account pubkeys", "[core]
 
 TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
     TempCore c;
-    auto mock_net = std::make_shared<MockNetwork>();
-    c->set_network(mock_net);
+    auto* mock_net = attach_mock_network(*c);
 
     TempCore remote;
     auto session_id_span = remote->globals.session_id();
@@ -214,8 +212,7 @@ TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
 
 TEST_CASE("prefetch_pfs_keys handles malformed responses gracefully", "[core][pfs]") {
     TempCore c;
-    auto mock_net = std::make_shared<MockNetwork>();
-    c->set_network(mock_net);
+    auto* mock_net = attach_mock_network(*c);
 
     TempCore remote;
     auto session_id_span = remote->globals.session_id();

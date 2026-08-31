@@ -56,10 +56,6 @@
 /// Client shares Core's database — the same file and the same connection pool, not a second
 /// database — so a write from a Client handler joins whatever transaction Core already has open on
 /// that thread.
-namespace oxen::quic {
-class JobQueue;
-}
-
 // Forward declared rather than included: the generated protobuf headers are large and this one is
 // public.  Only referenced by private members below.
 namespace SessionProtos {
@@ -1253,10 +1249,7 @@ class Client {
     //
     // Declared after `core` -- the one thing that belongs below it -- because a JobQueue needs its
     // loop alive in order to stop, so it has to be destroyed while Core still exists.
-    struct JobsDeleter {
-        void operator()(oxen::quic::JobQueue*) const;
-    };
-    std::unique_ptr<oxen::quic::JobQueue, JobsDeleter> _jobs;
+    oxen::quic::JobQueue _jq{loop};
 };
 
 }  // namespace session::client

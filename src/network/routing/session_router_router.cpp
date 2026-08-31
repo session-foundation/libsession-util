@@ -158,15 +158,10 @@ void SessionRouter::_init() {
                         return;
 
                     if (snode_pool->size() == 0)
+                        // The pool outlives us, so this one keeps its weak guard.
                         snode_pool->refresh_if_needed({}, [weak_self, this] {
-                            auto self = weak_self.lock();
-                            if (!self)
-                                return;
-
-                            _loop->call([weak_self] {
-                                if (auto self = weak_self.lock())
-                                    self->_finish_setup();
-                            });
+                            if (auto self = weak_self.lock())
+                                _jq.call([this] { _finish_setup(); });
                         });
                     else
                         _finish_setup();
@@ -184,20 +179,25 @@ SessionRouter::~SessionRouter() {
     std::vector<std::thread> threads_to_join;
 
     // Use 'call_get' to force this to be synchronous
-    if (_loop)
-        _loop->call_get([this, &threads_to_join] {
-            // Harvest upload thread handles *before* _close_connections clears the map
-            for (auto& [_, upload] : _active_uploads)
-                if (upload.second.joinable())
-                    threads_to_join.push_back(std::move(upload.second));
+    _loop->call_get([this, &threads_to_join] {
+        // Harvest upload thread handles *before* _close_connections clears the map
+        for (auto& [_, upload] : _active_uploads)
+            if (upload.second.joinable())
+                threads_to_join.push_back(std::move(upload.second));
 
-            _close_connections();
-        });
+        _close_connections();
+    });
 
-    // Block until upload threads have finished
+    // Block until upload threads have finished.  These wait on loop jobs of their own, so this has
+    // to happen out here rather than inside the job above -- and it is why this object must be
+    // destroyed off the loop thread: joining from the loop would be waiting on ourselves.
     for (auto& t : threads_to_join)
         if (t.joinable())
             t.join();
+
+    // Only once nothing can post any more: a post to a stopped queue throws, and a throw on one of
+    // those upload threads would be a terminate.
+    _loop->call_get([this] { _jq.stop(); });
 
     log::debug(cat, "Destroyed.");
 }
@@ -206,7 +206,7 @@ SessionRouter::~SessionRouter() {
 
 void SessionRouter::suspend() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _suspended = true;
         _close_connections();
         log::info(cat, "Suspended.");
@@ -215,7 +215,7 @@ void SessionRouter::suspend() {
 
 void SessionRouter::resume(bool /*automatically_reconnect*/) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         if (!_suspended)
             return;
 
@@ -226,7 +226,7 @@ void SessionRouter::resume(bool /*automatically_reconnect*/) {
 
 void SessionRouter::close_connections() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _close_connections(); });
+    _jq.call_get([this] { _close_connections(); });
 }
 
 void SessionRouter::clear_cache() {
@@ -239,17 +239,13 @@ std::vector<PathInfo> SessionRouter::get_active_paths() {
 }
 
 void SessionRouter::send_request(Request request, network_response_callback_t callback) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
-        if (auto self = weak_self.lock())
-            self->_send_request_internal(std::move(req), std::move(cb));
+    _jq.call([this, req = std::move(request), cb = std::move(callback)]() mutable {
+        _send_request_internal(std::move(req), std::move(cb));
     });
 }
 
 void SessionRouter::upload(UploadRequest request) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
-        if (auto self = weak_self.lock())
-            self->_upload_internal(std::move(req));
-    });
+    _jq.call([this, req = std::move(request)]() mutable { _upload_internal(std::move(req)); });
 }
 
 void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
@@ -266,25 +262,17 @@ void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::
     auto target = std::move(*quic_target);
 
     // Dispatch to the loop thread so we wait for _ready before spawning the upload thread.
-    _loop->call([weak_self = weak_from_this(),
-                 this,
-                 enc = std::move(enc),
-                 request = std::move(request),
-                 target = std::move(target)]() mutable {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
+    _jq.call([this,
+              enc = std::move(enc),
+              request = std::move(request),
+              target = std::move(target)]() mutable {
         if (!_ready) {
             log::debug(cat, "Router not ready, queueing upload_file.");
-            _pending_operations.emplace_back([weak_self,
-                                              this,
+            // _pending_operations is ours and is run from our own jobs, so `this` is safe here too.
+            _pending_operations.emplace_back([this,
                                               enc = std::move(enc),
                                               request = std::move(request),
                                               target = std::move(target)]() mutable {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
                 _start_file_upload(std::move(enc), std::move(request), std::move(target));
             });
             return;
@@ -379,18 +367,12 @@ void SessionRouter::_start_file_upload(
                             TUNNELED_QUIC_MAX_UDP_PAYLOAD);
                 });
 
-        _loop->call([weak_self = weak_from_this(), this, upload_id] {
-            if (auto self = weak_self.lock())
-                _cleanup_upload(upload_id);
-        });
+        _jq.call([this, upload_id] { _cleanup_upload(upload_id); });
     });
 }
 
 void SessionRouter::download(DownloadRequest request) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
-        if (auto self = weak_self.lock())
-            self->_download_internal(std::move(req));
-    });
+    _jq.call([this, req = std::move(request)]() mutable { _download_internal(std::move(req)); });
 }
 
 // MARK: Internal Logic
@@ -907,16 +889,11 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                     all_data.size(),
                     target.address);
 
-            _loop->call([weak_self,
-                         this,
-                         upload_request,
-                         upload_id,
-                         target,
-                         data = std::move(all_data)]() mutable {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
+            _jq.call([this,
+                      upload_request,
+                      upload_id,
+                      target,
+                      data = std::move(all_data)]() mutable {
                 if (upload_request.is_cancelled()) {
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
                     _cleanup_upload(upload_id);
@@ -925,34 +902,35 @@ void SessionRouter::_upload_internal(UploadRequest request) {
 
                 auto& held = _tunnel(target.address);
                 held.tunnel = srouter->establish_udp(
-                            target.address,
-                            target.port,
-                            [weak_self, this, upload_request, upload_id, data = std::move(data)](
-                                    router::tunnel_info info) mutable {
-                                if (auto self = weak_self.lock())
-                                    _quic_upload_via_tunnel(
-                                            upload_request,
-                                            upload_id,
-                                            std::move(data),
-                                            std::move(info));
-                            },
-                            [weak_self, this, upload_request, upload_id](
-                                    router::tunnel_failure failure) {
-                                if (auto self = weak_self.lock()) {
-                                    bool timeout =
-                                            failure == router::tunnel_failure::timeout;
-                                    log::error(
-                                            cat,
-                                            "[Upload {}]: Tunnel establishment failed: {}.",
-                                            upload_id,
-                                            timeout ? "timed out" : "remote is unreachable");
-                                    upload_request.on_complete(
-                                            timeout ? ERROR_BUILD_TIMEOUT
-                                                    : ERROR_INVALID_DESTINATION,
-                                            timeout);
-                                    _cleanup_upload(upload_id);
-                                }
-                            });
+                        target.address,
+                        target.port,
+                        [weak_self = weak_from_this(),
+                         this,
+                         upload_request,
+                         upload_id,
+                         data = std::move(data)](router::tunnel_info info) mutable {
+                            if (auto self = weak_self.lock())
+                                _quic_upload_via_tunnel(
+                                        upload_request,
+                                        upload_id,
+                                        std::move(data),
+                                        std::move(info));
+                        },
+                        [weak_self = weak_from_this(), this, upload_request, upload_id](
+                                router::tunnel_failure failure) {
+                            if (auto self = weak_self.lock()) {
+                                bool timeout = failure == router::tunnel_failure::timeout;
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Tunnel establishment failed: {}.",
+                                        upload_id,
+                                        timeout ? "timed out" : "remote is unreachable");
+                                upload_request.on_complete(
+                                        timeout ? ERROR_BUILD_TIMEOUT : ERROR_INVALID_DESTINATION,
+                                        timeout);
+                                _cleanup_upload(upload_id);
+                            }
+                        });
                 if (!held.tunnel) {
                     // Neither callback fires when the remote is unreachable, so this is the only
                     // chance to report it.
@@ -962,19 +940,15 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 }
             });
         } catch (const cancellation_exception&) {
-            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
-                if (auto self = weak_self.lock()) {
-                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-                    _cleanup_upload(upload_id);
-                }
+            _jq.call([this, upload_request, upload_id] {
+                upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                _cleanup_upload(upload_id);
             });
         } catch (const std::exception& e) {
             log::error(cat, "[Upload {}]: Exception: {}", upload_id, e.what());
-            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
-                if (auto self = weak_self.lock()) {
-                    upload_request.on_complete(ERROR_UNKNOWN, false);
-                    _cleanup_upload(upload_id);
-                }
+            _jq.call([this, upload_request, upload_id] {
+                upload_request.on_complete(ERROR_UNKNOWN, false);
+                _cleanup_upload(upload_id);
             });
         }
     });
@@ -985,24 +959,16 @@ void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string u
     auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
                                   .first->second.second;
 
-    upload_thread = std::thread([weak_self = weak_from_this(),
-                                 this,
+    // Ours, and joined before the queue is stopped -- see ~SessionRouter.
+    upload_thread = std::thread([this,
                                  upload_request = request,
                                  upload_id,
                                  file_server_config = _config.file_server_config] {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         try {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
 
-            _loop->call([weak_self, this, upload_request, req = std::move(request), upload_id] {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
+            _jq.call([this, upload_request, req = std::move(request), upload_id]() mutable {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
@@ -1019,7 +985,12 @@ void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string u
 
                 _send_request_internal(
                         std::move(req),
-                        [weak_self, this, upload_id, upload_request, upload_size](
+                        // Ends up held by the transport, which outlives us: weak guard.
+                        [weak_self = weak_from_this(),
+                         this,
+                         upload_id,
+                         upload_request,
+                         upload_size](
                                 bool success,
                                 bool timeout,
                                 int16_t status_code,
@@ -1081,10 +1052,7 @@ void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string u
         } catch (const std::exception& e) {
             log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, e.what());
 
-            _loop->call([weak_self, this, upload_request, upload_id] {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
+            _jq.call([this, upload_request, upload_id] {
                 _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });

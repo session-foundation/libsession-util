@@ -42,6 +42,10 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     bool _ready = false;
     bool _suspended = false;
     config::SessionRouter _config;
+    // The one component that keeps a share of the loop rather than a reference: the session-router
+    // library takes a `shared_ptr<Loop>` (router.hpp:137), so ownership has to be shared with it.
+    // What keeps that from destroying the loop from its own thread is the same invariant as
+    // everywhere else here -- this object is destroyed by whoever owns it, off the loop.
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<session::router::SessionRouter> srouter;
     std::weak_ptr<SnodePool> _snode_pool;
@@ -56,6 +60,13 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::vector<std::function<void()>> _pending_operations;
     std::unordered_map<std::string, std::pair<UploadRequest, std::thread>> _active_uploads;
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
+
+    /// This router's own jobs, rather than the loop's shared queue, so that ~SessionRouter can take
+    /// them away from the loop before anything is torn down: `stop()` waits out whatever is running
+    /// and cancels the rest.  That is what lets the jobs capture `this` bare.
+    ///
+    /// Declared last so that it is also the first member destroyed.
+    oxen::quic::JobQueue _jq{*_loop};
 
   public:
     static std::shared_ptr<SessionRouter> make(

@@ -180,12 +180,16 @@ Network::Network(config::Config _conf) :
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
     _disk_loop = std::make_shared<quic::Loop>();
+    _jq.emplace(*_loop);
 
     // Setup the transport layer
     switch (config.transport) {
         case opt::transport::Type::quic:
-            _transport = std::make_shared<QuicTransport>(
-                    std::move(build_quic_transport_config(config)), _loop);
+            // Created through the loop's deleter, so that dropping our reference to it in
+            // ~Network destroys it *on the loop* and blocks until that has happened: no libquic
+            // callback can then be in flight into it, which is what lets it hold a bare `this`.
+            _transport = _loop->make_shared<QuicTransport>(
+                    std::move(build_quic_transport_config(config)), *_loop);
             break;
     }
 
@@ -201,7 +205,7 @@ Network::Network(config::Config _conf) :
                     "Transport provided to the SnodePool bootstrap fetcher has been destroyed.");
     };
     _snode_pool = std::make_shared<SnodePool>(
-            std::move(build_snode_pool_config(config)), _loop, _disk_loop, bootstrap_fetcher);
+            std::move(build_snode_pool_config(config)), *_loop, *_disk_loop, bootstrap_fetcher);
 
     // Additional transport configuration
     _transport->set_node_failure_reporter(
@@ -213,10 +217,10 @@ Network::Network(config::Config _conf) :
     // Setup the router
     switch (config.router) {
         case opt::router::Type::onion_requests:
-            _router = std::make_unique<OnionRequestRouter>(
+            _router = _loop->make_shared<OnionRequestRouter>(
                     std::move(build_onion_request_router_config(config, file_server_config)),
-                    _loop,
-                    _disk_loop,
+                    *_loop,
+                    *_disk_loop,
                     _snode_pool,
                     _transport);
             break;
@@ -267,10 +271,21 @@ Network::Network(config::Config _conf) :
     _transport->on_status_changed = [this] { _recalculate_status(); };
 
     // Perform a clock resync
-    _loop->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
+    _jq->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
 }
 
 Network::~Network() {
+    // A Network is singly owned, so this runs on whichever thread its owner dropped it from -- and
+    // it must not be the loop thread, because the loops are joined at the bottom of this function
+    // and a thread cannot join itself.  The only way to get here on the loop is for an owner to
+    // destroy its Network from inside a callback we handed it, so say so rather than leaving the
+    // std::system_error from the join to explain it.
+    if (_loop->inside())
+        log::critical(
+                cat,
+                "Network is being destroyed from its own loop thread -- most likely by dropping it "
+                "from inside one of its own callbacks.  This is about to abort.");
+
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         // Need to ensure the destruction of the router and transport objects don't trigger
@@ -286,9 +301,18 @@ Network::~Network() {
 
     // Explicitly destroy in dependency order while _loop is still alive. Their destructors post
     // final cleanup via call_get so the loop must be running when they destruct.
+    //
+    // This has to happen before the queue below is stopped, for two reasons: these destructors are
+    // what guarantee that no callback of ours is still held anywhere (which is what lets those
+    // callbacks capture `this` bare), and a component finishing up may still post onto our queue --
+    // which throws once the queue has been stopped.
     _router.reset();
     _snode_pool.reset();
     _transport.reset();
+
+    // Nothing can reach us any more, so cancel whatever is left queued here rather than letting it
+    // run against members that are about to go.
+    _loop->call_get([this] { _jq->stop(); });
 
     // Now shut down the loops (these destructors join their threads)
     _disk_loop.reset();
@@ -299,7 +323,7 @@ Network::~Network() {
 
 void Network::clear_cache() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq->call_get([this] {
         if (_snode_pool)
             _snode_pool->clear_cache();
         if (_router)
@@ -313,7 +337,7 @@ void Network::suspend() {
     // Use 'call_get' to force this to be synchronous.  Some of these suspend() calls queue things
     // on the disk loop, but they don't have to worry about synchronizing because we flush queued
     // disk loop jobs before we finish.
-    _loop->call_get([this] {
+    _jq->call_get([this] {
         _suspended = true;
 
         if (_snode_pool)
@@ -347,7 +371,7 @@ void Network::suspend() {
 
 void Network::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this, automatically_reconnect] {
+    _jq->call_get([this, automatically_reconnect] {
         if (!_suspended)
             return;
 
@@ -364,7 +388,7 @@ void Network::resume(bool automatically_reconnect) {
                 std::chrono::steady_clock::now() - _last_successful_clock_resync;
 
         if (time_since_last_resync >= config.min_resume_clock_resync_interval) {
-            _loop->call_soon([this] {
+            _jq->call_soon([this] {
                 log::info(
                         cat,
                         "Performing clock resync as enough time has passed since the last resync.");
@@ -379,7 +403,7 @@ void Network::resume(bool automatically_reconnect) {
 
 void Network::close_connections() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _close_connections(); });
+    _jq->call_get([this] { _close_connections(); });
 }
 
 // MARK: Interface
@@ -399,10 +423,10 @@ void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         bool ignore_strike_count,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
-    _loop->call([this,
-                 pubkey = std::move(swarm_pubkey),
-                 ignore_strike_count,
-                 cb = std::move(callback)] {
+    _jq->call([this,
+               pubkey = std::move(swarm_pubkey),
+               ignore_strike_count,
+               cb = std::move(callback)] {
         if (!_snode_pool) {
             log::warning(
                     cat,
@@ -417,7 +441,7 @@ void Network::get_swarm(
 
 void Network::get_random_nodes(
         uint16_t count, std::function<void(std::vector<service_node> nodes)> callback) {
-    _loop->call([this, count, cb = std::move(callback)] {
+    _jq->call([this, count, cb = std::move(callback)] {
         if (!_snode_pool) {
             log::warning(
                     cat,
@@ -467,16 +491,11 @@ void Network::send_request(Request request, network_response_callback_t callback
 
     try {
         auto processed_request = _preprocess_request(std::move(request));
+        // Bare `this`: the router is destroyed by ~Network before our queue is stopped, so it
+        // cannot still be holding this callback by the time any of our state goes.
         auto router_callback =
-                [weak_self = weak_from_this(),
-                 this,
-                 original_req = processed_request,
-                 cb = std::move(callback)](
+                [this, original_req = processed_request, cb = std::move(callback)](
                         bool success, bool timeout, int16_t status_code, auto headers, auto body) {
-                    auto self = weak_self.lock();
-                    if (!self)
-                        return;
-
                     const auto dest_is_snode =
                             std::holds_alternative<service_node>(original_req.destination);
 
@@ -555,12 +574,8 @@ void Network::upload(UploadRequest request) {
         return;
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), this, user_callback](
+    request.on_complete = [this, user_callback](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         if (auto* status_code = std::get_if<int16_t>(&result)) {
             // Handle 425 (clock out of sync)
             // If we got a 425 (no need to handle a 406 as we only ever upload to a server),
@@ -599,13 +614,9 @@ void Network::upload_file(FileUploadRequest request, std::span<const std::byte> 
 
     auto user_callback = request.on_complete;
     request.on_complete =
-            [weak_self = weak_from_this(), this, user_callback](
+            [this, user_callback](
                     std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result,
                     bool timeout) {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
                 if (auto* status_code = std::get_if<int16_t>(&result)) {
                     if (*status_code == ERROR_TOO_EARLY) {
                         log::info(cat, "File upload received 425, triggering clock resync.");
@@ -633,12 +644,8 @@ void Network::download(DownloadRequest request) {
         return;
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), this, user_callback, req = request](
+    request.on_complete = [this, user_callback, req = request](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         if (auto* status_code = std::get_if<int16_t>(&result)) {
             // If we got a 425 (no need to handle a 406 as we only ever download from a server),
             // then the device clock is out of sync so we need to kick off a clock resync request
@@ -678,7 +685,7 @@ void Network::_close_connections() {
 }
 
 void Network::_recalculate_status() {
-    _loop->call([this] {
+    _jq->call([this] {
         if (!_transport || !_router)
             return _update_status(ConnectionStatus::disconnected);
 
@@ -1079,7 +1086,7 @@ void Network::_resync_clock(
     if (original_request && request_callback) {
         // If we don't have a resync request queue then create one
         if (!_clock_resync_request_queue)
-            _clock_resync_request_queue = detail::RequestQueue::make(_loop);
+            _clock_resync_request_queue = std::make_shared<detail::RequestQueue>(*_loop);
 
         _clock_resync_request_queue->add(std::move(*original_request), std::move(request_callback));
     }
@@ -1304,9 +1311,9 @@ struct session_response_handle_cpp_t {
 
 namespace {
 
-inline std::shared_ptr<session::network::Network> unbox(network_object* network_) {
+inline session::network::Network* unbox(network_object* network_) {
     assert(network_ && network_->internals);
-    return *static_cast<std::shared_ptr<session::network::Network>*>(network_->internals);
+    return static_cast<session::network::Network*>(network_->internals);
 }
 
 }  // namespace
@@ -1612,9 +1619,9 @@ LIBSESSION_C_API bool session_network_init(
 
         // Construct the Network instance
         Config final_config(cpp_opts);
-        auto n = std::make_shared<Network>(std::move(final_config));
+        auto n = std::make_unique<Network>(std::move(final_config));
         auto n_object = std::make_unique<network_object>();
-        n_object->internals = new std::shared_ptr<Network>(n);
+        n_object->internals = n.release();
         *network = n_object.release();
         return true;
     } catch (const std::exception& e) {
@@ -1624,7 +1631,7 @@ LIBSESSION_C_API bool session_network_init(
 }
 
 LIBSESSION_C_API void session_network_free(network_object* network) {
-    delete static_cast<std::shared_ptr<session::network::Network>*>(network->internals);
+    delete static_cast<session::network::Network*>(network->internals);
     delete network;
 }
 

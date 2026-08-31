@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <future>
 #include <session/network/session_network.hpp>
+#include <thread>
 
 #include "test_helper.hpp"
 
@@ -176,4 +177,48 @@ TEST_CASE("Network: attempts are bounded by the overall budget", "[network]") {
 
         CHECK(n.router->tried.size() == 1);
     }
+}
+
+TEST_CASE(
+        "Network: an owner reference dropped mid-callback does not tear the Network down from its "
+        "own loop",
+        "[network]") {
+    // Two members so that the first, unreachable one sends the request through
+    // _retry_next_swarm_node: that goes via SnodePool::get_swarm, which answers from the loop, so
+    // the second attempt -- and the callback below -- run on the loop thread rather than on this
+    // one.
+    ScriptedNetwork n{2};
+    n.router->replies[n.swarm[1].remote_pubkey] = {};
+
+    auto reached_callback = std::promise<void>{};
+    auto in_callback = reached_callback.get_future();
+    std::atomic<bool> answered = false;
+
+    n.net->send_request(
+            n.to(n.swarm[0]), [&reached_callback, &answered](bool ok, bool, int16_t, auto, auto) {
+                answered = ok;
+                reached_callback.set_value();
+
+                // Stay on the loop thread while the reference below goes, which is the interleaving
+                // that used to abort: the callback held a shared_ptr<Network> of its own, so
+                // dropping the owner's left the loop thread as the last owner, and ~Network joins
+                // that thread.
+                std::this_thread::sleep_for(50ms);
+            });
+
+    REQUIRE(in_callback.wait_for(5s) == std::future_status::ready);
+
+    auto observer = std::weak_ptr<Network>{n.net};
+    n.net.reset();
+
+    // Waits for the Network to actually be gone rather than merely unreferenced from here: the
+    // teardown is what fails, so it has to happen while this test is still running.  Nothing else
+    // holds a reference, so this returns as soon as the callback has finished.
+    for (int i = 0; i < 500 && !observer.expired(); i++)
+        std::this_thread::sleep_for(10ms);
+
+    // Surviving to here is the assertion: the failure was an abort out of a destructor rather than
+    // a wrong answer.
+    CHECK(observer.expired());
+    CHECK(answered);
 }

@@ -14,7 +14,7 @@ core::callbacks& CoreComponent::cb() {
 }
 
 quic::Loop& CoreComponent::loop() {
-    return *core._loop;
+    return core._loop;
 }
 
 CoreComponent::CoreComponent(Core& core) : core{core} {

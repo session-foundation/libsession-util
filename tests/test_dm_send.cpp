@@ -53,8 +53,7 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     recipient->devices.active_account_keys();
     auto [x25519_pub, mlkem_pub] = TestHelper::active_account_pubkeys(*recipient);
@@ -105,8 +104,7 @@ TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     auto recip_sid = sid_bytes(*recipient);
     TestHelper::seed_pfs_nak(*sender, recip_sid);
@@ -151,8 +149,7 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
 
     TempCore sender{sender_cbs};
     TempCore recipient{recip_cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     auto recip_sid = sid_bytes(*recipient);
     TestHelper::seed_pfs_nak(*sender, recip_sid);
@@ -221,8 +218,7 @@ TEST_CASE("send_dm: no_network when no cache and no network", "[core][send_dm]")
 
 TEST_CASE("send_dm: the store names the recipient, namespace and ttl", "[core][send_dm]") {
     TempCore sender{};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
@@ -246,8 +242,7 @@ TEST_CASE("send_dm: network_error when store fails", "[core][send_dm]") {
     cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
 
     TempCore sender{cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
@@ -263,8 +258,7 @@ TEST_CASE("send_dm: network_error when store fails", "[core][send_dm]") {
 
 TEST_CASE("send_dm: message IDs are monotonically increasing", "[core][send_dm]") {
     TempCore sender{};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
@@ -286,8 +280,7 @@ TEST_CASE("send_dm: success waits for the store to be answered", "[core][send_dm
     cbs.message_send_status = [&](int64_t, MessageSendStatus s, auto) { statuses.push_back(s); };
 
     TempCore sender{cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
@@ -314,8 +307,7 @@ TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
 
     TempCore sender{};
     TempCore recipient{recip_cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     recipient->devices.active_account_keys();
     auto [x25519_pub, mlkem_pub] = TestHelper::active_account_pubkeys(*recipient);
@@ -352,8 +344,7 @@ TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
 
 TEST_CASE("send_dm: Content overload preserves a matching sigTimestamp", "[core][send_dm]") {
     TempCore sender{};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
 
@@ -392,8 +383,7 @@ TEST_CASE(
     };
 
     TempCore sender{cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     // Nothing cached for this recipient, so the send is queued behind a key fetch.
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
@@ -425,8 +415,7 @@ TEST_CASE(
     };
 
     TempCore sender{cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     for (int i = 0; i < 3; i++)
         sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
@@ -453,8 +442,7 @@ TEST_CASE(
     };
 
     TempCore sender{cbs};
-    auto net = std::make_shared<MockNetwork>();
-    sender->set_network(net);
+    auto* net = attach_mock_network(*sender);
 
     sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
     REQUIRE(!net->sent_requests.empty());

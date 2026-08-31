@@ -26,7 +26,11 @@ namespace detail {
 
 namespace fs = std::filesystem;  // NOLINT(misc-unused-alias-decls)
 
-class Network : public std::enable_shared_from_this<Network> {
+/// Owns the loops everything below it runs on, and is itself singly owned: a Network is held by one
+/// `unique_ptr` and nothing else, so no callback can keep it alive and its destructor always runs
+/// on whichever thread its owner drops it from.  That is what lets it join the loop threads at the
+/// end of ~Network -- joining them from a callback of their own would abort.
+class Network {
     friend class session::TestHelper;  // for unit tests: see _set_router
 
   private:
@@ -46,6 +50,16 @@ class Network : public std::enable_shared_from_this<Network> {
             DownloadRequest,
             std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>
             _clock_resync_download_queue;
+
+    /// Our own jobs, rather than the loop's shared queue, so that ~Network can take them away from
+    /// the loop: `stop()` waits out whatever is running and cancels the rest.  Together with the
+    /// components below being destroyed before it is stopped, that is what lets every job and
+    /// callback here capture `this` bare.
+    ///
+    /// Declared last so that it is also the first member destroyed.  Held in an optional because
+    /// the loop it runs on is created in the constructor body -- after the file-descriptor limit
+    /// has been raised, which has to come first -- rather than in the initialiser list.
+    std::optional<oxen::quic::JobQueue> _jq;
 
   public:
     const config::FileServer file_server_config;

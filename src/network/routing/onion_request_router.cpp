@@ -288,8 +288,8 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
 
 OnionRequestRouter::OnionRequestRouter(
         config::OnionRequestRouter config,
-        std::shared_ptr<oxen::quic::Loop> loop,
-        std::shared_ptr<oxen::quic::Loop> disk_loop,
+        oxen::quic::Loop& loop,
+        oxen::quic::Loop& disk_loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
         _config{std::move(config)},
@@ -299,8 +299,8 @@ OnionRequestRouter::OnionRequestRouter(
         _transport{transport} {
     log::trace(cat, "Initializing.");
 
-    _request_queues[PathCategory::standard] = detail::RequestQueue::make(_loop);
-    _request_queues[PathCategory::file] = detail::RequestQueue::make(_loop);
+    _request_queues[PathCategory::standard] = std::make_shared<detail::RequestQueue>(_loop);
+    _request_queues[PathCategory::file] = std::make_shared<detail::RequestQueue>(_loop);
 
     if (_config.cache_directory) {
         std::string cache_file_name;
@@ -324,7 +324,7 @@ OnionRequestRouter::OnionRequestRouter(
         _load_from_disk();
     }
 
-    _loop->call_soon([this] {
+    _jq.call_soon([this] {
         auto snode_pool = _snode_pool.lock();
         if (!snode_pool) {
             log::critical(cat, "SnodePool was destroyed, cannot setup router.");
@@ -332,12 +332,10 @@ OnionRequestRouter::OnionRequestRouter(
         }
 
         if (snode_pool->size() == 0)
-            snode_pool->refresh_if_needed({}, [weak_self = weak_from_this()] {
+            // The pool outlives us, so this one keeps a weak guard rather than a bare `this`.
+            snode_pool->refresh_if_needed({}, [weak_self = weak_from_this(), this] {
                 if (auto self = weak_self.lock())
-                    self->_loop->call([weak_self] {
-                        if (auto self = weak_self.lock())
-                            self->_finish_setup();
-                    });
+                    _jq.call([this] { _finish_setup(); });
             });
         else
             _finish_setup();
@@ -345,9 +343,15 @@ OnionRequestRouter::OnionRequestRouter(
 }
 
 OnionRequestRouter::~OnionRequestRouter() {
-    // Use 'call_get' to force this to be synchronous
-    if (_loop)
-        _loop->call_get([this] { _close_connections(); });
+    // Both halves go in one job on the loop's own queue, in this order and for this reason: the
+    // upload threads post their completion onto _jq, and posting to a stopped queue throws --
+    // which, on a thread of ours, is a terminate.  _close_connections joins those threads, so once
+    // it returns nothing can post any more and the queue can be stopped.  Being a single job also
+    // leaves no window in which a job of ours could run against a half-torn-down router.
+    _loop.call_get([this] {
+        _close_connections();
+        _jq.stop();
+    });
 
     log::debug(cat, "Destroyed.");
 }
@@ -479,22 +483,20 @@ void OnionRequestRouter::_perform_edge_node_write(
 
 void OnionRequestRouter::suspend() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _suspended = true;
 
         // Write the edge nodes to disk before suspension completes
-        if (_disk_loop) {
-            std::vector<cached_edge_node> edge_nodes;
+        std::vector<cached_edge_node> edge_nodes;
 
-            for (const auto& path_list : std::views::values(_paths))
-                for (const auto& path : path_list)
-                    if (!path.nodes.empty())
-                        edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
+        for (const auto& path_list : std::views::values(_paths))
+            for (const auto& path : path_list)
+                if (!path.nodes.empty())
+                    edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
 
-            _disk_loop->call([path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
-                OnionRequestRouter::_perform_edge_node_write(path, nodes);
-            });
-        }
+        _disk_loop.call([path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
+            OnionRequestRouter::_perform_edge_node_write(path, nodes);
+        });
 
         _close_connections();
         log::info(cat, "Suspended.");
@@ -503,7 +505,7 @@ void OnionRequestRouter::suspend() {
 
 void OnionRequestRouter::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this, automatically_reconnect] {
+    _jq.call_get([this, automatically_reconnect] {
         if (!_suspended)
             return;
 
@@ -518,22 +520,22 @@ void OnionRequestRouter::resume(bool automatically_reconnect) {
 
 void OnionRequestRouter::close_connections() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _close_connections(); });
+    _jq.call_get([this] { _close_connections(); });
 }
 
 void OnionRequestRouter::clear_cache() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         _cached_edge_nodes = {};
 
-        _disk_loop->call([path = _edge_node_cache_file_path] {
+        _disk_loop.call([path = _edge_node_cache_file_path] {
             OnionRequestRouter::_clear_disk_cache(path);
         });
     });
 }
 
 std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
-    return _loop->call_get([this] {
+    return _jq.call_get([this] {
         std::vector<PathInfo> result;
         result.reserve(_paths.size());
 
@@ -546,21 +548,17 @@ std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
 }
 
 std::vector<service_node> OnionRequestRouter::get_all_used_nodes() {
-    return _loop->call_get([this] { return extract_nodes(_paths, _pending_paths); });
+    return _jq.call_get([this] { return extract_nodes(_paths, _pending_paths); });
 }
 
 void OnionRequestRouter::send_request(Request request, network_response_callback_t callback) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
-        if (auto self = weak_self.lock())
-            self->_send_request_internal(std::move(req), std::move(cb));
+    _jq.call([this, req = std::move(request), cb = std::move(callback)]() mutable {
+        _send_request_internal(std::move(req), std::move(cb));
     });
 }
 
 void OnionRequestRouter::upload(UploadRequest request) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
-        if (auto self = weak_self.lock())
-            self->_upload_internal(std::move(req));
-    });
+    _jq.call([this, req = std::move(request)]() mutable { _upload_internal(std::move(req)); });
 }
 
 void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
@@ -571,8 +569,9 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
             _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
                     .first->second.second;
 
-    upload_thread = std::thread([weak_self = weak_from_this(),
-                                 this,
+    // This thread is ours: _close_connections joins it before the queue is stopped, so it outlives
+    // neither us nor the queue it posts to.
+    upload_thread = std::thread([this,
                                  enc = std::move(enc),
                                  request = std::move(request),
                                  upload_id,
@@ -620,10 +619,7 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
                     });
         } catch (const std::exception& e) {
             log::error(cat, "[Upload {}]: File upload failed: {}", upload_id, e.what());
-            _loop->call([weak_self = weak_from_this(), this, request, upload_id] {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
+            _jq.call([this, request, upload_id] {
                 _cleanup_upload(upload_id);
                 if (request.on_complete)
                     request.on_complete(ERROR_UNKNOWN, false);
@@ -633,10 +629,7 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
 }
 
 void OnionRequestRouter::download(DownloadRequest request) {
-    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
-        if (auto self = weak_self.lock())
-            self->_download_internal(std::move(req));
-    });
+    _jq.call([this, req = std::move(request)]() mutable { _download_internal(std::move(req)); });
 }
 
 // MARK: Internal Logic
@@ -934,16 +927,11 @@ void OnionRequestRouter::_dispatch_upload(
         Request req,
         std::function<bool()> is_cancelled,
         std::function<void(std::variant<file_metadata, int16_t>, bool)> on_result) {
-    _loop->call([weak_self = weak_from_this(),
-                 this,
-                 upload_id,
-                 req = std::move(req),
-                 is_cancelled = std::move(is_cancelled),
-                 on_result = std::move(on_result)]() mutable {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
+    _jq.call([this,
+              upload_id,
+              req = std::move(req),
+              is_cancelled = std::move(is_cancelled),
+              on_result = std::move(on_result)]() mutable {
         if (is_cancelled() || !req.body) {
             log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
             on_result(ERROR_REQUEST_CANCELLED, false);
@@ -957,7 +945,13 @@ void OnionRequestRouter::_dispatch_upload(
 
         _send_request_internal(
                 std::move(req),
-                [weak_self, this, upload_id, is_cancelled, on_result, upload_size](
+                // Ends up held by the transport, which outlives us, so this one keeps a weak guard.
+                [weak_self = weak_from_this(),
+                 this,
+                 upload_id,
+                 is_cancelled,
+                 on_result,
+                 upload_size](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -1023,15 +1017,11 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
     // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
-    upload_thread = std::thread([weak_self = weak_from_this(),
-                                 this,
+    // Ours, and joined by _close_connections before the queue is stopped -- see upload_file.
+    upload_thread = std::thread([this,
                                  upload_request = request,
                                  upload_id,
                                  file_server_config = _config.file_server_config] {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         try {
             auto req = file_server::to_request(upload_id, file_server_config, upload_request);
 
@@ -1043,10 +1033,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
         } catch (const std::exception& e) {
             log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, e.what());
 
-            _loop->call([weak_self, this, upload_request, upload_id] {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
+            _jq.call([this, upload_request, upload_id] {
                 _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });
@@ -1367,12 +1354,9 @@ void OnionRequestRouter::_on_edge_connectivity_response(
                 _config.path_build_retry_limit);
         _update_status();
 
-        _loop->call_later(
-                delay,
-                [weak_self = weak_from_this(), path_id, category, initiating_req_id, edge_node] {
-                    if (auto self = weak_self.lock())
-                        self->_build_path(category, initiating_req_id, {edge_node}, path_id);
-                });
+        _jq.call_later(delay, [this, path_id, category, initiating_req_id, edge_node] {
+            _build_path(category, initiating_req_id, {edge_node}, path_id);
+        });
         return;
     }
 
@@ -2137,7 +2121,7 @@ void OnionRequestRouter::_update_rotation_timer() {
     if (!_path_rotation_timer) {
         // If this is the first request timeout then set up the timeout event timer:
         _path_rotation_timer.reset(event_new(
-                _loop->get_event_base(),
+                _loop.get_event_base(),
                 -1,          // Not attached to an actual socket
                 EV_TIMEOUT,  // Stays active (i.e. repeats) once fired
                 [](evutil_socket_t, short, void* self) {

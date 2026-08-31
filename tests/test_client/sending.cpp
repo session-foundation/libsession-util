@@ -4,8 +4,7 @@
 
 TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][send]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -50,8 +49,7 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
 
 TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -81,8 +79,7 @@ TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[cli
     // The store is captured and never answered, which leaves the message mid-flight -- exactly the
     // state a crash would leave behind.
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -206,8 +203,7 @@ TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
 TEST_CASE("Client: send status changes are reported as message_updated", "[client][signals]") {
     Recorder r;
     TempClient c{r.handlers()};
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -326,8 +322,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
 
 TEST_CASE("Client: the two copies of a send report separately", "[client][send]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     constexpr auto peer =
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
@@ -363,8 +358,7 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
 
 TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);

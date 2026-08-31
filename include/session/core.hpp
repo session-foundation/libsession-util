@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/crypto/ed25519.hpp>
@@ -133,7 +134,6 @@
 /// ```
 
 namespace oxen::quic {
-class Loop;
 struct Ticker;
 }  // namespace oxen::quic
 
@@ -291,14 +291,18 @@ concept CoreOption = sqlite::DatabaseOption<std::remove_cvref_t<T>> ||
 class Core {
     friend class session::TestHelper;  // for unit tests
 
-    // Constructed first (in init()), destroyed last: must outlive all components that use it.
-    // Custom deleter allows quic::Loop to remain an incomplete type in this header.
-    struct LoopDeleter {
-        void operator()(quic::Loop*) const;
-    };
-    std::unique_ptr<quic::Loop, LoopDeleter> _loop;
+    // Declared first, so it is constructed first and destroyed last: it must outlive every
+    // component that uses it, and the poll ticker below.
+    quic::Loop _loop;
 
-    std::shared_ptr<network::Network> _network;
+    // Singly owned: a Network must not be kept alive by anything else, least of all by a callback
+    // it hands out, so that its destructor never runs on its own loop thread.
+    //
+    // Custom deleter allows network::Network to remain an incomplete type in this header.
+    struct NetworkDeleter {
+        void operator()(network::Network*) const;
+    };
+    std::unique_ptr<network::Network, NetworkDeleter> _network;
 
     sqlite::Database db;
     friend class detail::CoreComponent;
@@ -448,8 +452,9 @@ class Core {
         init();
     }
 
-    /// Set an optional network interface that can be used to make network requests to swarm members
-    void set_network(std::shared_ptr<network::Network> network);
+    /// Set an optional network interface that can be used to make network requests to swarm
+    /// members.  Ownership is taken: nothing else may hold on to the Network.
+    void set_network(std::unique_ptr<network::Network> network);
 
     /// How long a cached PFS key is considered fresh (no re-fetch needed).
     static constexpr auto PFS_KEY_FRESH_DURATION = 24h;
@@ -527,8 +532,9 @@ class Core {
             std::chrono::milliseconds ttl = 14 * 24h,
             bool force_v2 = false);
 
-    /// Returns the optional network interface, if set.
-    const std::shared_ptr<network::Network>& network() const { return _network; }
+    /// Returns the optional network interface, or nullptr if none is set.  Non-owning: a caller
+    /// must not keep this beyond the point where the network could be replaced or dropped.
+    network::Network* network() const { return _network.get(); }
 
     /// The event loop this account's work runs on.
     ///

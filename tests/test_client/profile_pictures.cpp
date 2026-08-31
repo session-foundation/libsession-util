@@ -49,8 +49,7 @@ void set_picture(
 TEST_CASE("Client: a stream-encrypted picture round-trips through the cache", "[client][pictures]") {
     TempCacheDir dir;
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     std::vector<std::byte> image(9000);
@@ -118,8 +117,7 @@ TEST_CASE("Client: a stream-encrypted picture round-trips through the cache", "[
 
 TEST_CASE("Client: a picture from before the stream scheme still opens", "[client][pictures]") {
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
 
     std::vector<std::byte> image(2000);
     session::random::fill(image);
@@ -157,8 +155,7 @@ TEST_CASE("Client: a picture that will not decrypt is an error, not an absence",
           "[client][pictures]") {
     TempCacheDir dir;
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     std::vector<std::byte> image(500);
@@ -200,8 +197,7 @@ TEST_CASE("Client: a picture that will not decrypt is an error, not an absence",
 TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][pictures]") {
     TempCacheDir dir;
     TempClient c;
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     auto seed = session::random::random(32);
@@ -265,8 +261,7 @@ TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictu
             };
 
     TempClient c{std::move(cbs)};
-    auto net = std::make_shared<MockNetwork>();
-    c->core.set_network(net);
+    auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
     std::vector<std::byte> image(1500);
