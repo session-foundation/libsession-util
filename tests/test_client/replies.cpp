@@ -175,3 +175,63 @@ TEST_CASE("Client: a quote with an unusable author is dropped", "[client][replie
     CHECK_FALSE(by_body("body survives").reply.has_value());
     CHECK(by_body("a good reply").reply.has_value());
 }
+
+TEST_CASE("Client: a reply is re-reported when its target arrives", "[client][replies]") {
+    Recorder rec;
+    TempClient c{rec.handlers()};
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    auto target_ts = from_epoch_ms(1000);
+    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+            quoting(peer.session_id, target_ts, 7777));
+    sync(*c);
+
+    REQUIRE(rec.msg_added.size() == 1);
+    auto reply_id = rec.msg_added[0].second.id;
+    REQUIRE_FALSE(rec.msg_added[0].second.reply->message_id.has_value());
+    rec.msg_updated.clear();
+
+    // The target lands afterwards.  Nothing about the reply's own row changes, but what it resolves
+    // to does -- and a display holding it has no way to know that without being told.
+    deliver(*c, peer, "the original", target_ts, "h1", "", std::nullopt, nullptr, 7777);
+    sync(*c);
+
+    auto reported = std::ranges::find_if(rec.msg_updated, [&](const auto& p) {
+        return p.second.id == reply_id;
+    });
+    REQUIRE(reported != rec.msg_updated.end());
+    REQUIRE(reported->second.reply);
+    CHECK(reported->second.reply->message_id.has_value());
+}
+
+TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][replies]") {
+    Recorder rec;
+    TempClient c{rec.handlers()};
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    auto target_ts = from_epoch_ms(1000);
+    deliver(*c, peer, "the original", target_ts, "h1", "", std::nullopt, nullptr, 7777);
+    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+            quoting(peer.session_id, target_ts, 7777));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 2);
+    auto reply_id = msgs[0].id;
+    auto target_id = msgs[1].id;
+    rec.msg_updated.clear();
+
+    c->delete_message(target_id, wait);
+    sync(*c);
+
+    // The target itself is reported, and so is the reply that points at it: what it should draw
+    // has changed even though its own row has not.
+    CHECK(std::ranges::any_of(rec.msg_updated, [&](const auto& p) {
+        return p.second.id == target_id;
+    }));
+    CHECK(std::ranges::any_of(rec.msg_updated, [&](const auto& p) {
+        return p.second.id == reply_id;
+    }));
+}

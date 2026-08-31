@@ -1198,7 +1198,22 @@ class Client {
     void _emit_conversation_removed(const ConversationId& id);
     void _emit_lists_replaced();
     void _emit_history_replaced(const ConversationId& id);
+    // Reports a message, and then reports every message that replies to it.
+    //
+    // A reply resolves what it answers on each read, so anything that happens to a message changes
+    // the replies pointing at it: one arriving makes them resolve, one being deleted changes what
+    // they show.  Cascading here rather than at the ten call sites means none of them can forget
+    // it, which would show up only as a display that quietly stops matching the database.
     void _emit_message(bool added, const ConversationId& id, int64_t message_id);
+
+    // The above without the cascade, which is what the cascade itself uses.
+    //
+    // One level is enough, and is why this terminates: reporting B refreshes what A shows for the
+    // message it replied to, but reporting A cannot change what anything shows for *A*, because a
+    // message reached through a reply carries the reference to what it answered and never the
+    // answer itself.  So there is no visited set, and two messages claiming to reply to each other
+    // cannot loop.
+    void _emit_message_alone(bool added, const ConversationId& id, int64_t message_id);
 
     // Conversations whose settled state still has to be reported.  A conversation is marked here
     // rather than reported immediately so that a poll delivering fifty messages to one conversation

@@ -478,7 +478,7 @@ void Client::_emit_history_replaced(const ConversationId& id) {
     });
 }
 
-void Client::_emit_message(bool added, const ConversationId& id, int64_t message_id) {
+void Client::_emit_message_alone(bool added, const ConversationId& id, int64_t message_id) {
     auto msg = _message(message_id);
     if (!msg)
         return;
@@ -487,6 +487,31 @@ void Client::_emit_message(bool added, const ConversationId& id, int64_t message
         if (h)
             h(id, msg);
     });
+}
+
+void Client::_emit_message(bool added, const ConversationId& id, int64_t message_id) {
+    _emit_message_alone(added, id, message_id);
+
+    // Matched the way the reference was written rather than the way it resolves: a quote with no
+    // msgid whose target is ambiguous resolves to only one of the candidates, but which one is not
+    // worth computing here.  Reporting a message whose displayed reply did not actually change
+    // costs a redraw; failing to report one that did leaves the display wrong.
+    //
+    // `reply_timestamp IS NOT NULL` is redundant against the equality but is what lets the planner
+    // use `messages_reply_target`, which is a partial index over exactly that condition.
+    auto c = core.database().conn();
+    for (auto replier : c.prepared_results<int64_t>(
+                 R"(
+        SELECT r.id FROM messages r JOIN messages t ON t.id = ?1
+         WHERE r.conversation = t.conversation
+           AND r.reply_timestamp IS NOT NULL
+           AND r.reply_author = t.sender
+           AND r.reply_timestamp = t.timestamp
+           AND (r.reply_msgid IS NULL OR r.reply_msgid = t.msgid)
+           AND r.id != t.id
+    )",
+                 message_id))
+        _emit_message_alone(false, id, replier);
 }
 
 void Client::JobsDeleter::operator()(oxen::quic::JobQueue* p) const {
