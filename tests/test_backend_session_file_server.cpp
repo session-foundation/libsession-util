@@ -78,6 +78,21 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
           "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
     CHECK(parsed_download_url->wants_stream_decryption);
 
+    // A valueless `d=` is NOT the stream-encryption fragment.  Session Desktop builds its fragment
+    // with URLSearchParams, which serialises a valueless key with the `=`, so its stream-encrypted
+    // uploads are read as legacy by every client that parses the url through here.
+    parsed_download_url = file_server::parse_download_url("https://example.com/file/abc123#d="sv);
+    REQUIRE(parsed_download_url.has_value());
+    CHECK(parsed_download_url->file_id == "abc123"sv);
+    CHECK_FALSE(parsed_download_url->wants_stream_decryption);
+
+    parsed_download_url = file_server::parse_download_url(
+            "https://example.com/file/abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d="sv);
+    REQUIRE(parsed_download_url.has_value());
+    CHECK(parsed_download_url->custom_pubkey_hex ==
+          "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+    CHECK_FALSE(parsed_download_url->wants_stream_decryption);
+
     // Doesn't have an issue with a legacy url
     parsed_download_url = file_server::parse_download_url(
             "http://filev2.getsession.org/files/2478430809375318"sv);
