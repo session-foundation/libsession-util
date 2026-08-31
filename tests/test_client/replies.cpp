@@ -235,3 +235,155 @@ TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][re
         return p.second.id == reply_id;
     }));
 }
+
+TEST_CASE("Client: a reply carries the message it answers", "[client][replies]") {
+    TempClient c;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    auto first = from_epoch_ms(1000);
+    deliver(*c, peer, "what was said", first, "h1", "", std::nullopt, nullptr, 7777);
+    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+            quoting(peer.session_id, first, 7777));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 2);
+    REQUIRE(msgs[0].reply);
+    REQUIRE(msgs[0].reply->message);
+
+    // The whole message, not a summary of it: a caller drawing a reply line needs whatever it
+    // needs, and that is not knowable from here.
+    const auto& target = *msgs[0].reply->message;
+    CHECK(target.id == msgs[1].id);
+    CHECK(target.body == "what was said");
+    CHECK(target.sender == peer.session_id);
+    CHECK(target.timestamp == first);
+}
+
+TEST_CASE("Client: a quoted attachment-only message arrives whole", "[client][replies]") {
+    TempClient c;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    // No body at all: exactly the case a body-only summary could not draw.
+    auto first = from_epoch_ms(1000);
+    deliver(*c, peer, "", first, "h1", "", std::nullopt,
+            [](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/1#d");
+                a->set_key(std::string(32, 'k'));
+                a->set_contenttype("image/png");
+                a->set_filename("photo.png");
+            },
+            7777);
+    deliver(*c, peer, "nice one", from_epoch_ms(2000), "h2", "", std::nullopt,
+            quoting(peer.session_id, first, 7777));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 2);
+    REQUIRE(msgs[0].reply);
+    REQUIRE(msgs[0].reply->message);
+
+    const auto& target = *msgs[0].reply->message;
+    CHECK(target.body.empty());
+    REQUIRE(target.attachments.size() == 1);
+    CHECK(target.attachments[0].filename == "photo.png");
+    // Derived on the nested message too, not left at its default.
+    CHECK(target.gallery_viewable);
+}
+
+TEST_CASE("Client: reply loading stops one level down", "[client][replies]") {
+    TempClient c;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    // A chain: A <- B <- C.  Reading C must give B, and B must name A without carrying it.
+    auto a_ts = from_epoch_ms(1000);
+    auto b_ts = from_epoch_ms(2000);
+    deliver(*c, peer, "A", a_ts, "h1", "", std::nullopt, nullptr, 111);
+    deliver(*c, peer, "B", b_ts, "h2", "", std::nullopt, quoting(peer.session_id, a_ts, 111), 222);
+    deliver(*c, peer, "C", from_epoch_ms(3000), "h3", "", std::nullopt,
+            quoting(peer.session_id, b_ts, 222));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 3);
+    const auto& cmsg = msgs[0];
+
+    REQUIRE(cmsg.reply);
+    REQUIRE(cmsg.reply->message);
+    CHECK(cmsg.reply->message->body == "B");
+
+    // B is itself a reply, and says so -- but the payload stops here, which is what keeps a read
+    // from walking a chain of unbounded length.  The id is still there to ask with.
+    const auto& nested = *cmsg.reply->message;
+    REQUIRE(nested.reply);
+    CHECK(nested.reply->author == peer.session_id);
+    CHECK(nested.reply->timestamp == a_ts);
+    CHECK(nested.reply->message_id.has_value());
+    CHECK(nested.reply->message == nullptr);
+}
+
+TEST_CASE("Client: several replies to one message share one copy", "[client][replies]") {
+    TempClient c;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    auto first = from_epoch_ms(1000);
+    deliver(*c, peer, "the original", first, "h1", "", std::nullopt, nullptr, 7777);
+    deliver(*c, peer, "answer one", from_epoch_ms(2000), "h2", "", std::nullopt,
+            quoting(peer.session_id, first, 7777));
+    deliver(*c, peer, "answer two", from_epoch_ms(3000), "h3", "", std::nullopt,
+            quoting(peer.session_id, first, 7777));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 3);
+    REQUIRE(msgs[0].reply);
+    REQUIRE(msgs[1].reply);
+    REQUIRE(msgs[0].reply->message);
+
+    // One read, one payload: the pointers are the same object, not two copies of it.
+    CHECK(msgs[0].reply->message == msgs[1].reply->message);
+}
+
+TEST_CASE("Client: many distinct reply targets load correctly", "[client][replies]") {
+    TempClient c;
+    SenderKeys peer;
+    auto convo = ConversationId::dm(peer.session_id);
+
+    // More distinct targets than the lookup caches a statement for, so this exercises the one-off
+    // statement branch as well as the binding of a longer placeholder list.
+    constexpr int n = 6;
+    std::vector<sys_ms> stamps;
+    for (int i = 0; i < n; i++) {
+        auto ts = from_epoch_ms(1000 + i);
+        stamps.push_back(ts);
+        deliver(*c, peer, "original {}"_format(i), ts, "o{}"_format(i), "", std::nullopt, nullptr,
+                100 + i);
+    }
+    for (int i = 0; i < n; i++)
+        deliver(*c, peer, "answer {}"_format(i), from_epoch_ms(5000 + i), "a{}"_format(i), "",
+                std::nullopt, quoting(peer.session_id, stamps[i], 100 + i));
+    sync(*c);
+
+    auto msgs = c->conversation(convo, wait)->messages(wait);
+    REQUIRE(msgs.size() == 2 * n);
+
+    // Every answer resolved, and each to its *own* target rather than all to one of them -- which
+    // is what a mis-bound placeholder list would produce.
+    int checked = 0;
+    for (const auto& m : msgs) {
+        if (!m.body.starts_with("answer "))
+            continue;
+        auto which = m.body.substr(7);
+        REQUIRE(m.reply);
+        REQUIRE(m.reply->message);
+        CHECK(m.reply->message->body == "original {}"_format(which));
+        checked++;
+    }
+    CHECK(checked == n);
+}

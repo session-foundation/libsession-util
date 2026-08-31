@@ -19,6 +19,7 @@
 #include <session/random.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/session_network.hpp>
+#include <session/placeholders.hpp>
 #include <session/sqlite.hpp>
 #include <set>
 #include <stdexcept>
@@ -2935,16 +2936,12 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     for (auto& m : msgs)
         by_id.emplace(m.id, &m);
 
-    std::string placeholders;
-    for (size_t i = 0; i < msgs.size(); i++)
-        placeholders += i ? ",?" : "?";
-
     auto st = c.prepared_st(
             R"(
         SELECT message, idx, content_type, filename, caption, flags, width, height,
                size, url IS NOT NULL, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
-    )"_format(placeholders));
+    )"_format(sqlite::placeholders(msgs.size())));
 
     int n = 1;
     for (const auto& m : msgs)
@@ -2982,29 +2979,50 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     }
 }
 
-template <typename... Bind>
-static std::vector<Message> query_messages(
+// How deep a read goes when a message turns out to be a reply.
+enum class ReplyDepth {
+    // Load the replied-to message, so a caller can draw the reply from one read.
+    with_target,
+    // Resolve the reference but leave `Reply::message` null.  This is what a *nested* message gets,
+    // and is the whole of the depth limit: without it, reading one message could walk a chain of
+    // replies of unbounded length.
+    reference_only,
+};
+
+// How many distinct reply targets a page may have before its lookup stops being worth caching a
+// compiled statement for; see `load_reply_targets`.
+static constexpr size_t REPLY_TARGET_CACHE_MAX = 4;
+
+static void load_reply_targets(
+        sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
+
+// Turns a bound statement over MESSAGE_COLUMNS into whole Messages: attachments loaded, gallery
+// decided, and replied-to messages filled in unless this is already a nested read.
+//
+// Takes a bare statement rather than a `StatementWrapper` so that it serves both a cached statement
+// and a one-off; see `load_reply_targets` for why one of its callers cannot use the cache.
+static std::vector<Message> build_messages(
         sqlite::Connection& c,
         const ConversationId& convo,
-        const std::string& query,
-        const Bind&... bind) {
+        ReplyDepth depth,
+        SQLite::Statement& st) {
     std::vector<Message> out;
-    for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state, deleted,
-               gallery, reply_author, reply_ts, reply_id] :
-         c.prepared_results<
-                 int64_t,
-                 std::optional<std::string>,
-                 sqlite::blob_guts<b33>,
-                 int,
-                 int64_t,
-                 std::string,
-                 std::optional<int>,
-                 std::optional<int>,
-                 std::optional<int>,
-                 int,
-                 std::optional<sqlite::blob_guts<b33>>,
-                 std::optional<int64_t>,
-                 std::optional<int64_t>>(query, bind...))
+    while (st.executeStep()) {
+        auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state, deleted,
+              gallery, reply_author, reply_ts, reply_id] =
+                sqlite::get<int64_t,
+                            std::optional<std::string>,
+                            sqlite::blob_guts<b33>,
+                            int,
+                            int64_t,
+                            std::string,
+                            std::optional<int>,
+                            std::optional<int>,
+                            std::optional<int>,
+                            int,
+                            std::optional<sqlite::blob_guts<b33>>,
+                            std::optional<int64_t>,
+                            std::optional<int64_t>>(st);
         out.push_back(
                 Message{.id = id,
                         .conversation = convo,
@@ -3031,6 +3049,7 @@ static std::vector<Message> query_messages(
                                        : std::nullopt,
                         .deleted = deleted ? std::optional{static_cast<Deletion>(*deleted)}
                                            : std::nullopt});
+    }
 
     // Done here rather than by each caller so that every path that produces Messages produces whole
     // ones: a Message with its attachments silently missing is worse than no accessor at all.
@@ -3047,7 +3066,71 @@ static std::vector<Message> query_messages(
             c.prepared_exec("UPDATE messages SET gallery = 0 WHERE id = ?", m.id);
         }
     }
+
+    if (depth == ReplyDepth::with_target)
+        load_reply_targets(c, convo, out);
+
     return out;
+}
+
+template <typename... Bind>
+static std::vector<Message> query_messages(
+        sqlite::Connection& c,
+        const ConversationId& convo,
+        ReplyDepth depth,
+        const std::string& query,
+        const Bind&... bind) {
+    auto st = c.prepared_st(query);
+    bind_oneshot(st, bind...);
+    return build_messages(c, convo, depth, *st);
+}
+
+static void load_reply_targets(
+        sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs) {
+    // Deduplicated: a conversation where several people answer the same message should read it
+    // once, and then share the one copy rather than each holding its own.
+    std::set<int64_t> wanted;
+    for (const auto& m : msgs)
+        if (m.reply && m.reply->message_id)
+            wanted.insert(*m.reply->message_id);
+    if (wanted.empty())
+        return;
+
+    auto query =
+            "{} WHERE m.id IN ({})"_format(MESSAGE_COLUMNS, sqlite::placeholders(wanted.size()));
+
+    // Cached only up to a few targets.  A prepared statement is kept forever against its query
+    // text, and this text varies with how many distinct messages the page replies to -- so caching
+    // every shape would keep a compiled statement per count ever seen, most of them to save
+    // recompiling a query unlikely to recur with exactly that many placeholders.
+    //
+    // The small counts are worth it though, because they are the common case: a page of history
+    // usually answers a handful of distinct messages at most, so these few shapes recur constantly
+    // while the long ones are one-offs.
+    std::optional<sqlite::StatementWrapper> cached;
+    std::optional<SQLite::Statement> one_off;
+    if (wanted.size() <= REPLY_TARGET_CACHE_MAX)
+        cached.emplace(c.prepared_st(query));
+    else
+        one_off.emplace(c.sql, query);
+    SQLite::Statement& st = cached ? **cached : *one_off;
+
+    int n = 1;
+    for (auto id : wanted)
+        st.bind(n++, id);
+
+    // `reference_only`, which is the depth limit: these targets keep the reference to whatever
+    // *they* replied to, but not the message, so one read cannot walk a chain.
+    std::map<int64_t, std::shared_ptr<const Message>> loaded;
+    for (auto& t : build_messages(c, convo, ReplyDepth::reference_only, st)) {
+        auto id = t.id;
+        loaded.emplace(id, std::make_shared<const Message>(std::move(t)));
+    }
+
+    for (auto& m : msgs)
+        if (m.reply && m.reply->message_id)
+            if (auto found = loaded.find(*m.reply->message_id); found != loaded.end())
+                m.reply->message = found->second;
 }
 
 std::vector<Message> Client::_messages(
@@ -3069,6 +3152,7 @@ std::vector<Message> Client::_messages(
         return query_messages(
                 c,
                 id,
+                ReplyDepth::with_target,
                 R"(
             {} WHERE m.conversation = ? {} ORDER BY m.timestamp DESC, m.id DESC LIMIT ?
         )"_format(MESSAGE_COLUMNS, visible),
@@ -3080,6 +3164,7 @@ std::vector<Message> Client::_messages(
     return query_messages(
             c,
             id,
+            ReplyDepth::with_target,
             R"(
         {} WHERE m.conversation = ?1 {}
              AND (m.timestamp < ?2 OR (m.timestamp = ?2 AND m.id < ?3))
@@ -3099,7 +3184,11 @@ std::optional<Message> Client::_message(int64_t id) {
         return std::nullopt;
 
     auto found = query_messages(
-            c, conversation_id_at(c, *convo), "{} WHERE m.id = ?"_format(MESSAGE_COLUMNS), id);
+            c,
+            conversation_id_at(c, *convo),
+            ReplyDepth::with_target,
+            "{} WHERE m.id = ?"_format(MESSAGE_COLUMNS),
+            id);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
