@@ -46,6 +46,26 @@ static MsgId new_msgid() {
     return static_cast<MsgId>(csrng());
 }
 
+/// Fills in what every outgoing message carries, and returns its DataMessage for whatever else the
+/// caller has to add.
+///
+/// Three places build one: a plain send, the placeholder stored while attachments upload, and the
+/// rewrite that finally goes out once they have.  They agree on these fields by construction here,
+/// rather than by three copies of them staying in step.
+static SessionProtos::DataMessage* fill_outgoing_content(
+        SessionProtos::Content& content,
+        sys_ms timestamp,
+        std::optional<MsgId> msgid,
+        std::string_view body) {
+    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(timestamp)));
+    if (msgid)
+        content.set_msgid(*msgid);
+    auto* data = content.mutable_datamessage();
+    data->set_body(std::string{body});
+    data->set_timestamp(static_cast<uint64_t>(epoch_ms(timestamp)));
+    return data;
+}
+
 /// Reads a message's identifier out of arriving content.  Absent from anything sent by a client
 /// that predates the field, which then has no identity beyond its timestamp.
 static std::optional<MsgId> msgid_of(const SessionProtos::Content& content) {
@@ -3220,15 +3240,12 @@ int64_t Client::_send_message(const ConversationId& id, std::string_view body) {
     auto now = clock_now_ms();
     auto self = core.globals.session_id();
 
-    SessionProtos::Content content;
-    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
-    // Set before the copies below, so both carry it: that is what makes it the identifier every
-    // party agrees on, unlike a hash of copies that differ.
+    // Generated before the copies below, so both carry it: that is what makes it the identifier
+    // every party agrees on, unlike a hash of copies that differ.
     auto msgid = new_msgid();
-    content.set_msgid(msgid);
-    auto* data = content.mutable_datamessage();
-    data->set_body(std::string{body});
-    data->set_timestamp(static_cast<uint64_t>(epoch_ms(now)));
+
+    SessionProtos::Content content;
+    fill_outgoing_content(content, now, msgid, body);
 
     // Two artifacts: the copy the recipient gets, and the copy we deposit in our own swarm so that
     // our other devices see it.  They differ only in syncTarget, which is what tells those devices
@@ -3403,11 +3420,7 @@ int64_t Client::_send_message(
     auto msgid = new_msgid();
 
     SessionProtos::Content content;
-    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
-    content.set_msgid(msgid);
-    auto* data = content.mutable_datamessage();
-    data->set_body(std::string{body});
-    data->set_timestamp(static_cast<uint64_t>(epoch_ms(now)));
+    fill_outgoing_content(content, now, msgid, body);
 
     auto serialised = content.SerializeAsString();
     auto raw = std::span{reinterpret_cast<const std::byte*>(serialised.data()), serialised.size()};
@@ -4447,15 +4460,10 @@ void Client::_finish_attachment_send(int64_t client_id) {
         body = std::move(msg_body);
         timestamp = msg_ts;
 
-        content.set_sigtimestamp(static_cast<uint64_t>(timestamp));
-        // The one the row was stored with, not a fresh one: rebuilding the content does not make
-        // this a different message, and a new identifier here would leave the copy we already
+        // The identifier the row was stored with, not a fresh one: rebuilding the content does not
+        // make this a different message, and a new identifier here would leave the copy we already
         // showed the user and the copy we send disagreeing about which message they are.
-        if (msg_id)
-            content.set_msgid(*msg_id);
-        auto* data = content.mutable_datamessage();
-        data->set_body(body);
-        data->set_timestamp(static_cast<uint64_t>(timestamp));
+        auto* data = fill_outgoing_content(content, from_epoch_ms(timestamp), msg_id, body);
 
         for (auto&& [url, key, size, ctype, fname, caption, flags, width, height] :
              c.prepared_results<
