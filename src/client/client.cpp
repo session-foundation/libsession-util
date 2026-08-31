@@ -2835,14 +2835,42 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 
 // -- Messages ---------------------------------------------------------------------------------
 
+// Resolves what a wire reference names -- the target's author and send time, plus the sender's
+// msgId for it where they set one -- to a local message id, correlated against `m`.
+//
+// Written once because reactions address their target identically (see Reaction.msgTimestamp in
+// SessionProtos.proto, which mirrors Quote exactly); two copies of this would eventually disagree
+// about the ambiguous case.  Unqualified apart from `m`, following UNREAD's precedent, so it reads
+// the same wherever it is substituted.
+//
+// `min(q.id)` does double duty.  It applies the ambiguity rule: with no msgid, every message that
+// sender stamped in that millisecond matches, and the lowest id is arbitrary but stable across
+// reads -- which matters more than being right in a case the wire cannot disambiguate.  And it
+// collapses a multi-match to one row rather than multiplying the outer query.
+//
+// Guarded by the NULL check so a message that is not a reply -- almost all of them -- costs nothing.
+static constexpr auto WIRE_REF_TARGET = R"(
+    CASE WHEN m.reply_timestamp IS NULL THEN NULL ELSE (
+        SELECT min(q.id) FROM messages q
+         WHERE q.conversation = m.conversation AND q.sender = m.reply_author
+           AND q.timestamp = m.reply_timestamp
+           AND (m.reply_msgid IS NULL OR q.msgid = m.reply_msgid)
+    ) END
+)"sv;
+
 // No join back to conversations: every row of a given query belongs to one conversation, so its
 // ConversationId is resolved once by the caller rather than rebuilt per row.
-static constexpr auto MESSAGE_COLUMNS = R"(
+//
+// `ra` is the replied-to message's author, joined for its session id: the column holds an accounts
+// row id, and what a caller needs is who that is.
+static const std::string MESSAGE_COLUMNS = R"(
     SELECT m.id, m.swarm_hash, a.session_id, m.outgoing, m.timestamp, m.body, m.send_state,
-           m.sync_send_state, m.deleted, m.gallery
+           m.sync_send_state, m.deleted, m.gallery,
+           ra.session_id, m.reply_timestamp, {}
     FROM messages m
     JOIN accounts a ON a.id = m.sender
-)"sv;
+    LEFT JOIN accounts ra ON ra.id = m.reply_author
+)"_format(WIRE_REF_TARGET);
 
 // Whether a message is one we are willing to show as a gallery.  Ours to tighten -- to particular
 // formats, or a size ceiling -- which is why it is computed here rather than stored: narrowing it
@@ -2923,7 +2951,7 @@ static std::vector<Message> query_messages(
         const Bind&... bind) {
     std::vector<Message> out;
     for (auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state, deleted,
-               gallery] :
+               gallery, reply_author, reply_ts, reply_id] :
          c.prepared_results<
                  int64_t,
                  std::optional<std::string>,
@@ -2934,7 +2962,10 @@ static std::vector<Message> query_messages(
                  std::optional<int>,
                  std::optional<int>,
                  std::optional<int>,
-                 int>(query, bind...))
+                 int,
+                 std::optional<sqlite::blob_guts<b33>>,
+                 std::optional<int64_t>,
+                 std::optional<int64_t>>(query, bind...))
         out.push_back(
                 Message{.id = id,
                         .conversation = convo,
@@ -2950,6 +2981,15 @@ static std::vector<Message> query_messages(
                                                            : std::nullopt,
                         .hash = std::move(swarm_hash),
                         .gallery = gallery != 0,
+                        // The author and timestamp are what the wire carried, so they are known
+                        // whether or not the reference resolved; `message_id` is the resolution.
+                        // The message itself is filled in afterwards, in one query for the page.
+                        .reply = reply_author && reply_ts
+                                       ? std::optional{Reply{
+                                                 .author = *reply_author,
+                                                 .timestamp = from_epoch_ms(*reply_ts),
+                                                 .message_id = reply_id}}
+                                       : std::nullopt,
                         .deleted = deleted ? std::optional{static_cast<Deletion>(*deleted)}
                                            : std::nullopt});
 

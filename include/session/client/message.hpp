@@ -2,6 +2,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <session/client/attachment.hpp>
 #include <session/client/conversation_id.hpp>
@@ -60,6 +61,50 @@ struct MessageCursor {
 enum class Deletion : int {
     here = 1,       ///< Deleted on this device; the copies elsewhere are untouched.
     everywhere = 2  ///< Deleted here, and asked to be deleted wherever else it reached.
+};
+
+struct Message;
+
+/// What a message is a reply to.
+///
+/// The wire addresses a message by who sent it and when, never by an id, so `author` and
+/// `timestamp` are always known even when the message itself is not — which is what lets a client
+/// name the author over an "original message not found" line.
+struct Reply {
+    /// Who wrote the replied-to message, and when they sent it.
+    b33 author;
+    sys_ms timestamp;
+
+    /// Whether we have that message at all.  Unset means we do not — never that there is no reply;
+    /// `Message::reply` being unset means that.
+    ///
+    /// It can become set on a later read, once the message arrives, so do not cache it alongside
+    /// the message.  You are told when it changes: the quoting message is re-reported through
+    /// `message_updated`.
+    std::optional<int64_t> message_id;
+
+    /// The message itself, when it was loaded.
+    ///
+    /// The whole message rather than a summary of it, because every summary is missing whatever a
+    /// caller needs next: a quoted message with an image and no text has nothing to show from a
+    /// body alone, and `deleted`, `gallery` and the attachment list are all things a reply line may
+    /// legitimately want to draw.
+    ///
+    /// A `shared_ptr` rather than an `optional` because `Message` contains this struct: an optional
+    /// would need a complete type, and a `unique_ptr` would make `Message` non-copyable when it is
+    /// copied into every callback and every page.
+    ///
+    /// **Null in a nested reply, even when `message_id` is set.** Loading goes one level deep, so
+    /// reading a message cannot walk an arbitrarily long chain of replies — a message reached
+    /// *through* a reply carries the reference to what it answered but not the answer itself.  That
+    /// is why `message_id` is a separate field rather than read off this one: "we do not have it"
+    /// and "it was not loaded here" are different answers, and a caller wanting the second resolved
+    /// has the id to ask with.
+    ///
+    /// This is our own stored copy of the message, never the sender's. The wire has fields for the
+    /// sender's snippet of it, which current clients do not populate and which we would not trust
+    /// if they did: a forged one would put chosen words on screen attributed to someone else.
+    std::shared_ptr<const Message> message;
 };
 
 struct Message {
@@ -125,6 +170,9 @@ struct Message {
     /// the current rule is dropped rather than honoured, so a message that qualified under an older
     /// definition stops claiming to.
     bool gallery = false;
+
+    /// What this message is a reply to, or unset if it is not one.
+    std::optional<Reply> reply;
 
     /// Set once the message has been deleted, saying how far the deletion went.  The row survives
     /// so that a redelivery cannot resurrect it, and so that a message deleted only here can still
