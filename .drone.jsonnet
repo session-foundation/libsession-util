@@ -425,6 +425,13 @@ local static_build(name,
   debian_build('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', jobs=4),
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
 
+
+  mac_pipeline('Static iOS', arch='arm64', build=[
+    'export JOBS=6',
+    './utils/ios.sh libsession-util-ios-TAG',
+    'cd build-ios && ../utils/ci/drone-static-upload.sh',
+  ]),
+
   // Macos builds:
   mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
@@ -463,11 +470,5 @@ local static_build(name,
     'export JOBS=6',
     './utils/macos.sh',
     'cd build-macos && ../utils/ci/drone-static-upload.sh',
-  ]),
-
-  mac_pipeline('Static iOS', arch='arm64', build=[
-    'export JOBS=6',
-    './utils/ios.sh libsession-util-ios-TAG',
-    'cd build-ios && ../utils/ci/drone-static-upload.sh',
   ]),
 ]
