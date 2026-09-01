@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <memory>
 #include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
@@ -455,6 +456,30 @@ class Core {
     /// Set an optional network interface that can be used to make network requests to swarm
     /// members.  Ownership is taken: nothing else may hold on to the Network.
     void set_network(std::unique_ptr<network::Network> network);
+
+    /// Constructs the network in place and attaches it, forwarding the arguments to its
+    /// constructor.  Returns a reference to it, valid until it is replaced or this Core is
+    /// destroyed.
+    ///
+    ///     core.make_network(session::network::config::Config{});
+    ///
+    /// The usual way to call `set_network`: the object exists only to be owned here, so building it
+    /// and handing it over in one step spares the caller a `make_unique` — and spares it the chance
+    /// to keep a copy of what it has just given away, which the ownership rule above forbids.
+    ///
+    /// `N` names a subclass when there is one, which in practice means a test double:
+    ///
+    ///     auto& net = core.make_network<MockNetwork>();
+    ///
+    /// This is a template, so `N` has to be complete where it is called — which it is, since the
+    /// caller is naming its constructor. `session::network::Network` is only forward declared here.
+    template <std::derived_from<network::Network> N = network::Network, typename... Args>
+    N& make_network(Args&&... args) {
+        auto net = std::make_unique<N>(std::forward<Args>(args)...);
+        auto& ref = *net;
+        set_network(std::move(net));
+        return ref;
+    }
 
     /// How long a cached PFS key is considered fresh (no re-fetch needed).
     static constexpr auto PFS_KEY_FRESH_DURATION = 24h;

@@ -106,10 +106,7 @@ class MockNetwork : public network::Network {
 /// Network outright -- nothing else may hold it alive -- so a test that goes on poking at the mock
 /// keeps a raw pointer rather than a second reference.
 inline MockNetwork* attach_mock_network(core::Core& core) {
-    auto net = std::make_unique<MockNetwork>();
-    auto* mock = net.get();
-    core.set_network(std::move(net));
-    return mock;
+    return &core.make_network<MockNetwork>();
 }
 
 /// Answers every captured download with `data`, delivered in chunks as a transport would rather
