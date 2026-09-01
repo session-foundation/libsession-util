@@ -111,8 +111,8 @@ using namespace std::literals;
 // literal).
 constexpr ProviderURLs google_play_urls{
         .refund_platform_url = "https://support.google.com/googleplay/workflow/9813244?"sv,
-        .refund_support_url = "https://getsession.org/android-refund"sv,
-        .refund_status_url = "https://getsession.org/android-refund"sv,
+        .refund_support_url = "https://getsession.org/refund-android"sv,
+        .refund_status_url = "https://getsession.org/refund-android"sv,
         .update_subscription_url =
                 "https://play.google.com/store/account/subscriptions?package=network.loki.messenger"sv,
         .cancel_subscription_url =
