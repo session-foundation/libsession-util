@@ -408,7 +408,7 @@ device::map Devices::devices(
 
     std::string query =
             "SELECT id, unique_id, state, seqno, timestamp, device_type, description,"
-            "       version, pubkey_mlkem768, pubkey_x25519"
+            "       version, pubkey_mlkem768, pubkey_x25519, kicked_timestamp"
             " FROM devices WHERE ((1 << state) & ?) != 0";
     if (!only_device.empty())
         query += " AND unique_id = ?";
@@ -420,7 +420,7 @@ device::map Devices::devices(
     else
         bind_oneshot(st, state_mask, only_device);
 
-    for (auto [id, devid, state, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
+    for (auto [id, devid, state, seqno, timestamp, type, desc, ver, pk_ml, pk_x, kicked] :
          sqlite::IterableStatementWrapper<
                  int64_t,
                  sqlite::blob_guts<std::array<std::byte, 32>>,
@@ -431,10 +431,13 @@ device::map Devices::devices(
                  std::string,
                  int64_t,
                  sqlite::blobn<mlkem768::PUBLICKEYBYTES>,
-                 sqlite::blobn<32>>{std::move(st)}) {
+                 sqlite::blobn<32>,
+                 std::optional<int64_t>>{std::move(st)}) {
         auto& info = devs[devid];
         info = fill_device_info(
                 devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml, pk_x);
+        if (kicked)
+            info.kicked.emplace(std::chrono::seconds{*kicked});
         load_device_extras(c, id, info);
     }
 
@@ -773,11 +776,16 @@ namespace {
     constexpr auto PERS_ACC_KEY_ROT = "SessionAccKeyRot"_b2b_pers;
 
     // Device group payloads are null-padded to a multiple of this before encryption so that the
-    // encrypted size reveals only which bucket the device count falls in, not the count itself.
-    // 1600 is a deliberate overestimate of a ~1341-byte device record, four records to a bucket, so
-    // any group of up to 4 devices encrypts to the same size.  The padded ciphertext/key slot lists
-    // hide the count in the key list; without this the payload length would give it away anyway.
+    // encrypted size reveals only which bucket the payload falls in, not what it contains.  A
+    // bucket is four devices at a budget of 1600 bytes each, a deliberate overestimate of a
+    // ~1341-byte record, with the remainder of a bucket left for removal tombstones.
     constexpr size_t DEVICE_PAYLOAD_PADDING = 4 * 1600;
+
+    // Added before the buckets: the account key list is carried by every payload whatever the
+    // device count, and is bounded by the rotation period and retention window -- at most 33
+    // entries of ~70 bytes.  Without a fixed allowance for it, it would consume most of the first
+    // bucket and the bucketing would stop meaning what it is supposed to mean.
+    constexpr size_t ACCOUNT_KEYS_ALLOWANCE = 2300;
 
     constexpr int bt_bytes_encoded(int x) {
         int sz = 1 + x;
@@ -867,8 +875,10 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         random::fill(rnd);
         mlkem768::encapsulate(ciphertext[i], ml_ss[i], info->pk_mlkem768, rnd);
     }
-    // Fill padding entries with randomness:
-    for (; i < padded_count; i++)
+    // Fill padding entries with randomness.  `++i` first: the loop above leaves `i` on the last
+    // real entry, and starting here would overwrite it with noise -- which nothing detects when
+    // there is more than one recipient, because some other slot still decrypts.
+    for (++i; i < padded_count; i++)
         random::fill(ciphertext[i]);
 
     std::array<std::byte, encryption::XCHACHA20_NONCEBYTES> nonce;
@@ -890,9 +900,14 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     }
 
     auto plaintext_devices = encode_group_payload(devices, acc_keys);
-    plaintext_devices.resize(
-            (plaintext_devices.size() + DEVICE_PAYLOAD_PADDING - 1) / DEVICE_PAYLOAD_PADDING *
-            DEVICE_PAYLOAD_PADDING);
+    // 2300 + 6400N: at least one bucket, so a payload smaller than the account key allowance still
+    // pads up rather than down to nothing.
+    auto buckets = std::max<size_t>(
+            1,
+            (plaintext_devices.size() - std::min(plaintext_devices.size(), ACCOUNT_KEYS_ALLOWANCE) +
+             DEVICE_PAYLOAD_PADDING - 1) /
+                    DEVICE_PAYLOAD_PADDING);
+    plaintext_devices.resize(ACCOUNT_KEYS_ALLOWANCE + buckets * DEVICE_PAYLOAD_PADDING);
 
     std::vector<std::byte> enc_devices;
     enc_devices.resize(plaintext_devices.size() + encryption::XCHACHA20_ABYTES);
@@ -934,8 +949,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         // values.
         hash::blake2b_pers(eind, PERS_KEY_KEY_IDX, A, B, info->pk_mlkem768, ct, ekey);
     }
-    // Fill padding entries with randomness:
-    for (; i < padded_count; i++) {
+    // Fill padding entries with randomness; `++i` for the same reason as above.
+    for (++i; i < padded_count; i++) {
         random::fill(enc_indicator[i]);
         random::fill(enc_key[i]);
     }
@@ -983,6 +998,22 @@ static const std::string REGISTER_DEVICE_SQL =
         "UPDATE devices SET processing = {}, broadcast_needed = 1 WHERE id = ?"_format(
                 static_cast<int>(Processing::Registered));
 
+// Restates a removal that an incoming message tried to undo, moving the tombstone to the front of
+// the removed list and marking it for broadcast.
+//
+// Refusing the record locally is not enough: a device that never saw the removal -- offline at the
+// time, or having since pruned the tombstone -- has no reason to refuse it, and would go on
+// treating the device as a member and encrypting to it.  Nothing reconciles that afterwards, since
+// a record absent from a message means "unchanged" rather than "removed", so the two devices would
+// hold permanently different groups.  A tombstone propagates where a refusal does not.
+//
+// The timestamp is moved to now rather than left at the original removal, because retention keeps
+// the most recently removed: a tombstone left to age could be evicted while the device it names is
+// still trying to return, either by waiting out the window or by provoking enough other removals to
+// displace it.
+static const std::string REASSERT_KICK_SQL =
+        "UPDATE devices SET kicked_timestamp = ?, broadcast_needed = 1 WHERE unique_id = ?";
+
 void Devices::receive_device_group_message(std::span<const std::byte> data) {
     GroupPayload payload;
     try {
@@ -1024,6 +1055,28 @@ void Devices::receive_device_group_message(std::span<const std::byte> data) {
             // processing=Removed only if the device was previously Registered.
             assert(info.kicked);
             c.prepared_exec(KICK_DEVICE_SQL, info.kicked->time_since_epoch().count(), id);
+            continue;
+        }
+
+        // A removal is one-way: a device we hold a tombstone for cannot be returned to the group by
+        // a record in a message, only by a fresh link request under a new device id.  Anything
+        // claiming otherwise is either a device that was removed and is re-adding itself -- it
+        // still holds the account seed, so it can sign and push whatever it likes -- or a device
+        // relaying such a record.  Either way the answer is to restate the removal rather than to
+        // adopt it.
+        //
+        // `kicked_timestamp IS NOT NULL` rather than the state, because Unregistered also covers a
+        // device that was never in the group: our own row before the group is established, and a
+        // denied link request.  Those must still be able to register.
+        auto kicked = c.prepared_maybe_get<std::optional<int64_t>>(
+                              "SELECT kicked_timestamp FROM devices WHERE unique_id = ?", id)
+                              .value_or(std::nullopt);
+        if (kicked) {
+            log::warning(
+                    cat,
+                    "Device group message tried to restore removed device {}; restating removal",
+                    oxenc::to_hex(id));
+            c.prepared_exec(REASSERT_KICK_SQL, epoch_seconds(clock_now_s()), id);
             continue;
         }
 

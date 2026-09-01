@@ -262,6 +262,19 @@ TEST_CASE("Devices - device group payload padding", "[core][devices]") {
         return TestHelper::encrypt_device_data(c->devices, m).size();
     };
 
+    SECTION("the payload is padded to 2300 + 6400N") {
+        device::map m;
+        m.emplace(infos[0].id, infos[0]);
+        auto enc = TestHelper::encrypt_device_data(c->devices, m);
+
+        // The encrypted payload sits in the envelope's "d" field, and is the padded plaintext plus
+        // the poly1305 tag.  One device is one bucket, on top of the account key allowance.
+        oxenc::bt_dict_consumer env{to_string_view(enc)};
+        REQUIRE(env.skip_until("d"));
+        auto payload = env.consume_string_view();
+        CHECK(payload.size() == 2300 + 6400 + 16);
+    }
+
     SECTION("groups of up to 4 devices are indistinguishable by size") {
         auto one = encrypted_size(1);
         CHECK(encrypted_size(2) == one);
@@ -546,4 +559,89 @@ TEST_CASE("Devices - establishing the group", "[core][devices]") {
         std::error_code ec;
         std::filesystem::remove(path, ec);
     }
+}
+
+TEST_CASE("Devices - a removal cannot be undone by a message", "[core][devices]") {
+    TempCore c;
+
+    // A second device, with keys this core holds so that what we encrypt below is readable back.
+    auto k = c->devices.rotate_device_keys();
+    device::Info other{};
+    random::fill(other.id);
+    other.seqno = 1;
+    other.timestamp = clock_now_s();
+    other.type = device::Type::Session_Android;
+    other.description = "other device";
+    other.state = device::State::Registered;
+    other.version = {1, 0, 0};
+    other.pk_x25519 = k.x25519_pub;
+    other.pk_mlkem768 = k.mlkem768_pub;
+
+    auto [self, registered] = c->devices.device_info();
+    REQUIRE(registered);
+
+    auto deliver = [&](const device::map& m) {
+        TestHelper::receive_device_group_message(
+                c->devices, TestHelper::encrypt_device_data(c->devices, m));
+    };
+    auto state_of = [&](const std::array<std::byte, 32>& id) {
+        auto devs = c->devices.devices(true, true, true);
+        auto found = devs.find(id);
+        REQUIRE(found != devs.end());
+        return found->second;
+    };
+
+    // It joins.
+    deliver({{self.id, self}, {other.id, other}});
+    REQUIRE(state_of(other.id).state == device::State::Registered);
+
+    // It is removed, a while ago.
+    auto kicked_at = clock_now_s() - 1h;
+    auto gone = other;
+    gone.state = device::State::Unregistered;
+    gone.kicked = kicked_at;
+    deliver({{self.id, self}, {gone.id, gone}});
+
+    auto after_kick = state_of(other.id);
+    REQUIRE(after_kick.state == device::State::Unregistered);
+    REQUIRE(after_kick.kicked == kicked_at);
+
+    // Now it pushes itself back in with a higher seqno, which it can do: it still holds the account
+    // seed, so it can sign and encrypt a message everyone accepts.
+    auto returning = other;
+    returning.seqno = 5;
+    returning.description = "back again";
+    deliver({{self.id, self}, {returning.id, returning}});
+
+    auto after = state_of(other.id);
+
+    // Refused: still removed, and none of its claims adopted.
+    CHECK(after.state == device::State::Unregistered);
+    CHECK(after.description == "other device");
+
+    // And restated rather than merely ignored: the tombstone moves to the front of the removed
+    // list, and we owe a push so that devices which never saw the removal learn of it.
+    REQUIRE(after.kicked.has_value());
+    CHECK(*after.kicked > kicked_at);
+    CHECK(c->devices.needs_push().device_group);
+}
+
+TEST_CASE("Devices - a single-recipient group is readable", "[core][devices]") {
+    TempCore c;
+
+    // The common case: an account with one device, which is what establishing a group produces.
+    // With one recipient every other slot in the message is padding, so nothing else can stand in
+    // for a real entry that was overwritten.
+    auto [self, registered] = c->devices.device_info();
+    REQUIRE(registered);
+
+    auto enc = TestHelper::encrypt_device_data(c->devices, device::map{{self.id, self}});
+    auto plain = TestHelper::decrypt_device_data(c->devices, enc);
+
+    REQUIRE_FALSE(plain.empty());
+    oxenc::bt_dict_consumer btdc{to_string_view(plain)};
+    REQUIRE(btdc.skip_until("D"));
+    auto devs = btdc.consume_dict_consumer();
+    std::string_view self_key{reinterpret_cast<const char*>(self.id.data()), self.id.size()};
+    CHECK(devs.skip_until(self_key));
 }

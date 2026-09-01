@@ -144,23 +144,26 @@ A typical record size is:
     ==============
     1341 bytes  (approximate; some field lengths are variable)
 
-For determination of padding we budget 1600 bytes per device, four devices to a bucket, giving the
-6400-byte padding multiple applied at encryption time (see "Device data encryption" below).  The
-budget covers a device record and a removal tombstone (see "Removed devices"):
+A payload also carries the account key list, which is present regardless of the number of devices.
+Its size is bounded by the retention and rotation periods: keys rotate every 12h and are retained
+for 16 days, giving at most 33 entries of about 70 bytes each — an allowance of **2300 bytes**.
 
-    4 × 1500  = 6000   # device records
-    4 ×   47  =  188   # removal tombstones: 35-byte ID + 12-byte timestamp
-                 212   # reserved for future use
-              ------
-                6400
+Padding is therefore to a size of:
 
-A payload carries at most ⌈N/4⌉×4 tombstones, where N is the number of active devices: the same
-bucket size to which the ciphertext and key lists are padded.  The payload size therefore indicates
-no more about the account than those lists already do.  Devices retain the most recently removed
-tombstones and discard the rest, arriving at the same set from the same data.
+    2300 + 6400×N
 
-The budget is not enforced.  A record exceeding it pushes the payload into the next bucket rather
-than being rejected.
+where the 2300 covers the account key list and each 6400-byte bucket covers four devices at a
+budget of 1500 bytes per device record, the remainder of the bucket being available for removal
+tombstones (see "Removed devices").  A payload carries as many tombstones as fit without crossing
+into the next bucket, the most recently removed being kept; devices arrive at the same set from the
+same data.
+
+The budget is not enforced.  Records or account keys exceeding their allowance push the payload into
+the next bucket rather than being rejected.
+
+Note that the padded size is not what tells a reader how many devices an account has: the `keys`
+list in the outer structure is unencrypted and already gives that count, and is what a storage
+server reads to enforce a device limit (see "Extension - Pro subscriptions" below).
 
 ### Removed devices
 
@@ -193,11 +196,11 @@ short-lived, quantum resistant device keys deliberately not linked to the main k
 generate a random key and then encrypt that random key for each linked device.
 
 Before the encryption is actually performed, null byte padding is appended to the encoded value to
-make the plaintext a multiple of 6400 bytes (4 records of 1600 bytes; see above), so that the
-message size reveals only which bucket the device count falls in rather than the count itself.  A
-payload consisting of 1 through 4 devices therefore encrypts to an identical size.  On decryption
-the trailing null bytes are stripped; the payload is a bt-encoded dict, which always ends in `e`, so
-trailing nulls are unambiguously padding.
+bring the plaintext to 2300 + 6400×N bytes (see "Inner device data" above), so that the message size
+reveals only which bucket the payload falls in rather than its contents.  A payload consisting of 1
+through 4 devices therefore encrypts to an identical size.  On decryption the trailing null bytes
+are stripped; the payload is a bt-encoded dict, which always ends in `e`, so trailing nulls are
+unambiguously padding.
 
 The 32-byte symmetric encryption key, `key_base`, is itself separately encrypted for each device as
 described below.  This process involves generating a single ephemeral X25519 keypair and per-device

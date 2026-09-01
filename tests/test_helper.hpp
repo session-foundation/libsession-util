@@ -412,6 +412,11 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
         return d.decrypt_device_data(data);
     }
 
+    // Feeds an encrypted device group message through the receive path, as a poll would.
+    static void receive_device_group_message(core::Devices& d, std::span<const std::byte> data) {
+        d.receive_device_group_message(data);
+    }
+
     // Returns the raw 32-byte seed for the account key identified by the given x25519 public key.
     static cleared_b32 account_key_seed(
             core::Devices& d, std::span<const std::byte, 32> x25519_pub) {
