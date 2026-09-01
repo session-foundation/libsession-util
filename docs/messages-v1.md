@@ -4,7 +4,8 @@ Session currently uses an overcomplicated Protobuf message encoding; since PFS+P
 requires a backwards-incompatible message encryption change already, this is the right time to also
 moderately clean up that message format.
 
-The new message format is described in ./design.md, in the section "One-to-one Message Encryption".
+The new message format is described in ./protocol-v2.md, in the section "One-to-one Message
+Encryption".
 
 The existing format is as follows, from outermost (fully encoded and encrypted) to innermost (fully
 decoded):
