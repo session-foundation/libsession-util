@@ -99,8 +99,12 @@ namespace device {
         // The current device-specific MLKEM-768 pubkey
         std::array<std::byte, 1184> pk_mlkem768;
 
-        // Unknown extra keys.  Single-character keys in here are reserved for future
-        // libsession-util use; longer strings can be used for custom client data, if needed.
+        // Fields from a device running a newer libsession than ours, kept so that we republish them
+        // rather than silently dropping what we do not understand.
+        //
+        // Space for future versions of libsession, not for client data: everything here is carried
+        // by every other device on the account, and the payload is padded in buckets sized on the
+        // assumption that a record stays within its budget.  Anything added must fit it.
         oxenc::bt_dict extra;
 
         // Returns the encoded device type string: "i", "a", or "d" for the standard Session
