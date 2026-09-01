@@ -297,6 +297,36 @@ TEST_CASE("Devices - device group payload padding", "[core][devices]") {
         }
         CHECK(count == 3);
     }
+
+    SECTION("a kicked device is named in the payload but is not a recipient") {
+        device::map m;
+        for (size_t i = 0; i < 4; i++)
+            m.emplace(infos[i].id, infos[i]);
+        auto four_registered = TestHelper::encrypt_device_data(c->devices, m).size();
+
+        // A fifth entry, kicked rather than registered.
+        auto kicked = infos[4];
+        kicked.state = device::State::Unregistered;
+        kicked.kicked = clock_now_s();
+        m.emplace(kicked.id, kicked);
+
+        auto with_kicked = TestHelper::encrypt_device_data(c->devices, m);
+
+        // Unchanged size: five entries, but still only four recipients, so the key and ciphertext
+        // lists stay in the 4 bucket.  Were the kicked device handed a key they would cross into
+        // the 8 bucket and this would grow -- which is what makes this an assertion about the
+        // recipient set rather than about padding.
+        CHECK(with_kicked.size() == four_registered);
+
+        // And it is still named in the payload: that is how every other device learns it is gone.
+        auto plaintext = TestHelper::decrypt_device_data(c->devices, with_kicked);
+        oxenc::bt_dict_consumer btdc{to_string_view(plaintext)};
+        REQUIRE(btdc.skip_until("D"));
+        auto devs = btdc.consume_dict_consumer();
+        std::string_view kicked_key{
+                reinterpret_cast<const char*>(kicked.id.data()), kicked.id.size()};
+        CHECK(devs.skip_until(kicked_key));
+    }
 }
 
 TEST_CASE("Devices - account keys", "[core][devices]") {

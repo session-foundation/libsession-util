@@ -803,7 +803,16 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
     auto A = x25519::scalarmult_base(a);
 
-    int padded_count = devices.size();
+    // Who can read this, which is not the same as who appears in it.  A kicked device is written
+    // into the payload -- a tombstone carrying when it was kicked is how every other device learns
+    // it is gone -- but must not be given a key, which is the entire point of removing it.  A
+    // pending device is in neither: it is not in the group until someone accepts it.
+    std::vector<const device::Info*> recipients;
+    for (const auto& [id, info] : devices)
+        if (info.state == device::State::Registered)
+            recipients.push_back(&info);
+
+    int padded_count = recipients.size();
     padded_count = (padded_count + 3) / 4 * 4;
 
     auto indices = std::views::iota(0, padded_count);
@@ -839,12 +848,13 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
                 return std::span<std::byte, 32>{enc_key_raw.data() + pos_map[i] * (2 + 32) + 2, 32};
             });
 
-    cleared_vector<std::byte> ml_ss_raw(mlkem768::SHAREDSECRETBYTES * devices.size());
+    cleared_vector<std::byte> ml_ss_raw(mlkem768::SHAREDSECRETBYTES * recipients.size());
 
     // Dynamic ss subspan accessor of ml_ss_raw, but *doesn't* go through the pos_map (unlike the
     // above constructs), and only goes up to the actual number of devices, not the padded number
     // (because this is never transmitted, and so not shuffled or padded).
-    auto ml_ss = std::views::iota(size_t{0}, devices.size()) | std::views::transform([&](size_t i) {
+    auto ml_ss = std::views::iota(size_t{0}, recipients.size()) |
+                 std::views::transform([&](size_t i) {
                      return std::span<std::byte, mlkem768::SHAREDSECRETBYTES>{
                              ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES,
                              mlkem768::SHAREDSECRETBYTES};
@@ -852,10 +862,10 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
     cleared_b32 rnd;
     int i = -1;
-    for (auto& [devid, info] : devices) {
+    for (const auto* info : recipients) {
         ++i;
         random::fill(rnd);
-        mlkem768::encapsulate(ciphertext[i], ml_ss[i], info.pk_mlkem768, rnd);
+        mlkem768::encapsulate(ciphertext[i], ml_ss[i], info->pk_mlkem768, rnd);
     }
     // Fill padding entries with randomness:
     for (; i < padded_count; i++)
@@ -891,13 +901,13 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     cleared_b32 ki;
     cleared_b32 aB;
     i = -1;
-    for (auto& [devid, info] : devices) {
+    for (const auto* info : recipients) {
         ++i;
         auto eind = enc_indicator[i];
         auto ekey = enc_key[i];
         auto ct = ciphertext[i];
 
-        auto& B = info.pk_x25519;
+        auto& B = info->pk_x25519;
         if (!x25519::scalarmult(aB, a, B)) {
             // This really shouldn't happen: we shouldn't have accepted an invalid pubkey in the
             // first place.
@@ -905,8 +915,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
                     cat,
                     "X25519 scalarmult failed: device '{}' ({}) published an invalid X25519 "
                     "pubkey!",
-                    oxenc::to_hex(devid),
-                    info.description);
+                    oxenc::to_hex(info->id),
+                    info->description);
             // Without a proper key, we can't properly encrypt for the device so we'll just have to
             // fill the entry with random and move on.
             random::fill(eind);
@@ -915,14 +925,14 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         }
 
         hash::blake2b_key_pers(nonce, A, PERS_KEY_NONCE, ct, enc_devices);
-        hash::blake2b_pers(ki, PERS_KEY_KEY, aB, A, B, ml_ss[i], info.pk_mlkem768);
+        hash::blake2b_pers(ki, PERS_KEY_KEY, aB, A, B, ml_ss[i], info->pk_mlkem768);
 
         static_assert(decltype(ekey)::extent == key_base.size());
         encryption::xchacha20_xor(ekey, key_base, nonce, ki);
 
         // Hash a bunch of stuff together as a checksum to let decryption skip most not-for-me
         // values.
-        hash::blake2b_pers(eind, PERS_KEY_KEY_IDX, A, B, info.pk_mlkem768, ct, ekey);
+        hash::blake2b_pers(eind, PERS_KEY_KEY_IDX, A, B, info->pk_mlkem768, ct, ekey);
     }
     // Fill padding entries with randomness:
     for (; i < padded_count; i++) {
