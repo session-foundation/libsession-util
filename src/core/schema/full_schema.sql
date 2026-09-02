@@ -5,8 +5,6 @@
 -- Keep in step with the migrations: test_core_schema.cpp builds a database both ways and
 -- compares them.
 
--- from 000_devices.sql
-
 -- Table storing all the device group info
 CREATE TABLE devices (
     id INTEGER PRIMARY KEY NOT NULL,
@@ -125,8 +123,6 @@ CREATE TABLE config_dumps (
     PRIMARY KEY (pubkey, type)
 ) STRICT;
 
--- from 000_globals.sql
-
 CREATE TABLE globals (
     key TEXT PRIMARY KEY NOT NULL,
     value ANY NOT NULL
@@ -185,7 +181,6 @@ CREATE TABLE swarm_hashes (
 
 CREATE INDEX swarm_hashes_cursor ON swarm_hashes(namespace, node, id DESC);
 
--- from 000_pfs_key_cache.sql
 -- Cache of remote account public keys (X25519 + ML-KEM-768) used for PFS+PQ message encryption.
 -- Keys are considered fresh for PFS_KEY_FRESH_DURATION (24h) and expire after
 -- PFS_KEY_EXPIRY_DURATION (48h); stale entries (24-48h old) are still usable as a fallback.
@@ -203,7 +198,6 @@ CREATE TABLE pfs_key_cache (
     pubkey_mlkem768 BLOB CHECK(length(pubkey_mlkem768) = 1184)
 ) STRICT;
 
--- from 000_pro_revocations.sql
 CREATE TABLE pro_revocations (
     revocation_tag BLOB PRIMARY KEY NOT NULL,
     effective_ts INTEGER NOT NULL,  -- unix seconds; a matching proof is revoked once the clock reaches this
