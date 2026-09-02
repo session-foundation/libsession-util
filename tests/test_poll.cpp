@@ -251,3 +251,85 @@ TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[co
     CHECK(TestHelper::namespace_last_hash(*core, 21, mock_net->current_node.remote_pubkey) ==
           "hash1");
 }
+
+// A batch response where every namespace answered successfully and returned nothing.
+static nlohmann::json make_empty_response(std::span<const std::byte> request_body) {
+    auto batch = parse_json(request_body);
+    auto results = nlohmann::json::array();
+    for (size_t i = 0; i < batch["requests"].size(); i++)
+        results.push_back({{"code", 200}, {"body", {{"messages", nlohmann::json::array()}}}});
+    return nlohmann::json{{"results", std::move(results)}};
+}
+
+// Marks the result for `ns` as having more behind it, found by the position its subrequest occupies
+// -- which is how Core matches results to requests too.
+static void set_more(
+        nlohmann::json& response, std::span<const std::byte> request_body, int16_t ns) {
+    auto batch = parse_json(request_body);
+    for (size_t i = 0; i < batch["requests"].size(); i++)
+        if (batch["requests"][i]["params"]["namespace"] == ns)
+            response["results"][i]["body"]["more"] = true;
+}
+
+TEST_CASE("Poll: a truncated namespace is continued before it is reported final", "[core][poll]") {
+    int calls = 0;
+    core::callbacks cbs;
+    cbs.device_link_request =
+            [&](int, const core::device::Info&, std::span<const std::string_view>) { calls++; };
+
+    TempCore core{cbs};
+    auto* mock_net = attach_mock_network(*core);
+    mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
+
+    cleared_b32 seed_bytes;
+    {
+        auto seed_acc = core->globals.account_seed();
+        std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
+    }
+    TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
+    auto outer_msg = linker->devices.build_link_request().message;
+
+    TestHelper::poll(*core);
+    REQUIRE(mock_net->sent_requests.size() == 1);
+
+    auto first = *mock_net->sent_requests[0].request.body;
+    auto resp = make_response(first, 21, outer_msg, "hash1");
+    set_more(resp, first, 21);
+
+    // Copied out before invoking: the continuation is sent from inside this call, which appends to
+    // `sent_requests` and can reallocate the vector the callback itself lives in.
+    auto reply = mock_net->sent_requests[0].callback;
+    reply(true, false, 200, {}, resp.dump());
+
+    // The request is stored, but the batch was not final, so nothing has been reported yet.
+    CHECK(calls == 0);
+
+    REQUIRE(mock_net->sent_requests.size() == 2);
+    auto second = *mock_net->sent_requests[1].request.body;
+    CHECK(namespaces_in(second) == std::vector<int16_t>{21});
+    CHECK(params_for(second, 21)["last_hash"] == "hash1");
+
+    // Nothing left behind it: an empty answer is still an answer, and is what makes the batch final.
+    auto reply2 = mock_net->sent_requests[1].callback;
+    reply2(true, false, 200, {}, make_empty_response(second).dump());
+
+    CHECK(calls == 1);
+}
+
+TEST_CASE("Poll: `more` with nothing returned does not continue", "[core][poll]") {
+    TempCore core;
+    auto* mock_net = attach_mock_network(*core);
+
+    TestHelper::poll(*core);
+    REQUIRE(mock_net->sent_requests.size() == 1);
+
+    auto first = *mock_net->sent_requests[0].request.body;
+    auto resp = make_empty_response(first);
+    set_more(resp, first, 21);
+
+    auto reply = mock_net->sent_requests[0].callback;
+    reply(true, false, 200, {}, resp.dump());
+
+    // There is no new hash to move the cursor to, so another round would ask the same question.
+    CHECK(mock_net->sent_requests.size() == 1);
+}

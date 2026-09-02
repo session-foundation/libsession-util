@@ -18,6 +18,7 @@
 #include "core/pro.hpp"
 #include "core/schema/schema_registry.hpp"
 #include "session/network/key_types.hpp"
+#include "session/network/service_node.hpp"
 
 /// The "Core" class holds a Session account's own state, in an encrypted sqlite database: its keys,
 /// its device group, its configs, and the bookkeeping needed to talk to the network on its behalf.
@@ -330,10 +331,21 @@ class Core {
     std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
     void _update_polling();
     void _poll();
+
+    // Sends one round of retrieves to `node` for `namespaces`.  A retrieve is capped by the storage
+    // server, so one round may not exhaust a namespace; `round` counts continuations and bounds
+    // them.  Every round goes to the same node: the retrieve cursor is stored per (namespace, node),
+    // so continuing against a different swarm member would resume from that member's position.
+    void _send_poll(
+            network::Network* net,
+            network::service_node node,
+            std::vector<config::Namespace> namespaces,
+            int round);
     void _handle_poll_response(
-            const network::ed25519_pubkey& sn_pubkey,
-            std::span<const config::Namespace> namespaces,
-            std::string body);
+            network::service_node node,
+            std::vector<config::Namespace> namespaces,
+            std::string body,
+            int round);
 
     // Decrypts and dispatches one-to-one messages from Namespace::Default.
     void _handle_direct_messages(std::span<const SwarmMessage> messages);

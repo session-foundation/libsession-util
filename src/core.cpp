@@ -129,6 +129,24 @@ void Core::set_poll_interval(std::chrono::milliseconds interval) {
         _poll_ticker = _loop.call_every(_poll_interval, [this] { _poll(); });
 }
 
+// Order matters: the batch's results are handled in this order, so a namespace whose contents
+// another one's depend on has to come first.  The configs lead because a message arriving in the
+// same poll may be from a contact those configs are what tells us about; among themselves,
+// ConvoInfoVolatile comes last because it refers to conversations that Contacts and UserGroups
+// are what establish.
+static constexpr std::array POLL_NAMESPACES = {
+        config::Namespace::UserProfile,
+        config::Namespace::Contacts,
+        config::Namespace::UserGroups,
+        config::Namespace::ConvoInfoVolatile,
+        config::Namespace::Default,
+        config::Namespace::Devices,
+        config::Namespace::AccountPubkeys};
+
+// Ceiling on continuation rounds within one poll.  A well-behaved node exhausts a namespace in far
+// fewer; this exists so that a node whose `more` never goes false cannot poll indefinitely.
+static constexpr int POLL_MAX_ROUNDS = 20;
+
 void Core::_poll() {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
     // could make the loop thread the last owner and run ~Network there.
@@ -138,25 +156,36 @@ void Core::_poll() {
         return;
     }
 
-    // Order matters: the batch's results are handled in this order, so a namespace whose contents
-    // another one's depend on has to come first.  The configs lead because a message arriving in the
-    // same poll may be from a contact those configs are what tells us about; among themselves,
-    // ConvoInfoVolatile comes last because it refers to conversations that Contacts and UserGroups
-    // are what establish.
-    constexpr std::array namespaces = {
-            config::Namespace::UserProfile,
-            config::Namespace::Contacts,
-            config::Namespace::UserGroups,
-            config::Namespace::ConvoInfoVolatile,
-            config::Namespace::Default,
-            config::Namespace::Devices,
-            config::Namespace::AccountPubkeys};
+    log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
+
+    net->get_swarm(
+            globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot poll: no swarm nodes available");
+                    return;
+                }
+
+                _send_poll(
+                        net,
+                        swarm.front(),
+                        {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()},
+                        0);
+            });
+}
+
+void Core::_send_poll(
+        network::Network* net,
+        network::service_node node,
+        std::vector<config::Namespace> namespaces,
+        int round) {
 
     auto now_ms = epoch_ms(clock_now_ms());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
 
     // Build per-namespace signatures for namespaces that require authentication; index-aligned with
-    // `namespaces`.  Empty string means no auth needed for that namespace.
+    // `namespaces`.  Empty string means no auth needed for that namespace.  Signed here rather than
+    // once per poll because the signature covers a timestamp the storage server checks for
+    // freshness, so a continuation round cannot reuse the first round's.
     std::vector<std::string> ns_sig(namespaces.size());
     {
         auto seed = globals.account_seed();
@@ -170,98 +199,93 @@ void Core::_poll() {
         }
     }
 
-    log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
+    // Build one batch subrequest per namespace.
+    nlohmann::json requests = nlohmann::json::array();
+    {
+        auto conn = db.conn();
 
-    net->get_swarm(
-            globals.pubkey_x25519(),
-            false,
-            [this, net, namespaces, ed25519_hex, now_ms, ns_sig = std::move(ns_sig)](
-                    auto, auto swarm) {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot poll: no swarm nodes available");
-                    return;
-                }
+        for (size_t i = 0; i < namespaces.size(); ++i) {
+            auto ns_val = static_cast<int16_t>(namespaces[i]);
+            nlohmann::json params = {
+                    {"pubkey", globals.session_id_hex()},
+                    {"namespace", ns_val},
+            };
 
-                auto& node = swarm.front();
+            if (!ns_sig[i].empty()) {
+                params["pubkey_ed25519"] = ed25519_hex;
+                params["timestamp"] = now_ms;
+                params["signature"] = ns_sig[i];
+            }
 
-                // Build one batch subrequest per namespace.
-                nlohmann::json requests = nlohmann::json::array();
-                {
-                    auto conn = db.conn();
-
-                    for (size_t i = 0; i < namespaces.size(); ++i) {
-                        auto ns = namespaces[i];
-                        auto ns_val = static_cast<int16_t>(ns);
-                        nlohmann::json params = {
-                                {"pubkey", globals.session_id_hex()},
-                                {"namespace", ns_val},
-                        };
-
-                        if (!ns_sig[i].empty()) {
-                            params["pubkey_ed25519"] = ed25519_hex;
-                            params["timestamp"] = now_ms;
-                            params["signature"] = ns_sig[i];
-                        }
-
-                        // The newest hash this node handed us that it still holds.  Derived rather
-                        // than stored so that deleting a hash from the swarm moves the cursor back
-                        // to its predecessor on its own, with nothing to remember to update.
-                        //
-                        // A NULL expiry is a node that did not tell us when it would drop the
-                        // message, which is unknown rather than expired: refusing to use it would
-                        // throw away a working cursor over a missing field.
-                        auto last_hash = conn.prepared_maybe_get<std::string>(
-                                R"(
+            // The newest hash this node handed us that it still holds.  Derived rather than stored
+            // so that deleting a hash from the swarm moves the cursor back to its predecessor on
+            // its own, with nothing to remember to update.  A continuation round therefore picks up
+            // the hashes the previous round recorded, with no separate cursor to thread through.
+            //
+            // A NULL expiry is a node that did not tell us when it would drop the message, which is
+            // unknown rather than expired: refusing to use it would throw away a working cursor
+            // over a missing field.
+            auto last_hash = conn.prepared_maybe_get<std::string>(
+                    R"(
 SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
  WHERE h.namespace = ? AND n.pubkey = ? AND (h.expiry IS NULL OR h.expiry > ?)
  ORDER BY h.id DESC LIMIT 1
 )",
-                                ns_val,
-                                node.remote_pubkey,
-                                epoch_ms(clock_now_ms()));
-                        if (last_hash)
-                            params["last_hash"] = *last_hash;
+                    ns_val,
+                    node.remote_pubkey,
+                    epoch_ms(clock_now_ms()));
+            if (last_hash)
+                params["last_hash"] = *last_hash;
 
-                        requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});
-                    }
+            requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});
+        }
+    }
+
+    auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
+
+    log::debug(
+            cat,
+            "Retrieving {} namespaces from {} (round {}): {}",
+            namespaces.size(),
+            node.remote_pubkey.hex(),
+            round,
+            body_str);
+
+    net->send_request(
+            swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
+            [this, node, namespaces = std::move(namespaces), round](
+                    bool success,
+                    bool timeout,
+                    int16_t /*status_code*/,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) mutable {
+                if (!success || !body) {
+                    log::warning(
+                            cat,
+                            "Swarm poll request failed: {}",
+                            timeout ? "timed out"
+                            : body  ? *body
+                                    : "request failed");
+                    return;
                 }
 
-                auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
-
-                log::debug(
-                        cat,
-                        "Retrieving {} namespaces from {}: {}",
-                        namespaces.size(),
-                        node.remote_pubkey.hex(),
-                        body_str);
-
-                net->send_request(
-                        swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
-                        [this, sn_pubkey = node.remote_pubkey, namespaces](
-                                bool success,
-                                bool timeout,
-                                int16_t /*status_code*/,
-                                std::vector<std::pair<std::string, std::string>> /*headers*/,
-                                std::optional<std::string> body) {
-                            if (!success || !body) {
-                                log::warning(
-                                        cat,
-                                        "Swarm poll request failed: {}",
-                                        timeout ? "timed out"
-                                        : body  ? *body
-                                                : "request failed");
-                                return;
-                            }
-
-                            _handle_poll_response(sn_pubkey, namespaces, std::move(*body));
-                        });
+                _handle_poll_response(
+                        std::move(node), std::move(namespaces), std::move(*body), round);
             });
 }
 
 void Core::_handle_poll_response(
-        const network::ed25519_pubkey& sn_pubkey,
-        std::span<const config::Namespace> namespaces,
-        std::string body) {
+        network::service_node node,
+        std::vector<config::Namespace> namespaces,
+        std::string body,
+        int round) {
+
+    const auto& sn_pubkey = node.remote_pubkey;
+
+    // Namespaces the node says it has more of, to continue in another round.  Collected rather than
+    // continued in place because the cursor each one resumes from is written below.
+    std::vector<config::Namespace> unfinished;
+
     try {
         auto json = nlohmann::json::parse(body);
         auto it = json.find("results");
@@ -291,6 +315,15 @@ void Core::_handle_poll_response(
             auto msgs_it = body_it->find("messages");
             if (msgs_it == body_it->end() || !msgs_it->is_array())
                 continue;
+
+            // A retrieve is capped, so this says whether the node is holding more past what it
+            // returned.  Everything above `continue`s instead, which is the distinction that
+            // matters: a namespace that failed or answered malformedly is not reported to its
+            // handler at all, while one that answered with nothing is -- "we asked and there is
+            // nothing" is an answer, and some handlers act on it.
+            bool more = false;
+            if (auto m = body_it->find("more"); m != body_it->end() && m->is_boolean())
+                more = m->get<bool>();
 
             log::debug(cat, "Retrieved {} message(s) from namespace {}", msgs_it->size(), ns_val);
 
@@ -324,9 +357,17 @@ void Core::_handle_poll_response(
                 swarm_messages.push_back(std::move(swarm_msg));
             }
 
-            if (!swarm_messages.empty()) {
-                receive_messages(swarm_messages, ns, true);
+            // A node claiming more while returning nothing cannot be continued: there is no new
+            // hash to move the cursor to, so another round would ask the same question and get the
+            // same answer.  Treat the namespace as finished instead, or a handler waiting on
+            // `is_final` would wait for one that never comes.
+            more = more && !swarm_messages.empty();
 
+            receive_messages(swarm_messages, ns, !more);
+            if (more)
+                unfinished.push_back(ns);
+
+            if (!swarm_messages.empty()) {
                 // Only advance the cursor once the batch has been handled: the swarm filters on
                 // last_hash, so advancing past messages that threw would drop them permanently.
                 // Handling then dying before this point re-delivers the batch instead, so message
@@ -383,7 +424,26 @@ DELETE FROM swarm_hashes
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse poll response: {}", e.what());
+        return;
     }
+
+    if (unfinished.empty())
+        return;
+
+    if (round + 1 >= POLL_MAX_ROUNDS) {
+        log::warning(
+                cat,
+                "Stopping poll of {} after {} rounds with {} namespace(s) still reporting more",
+                sn_pubkey.hex(),
+                POLL_MAX_ROUNDS,
+                unfinished.size());
+        return;
+    }
+
+    // Deliberately not re-fetching the swarm: the cursor these resume from is this node's, so the
+    // continuation has to go back to the same one.
+    if (auto* net = _network.get())
+        _send_poll(net, std::move(node), std::move(unfinished), round + 1);
 }
 
 PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) {
