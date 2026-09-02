@@ -299,6 +299,22 @@ class Devices final : detail::CoreComponent {
         return t && *t <= clock_now();
     }
 
+    struct DeviceGroupPush {
+        std::vector<std::byte> message;  // encrypted bytes to push to Namespace::Devices
+        int64_t seqno;                   // this device's seqno at the moment the message was built
+    };
+
+    // Builds the account's device group ("G") message for upload to Namespace::Devices.
+    //
+    // Throws std::logic_error if this device is not registered: a device outside the group has
+    // nothing to say about it, and pushing anyway would announce a group of one that every other
+    // device would merge in as authoritative.
+    //
+    // `seqno` comes back rather than being read again afterwards because the message is built from
+    // a snapshot: pass it to mark_device_group_pushed() once the swarm confirms the store, so that
+    // a change made while the push was in flight stays dirty.
+    DeviceGroupPush build_device_group_message();
+
     // Builds the signed account public key message for upload to namespace -21.  The message is a
     // bt-encoded dict containing the current active ML-KEM-768 pubkey ("M"), X25519 pubkey ("X"),
     // and a "positive alternative" Ed25519 signature ("~") over the preceding fields, allowing

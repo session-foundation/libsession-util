@@ -1645,6 +1645,19 @@ std::optional<std::chrono::system_clock::time_point> Devices::next_device_rotati
     return std::nullopt;
 }
 
+Devices::DeviceGroupPush Devices::build_device_group_message() {
+    // One query for the whole group, so the seqno we report is the one the payload was built from.
+    // Reading our own row separately would let an update_info() land between the two and have the
+    // push confirm a seqno that is not what went out.
+    auto devs = devices(true, true, true);
+
+    auto self = devs.find(self_id);
+    if (self == devs.end() || self->second.state != device::State::Registered)
+        throw std::logic_error{"Cannot build device group message: this device is not registered"};
+
+    return {encrypt_device_data(devs), self->second.seqno};
+}
+
 std::vector<std::byte> Devices::build_account_pubkey_message() {
     auto keys = active_account_keys();
     if (keys.empty())
