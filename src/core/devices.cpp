@@ -308,13 +308,7 @@ namespace {
         std::memcpy(info.id.data(), devid.data(), info.id.size());
         info.seqno = seqno;
         info.timestamp = std::chrono::sys_seconds{std::chrono::seconds{timestamp}};
-        info.type = device::Type::Unknown;
-        if (type.size() == 1)
-            switch (type[0]) {
-                case 'a': info.type = device::Type::Session_Android; break;
-                case 'd': info.type = device::Type::Session_Desktop; break;
-                case 'i': info.type = device::Type::Session_iOS; break;
-            }
+        info.type = device::type_from_encoded(type);
         if (info.type == device::Type::Unknown)
             info.other_device = std::move(type);
         info.description = std::move(desc);
@@ -678,17 +672,8 @@ namespace {
 
         read_extras(dev, "t", info.extra);
         auto type = dev.maybe<std::string_view>("t").value_or(""sv);
-        info.other_device.clear();
-        if (type == "i")
-            info.type = device::Type::Session_iOS;
-        else if (type == "a")
-            info.type = device::Type::Session_Android;
-        else if (type == "d")
-            info.type = device::Type::Session_Desktop;
-        else {
-            info.type = device::Type::Unknown;
-            info.other_device = type;
-        }
+        info.type = device::type_from_encoded(type);
+        info.other_device = info.type == device::Type::Unknown ? std::string{type} : std::string{};
 
         read_extras(dev, "v", info.extra);
         auto ver = dev.maybe<int64_t>("v").value_or(0);

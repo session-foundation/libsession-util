@@ -35,7 +35,22 @@ namespace device {
         Session_iOS,
         Session_Desktop,
         Session_Android,
+        Session_CLI,
     };
+
+    // The Type a stored or encoded type string denotes; Unknown for anything else, which a caller
+    // keeps verbatim in `Info::other_device`.  The inverse of `Info::encoded_type()`.
+    inline Type type_from_encoded(std::string_view t) {
+        if (t == "i")
+            return Type::Session_iOS;
+        if (t == "a")
+            return Type::Session_Android;
+        if (t == "d")
+            return Type::Session_Desktop;
+        if (t == "c")
+            return Type::Session_CLI;
+        return Type::Unknown;
+    }
 
     enum class State {
         Registered = 0,  ///< Device is in the account's registered device set
@@ -114,6 +129,7 @@ namespace device {
                 case Type::Session_iOS: return "i";
                 case Type::Session_Android: return "a";
                 case Type::Session_Desktop: return "d";
+                case Type::Session_CLI: return "c";
                 default: return other_device;
             }
         }
