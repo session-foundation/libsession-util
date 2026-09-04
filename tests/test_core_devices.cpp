@@ -319,7 +319,7 @@ TEST_CASE("Devices - device group payload padding", "[core][devices]") {
 
         // A fifth entry, kicked rather than registered.
         auto kicked = infos[4];
-        kicked.state = device::State::Unregistered;
+        kicked.state = device::State::Kicked;
         kicked.kicked = clock_now_s();
         m.emplace(kicked.id, kicked);
 
@@ -598,12 +598,12 @@ TEST_CASE("Devices - a removal cannot be undone by a message", "[core][devices]"
     // It is removed, a while ago.
     auto kicked_at = clock_now_s() - 1h;
     auto gone = other;
-    gone.state = device::State::Unregistered;
+    gone.state = device::State::Kicked;
     gone.kicked = kicked_at;
     deliver({{self.id, self}, {gone.id, gone}});
 
     auto after_kick = state_of(other.id);
-    REQUIRE(after_kick.state == device::State::Unregistered);
+    REQUIRE(after_kick.state == device::State::Kicked);
     REQUIRE(after_kick.kicked == kicked_at);
 
     // Now it pushes itself back in with a higher seqno, which it can do: it still holds the account
@@ -616,7 +616,7 @@ TEST_CASE("Devices - a removal cannot be undone by a message", "[core][devices]"
     auto after = state_of(other.id);
 
     // Refused: still removed, and none of its claims adopted.
-    CHECK(after.state == device::State::Unregistered);
+    CHECK(after.state == device::State::Kicked);
     CHECK(after.description == "other device");
 
     // And restated rather than merely ignored: the tombstone moves to the front of the removed
@@ -624,6 +624,61 @@ TEST_CASE("Devices - a removal cannot be undone by a message", "[core][devices]"
     REQUIRE(after.kicked.has_value());
     CHECK(*after.kicked > kicked_at);
     CHECK(c->devices.needs_push().device_group);
+}
+
+TEST_CASE("Devices - a tombstone for an unknown device is kept", "[core][devices]") {
+    TempCore c;
+
+    // Keys this core holds, so that the message we build is readable back and the returning record
+    // below is a usable recipient.
+    auto k = c->devices.rotate_device_keys();
+
+    auto [self, registered] = c->devices.device_info();
+    REQUIRE(registered);
+
+    auto deliver = [&](const device::map& m) {
+        TestHelper::receive_device_group_message(
+                c->devices, TestHelper::encrypt_device_data(c->devices, m));
+    };
+    auto state_of = [&](const std::array<std::byte, 32>& id) {
+        auto devs = c->devices.devices(true, true, true);
+        auto found = devs.find(id);
+        REQUIRE(found != devs.end());
+        return found->second;
+    };
+
+    // A removal for a device we have never held a record of -- which is what a device joining after
+    // the removal sees, since the group carries the tombstone but nothing else about it.
+    auto kicked_at = clock_now_s() - 1h;
+    device::Info gone{};
+    random::fill(gone.id);
+    gone.state = device::State::Kicked;
+    gone.kicked = kicked_at;
+    deliver({{self.id, self}, {gone.id, gone}});
+
+    // Stored, rather than dropped for want of a row to update: the tombstone is the whole point of
+    // the entry, and needs no details to do its job.
+    auto after_kick = state_of(gone.id);
+    CHECK(after_kick.state == device::State::Kicked);
+    CHECK(after_kick.kicked == kicked_at);
+
+    // And it does its job: the removed device cannot talk its way back in, exactly as it could not
+    // for a device that saw the removal first.
+    auto returning = gone;
+    returning.state = device::State::Registered;
+    returning.kicked.reset();
+    returning.seqno = 5;
+    returning.timestamp = clock_now_s();
+    returning.description = "back again";
+    returning.type = device::Type::Session_Android;
+    returning.version = {1, 0, 0};
+    returning.pk_x25519 = k.x25519_pub;
+    returning.pk_mlkem768 = k.mlkem768_pub;
+    deliver({{self.id, self}, {returning.id, returning}});
+
+    auto after = state_of(gone.id);
+    CHECK(after.state == device::State::Kicked);
+    CHECK(after.description != "back again");
 }
 
 TEST_CASE("Devices - a single-recipient group is readable", "[core][devices]") {

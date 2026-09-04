@@ -10,7 +10,9 @@ CREATE TABLE devices (
     id INTEGER PRIMARY KEY NOT NULL,
     unique_id BLOB UNIQUE NOT NULL CHECK(length(unique_id) == 32),
 
-    state INTEGER NOT NULL CHECK(state == 0 OR state == 1 OR state == 2), -- registered, pending, unregistered
+    -- Membership rank: 0 unregistered, 1 pending, 2 registered, 3 kicked.  Ordered least to most
+    -- authoritative because merging compares (state, seqno) as a row value -- see device::State.
+    state INTEGER NOT NULL CHECK(state >= 0 AND state <= 3),
     processing INTEGER,  -- non-null during batch processing: 1=new link request, 2=newly registered, 3=newly removed
     seqno INTEGER NOT NULL DEFAULT 1,
     pushed_seqno INTEGER,         -- seqno of the last confirmed device group push; NULL = never pushed
@@ -21,7 +23,11 @@ CREATE TABLE devices (
     description TEXT NOT NULL, -- freeform device description
     version INTEGER NOT NULL, -- = 1000000*V + 1000*v + p for version "V.v.p"
     pubkey_mlkem768 BLOB NOT NULL CHECK(length(pubkey_mlkem768) == 1184),
-    pubkey_x25519 BLOB NOT NULL CHECK(length(pubkey_x25519) == 32)
+    pubkey_x25519 BLOB NOT NULL CHECK(length(pubkey_x25519) == 32),
+
+    -- A kick is the one state that carries a timestamp, and is meaningless without one, so the two
+    -- are tied together here rather than left to each call site to remember.
+    CHECK((state == 3) == (kicked_timestamp IS NOT NULL))
 ) STRICT;
 
 -- This table holds any extra info not captured by the above.  The data is stored as key/value pairs

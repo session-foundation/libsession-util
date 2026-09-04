@@ -52,15 +52,33 @@ namespace device {
         return Type::Unknown;
     }
 
+    /// A device's membership of the account's device group.
+    ///
+    /// **The numbers are a rank, and merging depends on it.** State never goes on the wire — it is
+    /// inferred from which message a record arrived in — so a state change moves no field that the
+    /// record's seqno versions, and a merge guarded on the seqno alone would discard every one of
+    /// them.  Records are therefore compared as `(state, seqno)` lexicographically, which is why
+    /// these are ordered from least to most authoritative and why the stored integer *is* the rank.
+    ///
+    /// Rank only ever increases and the order is total, so a merged result is the maximum over
+    /// everything received, regardless of the order it arrived in.
     enum class State {
-        Registered = 0,  ///< Device is in the account's registered device set
-        Pending = 1,     ///< A device with a pending link request.  This is used for two cases:
+        Unregistered = 0,  ///< Not in the group, and never was: local device info that cannot be
+                           ///< pushed because this device has not joined one yet.  Says nothing
+                           ///< about any other device, which is why a removal is `Kicked`.
+        Pending = 1,       ///< A device with a pending link request.  This is used for two cases:
                       ///< - This device has sent a request to join the account's device group and
                       ///<   is awaiting acceptance by an existing device.
                       ///< - Another device has sent a link request that has been received but not
-                      ///<   yet accepted, ignored, or rejected by this device.
-        Unregistered = 2,  ///< Local device info that cannot be pushed because the device is not
-                           /// currently in the device group.
+                      ///<   yet accepted or ignored by this device.
+        Registered = 2,  ///< Device is in the account's registered device set.  Outranks Pending so
+                         ///< that an acceptance propagates even against a newer link request, which
+                         ///< is what lets registration complete at all.
+        Kicked = 3,      ///< Removed from the group, and permanently: a kicked device id can never
+                         ///< rejoin, only be replaced by a fresh one.  Outranks everything, so the
+                         ///< tombstone that carries a removal cannot be undone by a stale record
+                         ///< replaying an earlier state.  Always accompanied by `kicked`, which the
+                         ///< schema enforces.
     };
 
     // Value returned to indicate the push status of a device info or account keys update.
