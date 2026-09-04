@@ -18,6 +18,50 @@ namespace session::client {
 
 class Client;
 
+/// Enough of the most recent message to draw a conversation-list row, without reading the message.
+///
+/// A summary rather than the message itself, because a list row is not a message view: it wants a
+/// line of text and a hint of what else is there, and handing over whole `Message`s to fill in a
+/// column of one-liners costs a read per row for detail nobody draws.
+///
+/// The fields are independent, not alternatives — a message can carry a body *and* attachments, and
+/// a row showing "look at this  📎2" needs both — so there is deliberately no single "kind" enum
+/// here to switch on.
+///
+/// **Expect this to gain fields.**  Message kinds that are not yet modelled — call metadata, a
+/// typing indicator — will describe themselves by adding to this struct, and adding a field is the
+/// intended way to grow it: designated initialisers and defaults keep that source-compatible.  Two
+/// consequences for a caller:
+///
+/// - Do not treat the fields you know as exhaustive.  "Empty body and no attachments" means *this
+///   build* has nothing to say about the message, which today implies there is nothing to show, but
+///   will later be how an unhandled kind looks.  A row that draws nothing in that case degrades
+///   gracefully; one that asserts on it does not.
+/// - Do not persist a preview, and do not compare two for equality to decide whether to redraw.  It
+///   is a description of a message as this version understands it, and both of those turn a gained
+///   field into a stale cache or a missed repaint.
+struct MessagePreview {
+    /// The message body, whole and untruncated.  Empty when the message carries no text, which is
+    /// normal: a message can be attachments alone.  Truncation is left to the caller, since how
+    /// much fits is a property of the row it is being drawn into and not of the message.
+    std::string body;
+
+    /// How many attachments it has, or 0 for none.  A count and nothing more: what the files
+    /// individually are — names, types, sizes — is `Conversation::messages()`'s business, not a
+    /// list row's.
+    int attachments = 0;
+
+    /// True if we sent it, for a row that prefixes "You: ".
+    bool outgoing = false;
+
+    /// True if the attachments are a voice message, which a row usually names rather than counts.
+    bool voice_message = false;
+
+    /// True if there is at least one attachment and every one of them is an image, so a row can say
+    /// "3 images" where it would otherwise say "3 files".  False when there are none at all.
+    bool all_images = false;
+};
+
 /// A conversation: what it looks like, and everything you can do to it.
 ///
 /// **The values are a snapshot; the operations are not.**  The fields were read when this was
@@ -49,9 +93,18 @@ class Conversation {
     /// nothing else about has no name, and the caller decides how to render that.
     std::string display_name;
 
-    /// Body of the most recent message, for a conversation-list preview.  Empty if the
-    /// conversation has no messages or the latest carries no text.
-    std::string last_message;
+    /// The most recent message that still says something, summarised for a list row.
+    ///
+    /// Unset when there is nothing to preview — the conversation has no messages, or every one it
+    /// has was deleted.  So an *empty* `body` on a preview that is set means the message carries no
+    /// text rather than that there is no message, which is the distinction a bare string could not
+    /// make and the reason this is an optional.
+    ///
+    /// Deleted messages are skipped rather than reported: taking the newest one regardless would
+    /// blank the row whenever the last thing said was later deleted, and what a list wants there is
+    /// the last thing that was actually said.  A caller that wants the deleted message itself is
+    /// asking about history, and should read it — `messages()` with `include_deleted`.
+    std::optional<MessagePreview> last_preview;
 
     /// Timestamp of the most recent message, or the conversation's creation time if it has none.
     sys_ms last_activity;
@@ -468,7 +521,7 @@ class AnyConversation {
 
     const ConversationId& id() const { return base().id; }
     const std::string& display_name() const { return base().display_name; }
-    const std::string& last_message() const { return base().last_message; }
+    const std::optional<MessagePreview>& last_preview() const { return base().last_preview; }
     sys_ms last_activity() const { return base().last_activity; }
     int unread() const { return base().unread; }
     bool marked_unread() const { return base().marked_unread; }

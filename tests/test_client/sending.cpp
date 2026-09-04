@@ -42,7 +42,10 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     // The conversation was created by the send and shows the outgoing message as its preview.
     auto convos = c->conversations(wait);
     REQUIRE(convos.size() == 1);
-    CHECK(convos[0].last_message() == "general kenobi");
+    CHECK(preview_body(convos[0]) == "general kenobi");
+    // Ours, which is what lets a row prefix "You: ".
+    REQUIRE(convos[0].last_preview());
+    CHECK(convos[0].last_preview()->outgoing);
     // Our own message is never unread.
     CHECK(convos[0].unread() == 0);
 }
@@ -116,7 +119,7 @@ TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     CHECK(r.msg_added[0].first == convo);
     CHECK(r.msg_added[0].second.body == "ping");
     REQUIRE(r.updated.size() == 1);
-    CHECK(r.updated[0].last_message() == "ping");
+    CHECK(preview_body(r.updated[0]) == "ping");
     CHECK(r.updated[0].unread() == 1);
 
     // A second message on an existing conversation does not re-announce the conversation.
@@ -169,7 +172,7 @@ TEST_CASE(
     CHECK(std::ranges::count(r.order, "updated") == 1);
     REQUIRE(r.updated.size() == 1);
     CHECK(r.updated[0].unread() == 5);
-    CHECK(r.updated[0].last_message() == "m4");
+    CHECK(preview_body(r.updated[0]) == "m4");
 }
 
 TEST_CASE("Client: state is committed before the handler fires", "[client][signals]") {
@@ -368,7 +371,7 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
 
     auto id = c->send_message(ConversationId::dm(me), {.body = "note to self"}, wait);
     CHECK(c->message(id, wait)->body == "note to self");
-    CHECK(c->conversation(ConversationId::dm(me), wait)->last_message() == "note to self");
+    CHECK(preview_body(*c->conversation(ConversationId::dm(me), wait)) == "note to self");
 
     // One store reaching the swarm, not two: our own swarm is the recipient's, so the sync copy
     // would be the same store twice.

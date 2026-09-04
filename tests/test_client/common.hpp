@@ -230,6 +230,17 @@ inline void sync(Client& c) {
     c.core.loop().call_get([] { return 0; });
 }
 
+/// The body of a conversation's last-message preview, or "" if it has no preview at all.
+///
+/// So that an assertion about the body reads as one: dereferencing the optional in the CHECK itself
+/// would make "there is no preview" undefined behaviour rather than a failure, and a test that
+/// crashes instead of failing tells you nothing about which of the two went wrong.  A test that
+/// cares about the difference asserts on `last_preview()` directly.
+inline std::string preview_body(const AnyConversation& c) {
+    const auto& p = c.last_preview();
+    return p ? p->body : "";
+}
+
 }  // namespace client_test
 
 using namespace client_test;

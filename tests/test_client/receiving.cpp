@@ -13,7 +13,7 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(sender.session_id));
     CHECK(convos[0].display_name() == "Obi-Wan");
-    CHECK(convos[0].last_message() == "hello there");
+    CHECK(preview_body(convos[0]) == "hello there");
     CHECK(convos[0].last_activity() == from_epoch_ms(5000));
     CHECK(convos[0].unread() == 1);
 
@@ -296,7 +296,7 @@ TEST_CASE("Client: conversations are ordered by most recent activity", "[client]
     deliver(*c, alice, "third", from_epoch_ms(3000), "a2");
     convos = c->conversations(wait);
     CHECK(convos[0].id() == ConversationId::dm(alice.session_id));
-    CHECK(convos[0].last_message() == "third");
+    CHECK(preview_body(convos[0]) == "third");
 }
 
 TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") {
@@ -430,7 +430,8 @@ TEST_CASE("Client: explicit conversation creation", "[client][convos]") {
     auto created = c->open_dm(convo, wait);
     CHECK(created.id == convo);
     CHECK(created.unread == 0);
-    CHECK(created.last_message.empty());
+    // Nothing to preview at all, which is a different answer from an empty body.
+    CHECK(!created.last_preview);
     CHECK(c->conversations(wait).size() == 1);
 
     // Opening one that already exists is not an error and does not duplicate it -- which is why
@@ -603,12 +604,12 @@ TEST_CASE("Client: the list preview skips a deleted last message", "[client][con
 
     auto newest = c->conversation(convo, wait)->messages(wait).front();
     REQUIRE(newest.body == "newest");
-    REQUIRE(c->conversation(convo, wait)->last_message() == "newest");
+    REQUIRE(preview_body(*c->conversation(convo, wait)) == "newest");
 
     c->delete_message(newest.id, wait);
 
     // The list says what was last actually said, rather than going blank.
-    CHECK(c->conversation(convo, wait)->last_message() == "older");
+    CHECK(preview_body(*c->conversation(convo, wait)) == "older");
 }
 
 TEST_CASE("Client: purging removes what a deletion left", "[client][messages][delete]") {

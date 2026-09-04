@@ -1516,3 +1516,102 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     });
     CHECK(kept == 1);
 }
+
+TEST_CASE("Client: the list preview describes a message's attachments", "[client][attachments]") {
+    TempClient c;
+    SenderKeys gallery, mixed, voice, wordy;
+    // Approved, or these would be message requests and `conversations()` would not list them.
+    for (const auto* who : {&gallery, &mixed, &voice, &wordy})
+        approve(*c, who->session_id);
+
+    uint64_t next_id = 500;
+    auto add = [&next_id](SessionProtos::DataMessage& data, std::string_view ctype, int flags = 0) {
+        auto* a = data.add_attachments();
+        a->set_id(next_id);
+        a->set_url("http://fs.example/file/{}#d"_format(next_id++));
+        a->set_key(std::string(32, 'k'));
+        a->set_size(10);
+        if (!ctype.empty())
+            a->set_contenttype(std::string{ctype});
+        if (flags)
+            a->set_flags(flags);
+    };
+
+    // Attachments and no body at all: the case that rendered as a blank row, because an empty
+    // preview string could not say whether there was a message.
+    deliver(*c, gallery, "", from_epoch_ms(1000), "h1", "", std::nullopt, [&](auto& data) {
+        add(data, "image/png");
+        add(data, "image/jpeg");
+    });
+    // Not all images, so a row must not offer to show them as one.
+    deliver(*c, mixed, "", from_epoch_ms(2000), "h2", "", std::nullopt, [&](auto& data) {
+        add(data, "image/png");
+        add(data, "application/pdf");
+    });
+    // A voice message, which a row names rather than counts.
+    deliver(*c, voice, "", from_epoch_ms(3000), "h3", "", std::nullopt, [&](auto& data) {
+        add(data, "audio/ogg", 1);
+    });
+    // Body *and* attachments together -- the combination that rules out describing a preview with a
+    // single kind enum, since a row wants both halves.
+    deliver(*c,
+            wordy,
+            "look at this",
+            from_epoch_ms(4000),
+            "h4",
+            "",
+            std::nullopt,
+            [&](auto& data) { add(data, "image/png"); });
+    sync(*c);
+
+    auto convos = c->conversations(wait);
+    REQUIRE(convos.size() == 4);
+
+    auto preview_of = [&](const SenderKeys& who) {
+        auto id = ConversationId::dm(who.session_id);
+        auto found = std::ranges::find_if(convos, [&](const auto& c) { return c.id() == id; });
+        REQUIRE(found != convos.end());
+        REQUIRE(found->last_preview());
+        return *found->last_preview();
+    };
+
+    auto g = preview_of(gallery);
+    CHECK(g.body.empty());
+    CHECK(g.attachments == 2);
+    CHECK(g.all_images);
+    CHECK_FALSE(g.voice_message);
+    CHECK_FALSE(g.outgoing);
+
+    auto m = preview_of(mixed);
+    CHECK(m.attachments == 2);
+    CHECK_FALSE(m.all_images);
+
+    auto v = preview_of(voice);
+    CHECK(v.attachments == 1);
+    CHECK(v.voice_message);
+    CHECK_FALSE(v.all_images);
+
+    auto w = preview_of(wordy);
+    CHECK(w.body == "look at this");
+    CHECK(w.attachments == 1);
+    CHECK(w.all_images);
+}
+
+TEST_CASE("Client: a text-only message previews no attachments", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    approve(*c, peer.session_id);
+
+    deliver(*c, peer, "just words", from_epoch_ms(1000), "h1");
+    sync(*c);
+
+    auto convos = c->conversations(wait);
+    REQUIRE(convos.size() == 1);
+    REQUIRE(convos[0].last_preview());
+    // A message with no attachments does not come back from the aggregate query at all, so this is
+    // what says the defaults it was left with are the right ones.
+    CHECK(convos[0].last_preview()->body == "just words");
+    CHECK(convos[0].last_preview()->attachments == 0);
+    CHECK_FALSE(convos[0].last_preview()->all_images);
+    CHECK_FALSE(convos[0].last_preview()->voice_message);
+}

@@ -1288,17 +1288,22 @@ static const auto CONVO_COLUMNS = R"(
            -- A nickname is ours for them and wins over the name they chose for themselves; falling
            -- back means an account we have seen but never made a contact of still has a name.
            coalesce(ct.nickname, a.name), c.last_activity,
-           -- The most recent message that still says something.  A deleted one has an empty body,
-           -- so taking it would blank the row rather than showing what was last actually said, and
-           -- a list has no way to draw the difference.
-           coalesce((SELECT b.body FROM messages b
-                      WHERE b.conversation = c.id AND b.deleted IS NULL
-                      ORDER BY b.timestamp DESC, b.id DESC LIMIT 1), ''),
+           -- The most recent message that still says something, for `last_preview`.  `lm.id` is
+           -- NULL exactly when there is nothing to preview, which is what leaves the optional
+           -- unset; the attachment side of the preview is filled in afterwards, in one query for
+           -- the whole list.
+           lm.id, lm.body, lm.outgoing,
            c.unread_count, c.priority, coalesce(ct.approved, 0), coalesce(ct.approved_me, 0),
            c.marked_unread, coalesce(ct.blocked, 0), a.name, ct.nickname,
            c.notifications, c.mute_until, c.exp_mode, c.exp_timer,
            a.profile_pic_url, a.profile_pic_key, c.auto_download
     {}
+    -- Joined rather than subqueried per column so that one index seek on messages_history serves
+    -- every field of the preview.  A conversation with nothing to preview simply misses.
+    LEFT JOIN messages lm ON lm.id = (
+        SELECT b.id FROM messages b
+         WHERE b.conversation = c.id AND b.deleted IS NULL
+         ORDER BY b.timestamp DESC, b.id DESC LIMIT 1)
 )"_format(SUBJECT_JOIN);
 
 // Which conversations are message requests, as a fragment both list queries need: a DM with someone
@@ -1310,10 +1315,65 @@ static const auto CONVO_COLUMNS = R"(
 static constexpr auto IS_REQUEST =
         "(c.dm IS NOT NULL AND coalesce(ct.approved, 0) = 0 AND a.session_id IS NOT ?1)"sv;
 
+// Fills in the attachment side of the `last_preview` of every conversation that has one.
+// `previews` pairs the previewed message with the index of the conversation it belongs to.
+//
+// One query for the whole list rather than an aggregate subquery per row: message_attachments is
+// keyed on (message, idx), so `message IN (...) GROUP BY message` is one index range scan per
+// message.  Same reasoning, and the same prepared-statement-per-list-size caveat, as
+// `load_attachments`.
+//
+// Messages with no attachments simply do not come back, and need not: a default-constructed
+// preview already says a message has none.
+static void load_preview_attachments(
+        sqlite::Connection& c,
+        std::vector<AnyConversation>& convos,
+        const std::vector<std::pair<int64_t, size_t>>& previews) {
+    if (previews.empty())
+        return;
+
+    std::unordered_map<int64_t, size_t> at;
+    for (const auto& [msg, i] : previews)
+        at.emplace(msg, i);
+
+    // The voice flag is formatted in rather than bound so that the query text stays a constant for
+    // a given list size, and so the bind indices are the message ids and nothing else.
+    //
+    // `substr(...) = 'image/'` rather than `LIKE 'image/%'` because LIKE is ASCII-case-insensitive
+    // in SQLite while `gallery_viewable`'s `starts_with` is not, and the two deciding differently
+    // about `image/PNG` is exactly the sort of disagreement nobody would think to look for.
+    auto st = c.prepared_st(
+            R"(
+        SELECT message, count(*),
+               sum(content_type IS NOT NULL AND substr(content_type, 1, 6) = 'image/'),
+               max(flags & {}) != 0
+        FROM message_attachments WHERE message IN ({}) GROUP BY message
+    )"_format(ATTACHMENT_FLAG_VOICE_MESSAGE, sqlite::placeholders(previews.size())));
+
+    int n = 1;
+    for (const auto& [msg, i] : previews)
+        st->bind(n++, msg);
+
+    for (auto&& [msg, count, images, voice] :
+         sqlite::IterableStatementWrapper<int64_t, int64_t, int64_t, int>{std::move(st)}) {
+        auto found = at.find(msg);
+        if (found == at.end())
+            continue;
+        auto& preview = convos[found->second].base().last_preview;
+        if (!preview)
+            continue;
+        preview->attachments = static_cast<int>(count);
+        preview->voice_message = voice != 0;
+        preview->all_images = count > 0 && images == count;
+    }
+}
+
 template <typename... Bind>
 static std::vector<AnyConversation> query_conversations(
         Client& client, sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<AnyConversation> out;
+    // Message id and the index of the conversation it previews; see load_preview_attachments.
+    std::vector<std::pair<int64_t, size_t>> preview_msgs;
     for (auto [convo,
                sid,
                gid,
@@ -1321,7 +1381,9 @@ static std::vector<AnyConversation> query_conversations(
                room,
                display_name,
                activity,
-               preview,
+               prev_id,
+               prev_body,
+               prev_outgoing,
                unread,
                priority,
                approved,
@@ -1345,7 +1407,9 @@ static std::vector<AnyConversation> query_conversations(
                  std::optional<std::string>,
                  std::optional<std::string>,
                  int64_t,
-                 std::string,
+                 std::optional<int64_t>,
+                 std::optional<std::string>,
+                 std::optional<int>,
                  int,
                  int,
                  int,
@@ -1369,7 +1433,15 @@ static std::vector<AnyConversation> query_conversations(
             base.picture.key.assign(pic_key->begin(), pic_key->end());
         }
         base.display_name = display_name.value_or("");
-        base.last_message = std::move(preview);
+        if (prev_id) {
+            // Attachment fields are left at their defaults here and filled in below; a message with
+            // no attachments is already correct as it stands.
+            base.last_preview = MessagePreview{
+                    .body = std::move(prev_body).value_or(""),
+                    .outgoing = prev_outgoing.value_or(0) != 0};
+            // The index this conversation is about to occupy: exactly one is appended per row.
+            preview_msgs.emplace_back(*prev_id, out.size());
+        }
         base.last_activity = from_epoch_ms(activity);
         base.unread = unread;
         base.marked_unread = marked_unread != 0;
@@ -1397,6 +1469,10 @@ static std::vector<AnyConversation> query_conversations(
             out.emplace_back(std::move(dm));
         }
     }
+
+    // After the loop, not inside it: the point of batching is that the statement above has finished
+    // and every previewed message is known, so this is one query rather than one per row.
+    load_preview_attachments(c, out, preview_msgs);
     return out;
 }
 
