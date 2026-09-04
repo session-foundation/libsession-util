@@ -151,7 +151,7 @@ add_subdirectory(external)
 
 session_dep(nettle 3)
 # Unicode normalisation and case folding for mnemonic input; see src/mnemonics/mnemonics.cpp.
-session_dep(utf8proc 2.5)
+session_dep(libutf8proc 2.5)
 
 add_subdirectory(src)
 add_subdirectory(proto)

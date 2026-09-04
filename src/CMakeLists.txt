@@ -117,7 +117,7 @@ target_link_libraries(crypto
     # AES only as GCM, and only where the hardware supports it.
     sessiondep::nettle
     sessiondep::simdutf
-    sessiondep::utf8proc
+    sessiondep::libutf8proc
     mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     libsession::protos
