@@ -440,8 +440,12 @@ device::map Devices::devices(
 
 std::pair<device::Info, bool> Devices::device_info() {
     auto devs = devices(true, true, true, self_id);
-    if (auto it = devs.find(self_id); it != devs.end())
-        return {std::move(it->second), it->second.state == device::State::Registered};
+    if (auto it = devs.find(self_id); it != devs.end()) {
+        // Read the state out before the move: the elements of a braced-init-list are evaluated in
+        // order, so testing `it->second` in the second element is testing a moved-from Info.
+        bool registered = it->second.state == device::State::Registered;
+        return {std::move(it->second), registered};
+    }
     return {device::Info{.id = self_id}, false};
 }
 
