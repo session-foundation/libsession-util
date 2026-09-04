@@ -76,14 +76,17 @@ class Client {
     friend class DM;
 
   public:
-    /// Constructs a Client and, internally, the Core it sits on.  Takes exactly the options
-    /// `core::Core` takes (database encryption, predefined_seed, callbacks, …) and forwards them.
+    /// Constructs a Client and, internally, the Core it sits on.  Takes the options `core::Core`
+    /// takes (database encryption, predefined_seed, …) and forwards them — with the one exception
+    /// of `core::callbacks`, which a Client's application cannot supply: those are Client's own
+    /// wiring, and the static_assert below rejects an attempt to pass a set rather than letting it
+    /// be silently overwritten.
     ///
-    /// Two of the Core callbacks are intercepted: `message_received` and `message_send_status`.
-    /// Client handles those to maintain its own tables and then invokes the application's handler
-    /// for the same event, if one was supplied, so passing `core::callbacks` here still works as
-    /// it does for a bare Core.  Applications building on Client should not need either of them —
-    /// `client::callbacks` reports what changed in terms of conversations instead.
+    /// What an application is told is `client::callbacks`, given as the `cbs` argument of the
+    /// overloads below and reported through the dispatcher.  Anything an application needs that
+    /// only Core knows is Client's job to handle and re-report there; if something Core reports has
+    /// no `client::callbacks` equivalent, that is a gap to fill here rather than a reason to reach
+    /// past Client for it.
     template <core::CoreOption... Opts>
     explicit Client(std::filesystem::path db_path, Opts&&... opts) :
             Client{std::move(db_path), callbacks{}, std::forward<Opts>(opts)...} {}
@@ -119,9 +122,20 @@ class Client {
     // -- Conversations and messages ---------------------------------------------------------------
     //
     // None of these touches the database on the calling thread: they hand the work to Core's event
-    // loop, which is the only thread that ever touches it.  That is not a stylistic choice -- the
-    // connection pool is not safe to use from two threads at once, and reading from one while
-    // Core's poll thread writes deadlocks rather than merely racing.
+    // loop, which is the only thread that ever touches it.
+    //
+    // Not because doing otherwise is unsafe -- the connection pool hands each thread its own
+    // connection, and WAL lets a reader run alongside the loop's writer -- but because of what it
+    // costs and what it cannot promise.  A first read from the calling thread opens a second
+    // encrypted connection to keep for the life of that thread; a write contends with the loop's
+    // writer for the single WAL write lock and gives up after the 5s busy timeout; and a read gets
+    // a snapshot whose relationship to the notifications the application has been given is
+    // undefined, so two reads either side of a callback can disagree.  Going through the loop makes
+    // all three questions not arise.
+    //
+    // A caller that genuinely wants to read on its own thread anyway can reach the pool through
+    // `core.database()` and will not corrupt anything.  It is just answering a different, weaker
+    // question than these do.
     //
     // Each returns immediately and invokes `cb` when the work is done -- through the dispatcher if
     // one was given, so on the application's own thread.  A caller that would rather block on the
