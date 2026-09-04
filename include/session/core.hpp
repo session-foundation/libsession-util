@@ -516,7 +516,22 @@ class Core {
     PfsKeyStatus prefetch_pfs_keys(std::span<const std::byte, 33> session_id);
 
     /// Sets the polling interval used when a network object is attached.  The default is 20s.
-    /// Takes effect by replacing the active ticker (if any); safe to call at any time.
+    ///
+    /// Takes effect by replacing the active ticker, if there is one, and so restarts the interval:
+    /// the next poll is a full `interval` away rather than at the point the old ticker would have
+    /// fired.  Attaching a network polls immediately and then every `interval`, so setting this
+    /// before `set_network()` costs no initial delay.
+    ///
+    /// Callable from any thread and at any time: the work is marshalled onto the event loop, so it
+    /// may not have taken effect by the time this returns.
+    ///
+    /// The interval is deliberately the application's choice rather than something Core adapts,
+    /// because what it trades away is not Core's to spend -- a desktop or terminal client wants
+    /// new messages promptly, and a mobile one wants its battery.  Note that nothing serialises
+    /// polls against each other: an interval short enough that a poll can still be outstanding
+    /// when the next one fires gets overlapping requests, which is wasteful but not incorrect
+    /// (the swarm cursor only advances once a batch has been handled, and message handlers are
+    /// already required to tolerate seeing a message twice).
     void set_poll_interval(std::chrono::milliseconds interval);
 
     /// Encrypt and send a direct message to the given recipient.

@@ -120,13 +120,18 @@ void Core::_update_polling() {
 }
 
 void Core::set_poll_interval(std::chrono::milliseconds interval) {
-    _poll_interval = interval;
-    if (_poll_ticker) {
-        _poll_ticker->stop();
-        _poll_ticker.reset();
-    }
-    if (_network)
-        _poll_ticker = _loop.call_every(_poll_interval, [this] { _poll(); });
+    // Marshalled onto the loop rather than done here: this replaces the ticker, and creating or
+    // stopping a libevent event from a thread that is not the loop's races the loop itself.  (Both
+    // `_poll_interval` and `_poll_ticker` are otherwise only touched there.)  `Loop::call` runs it
+    // inline when we are already on the loop thread, so this costs nothing in that case.
+    _loop.call([this, interval] {
+        _poll_interval = interval;
+        if (_poll_ticker) {
+            _poll_ticker->stop();
+            _poll_ticker.reset();
+        }
+        _update_polling();
+    });
 }
 
 // Order matters: the batch's results are handled in this order, so a namespace whose contents
