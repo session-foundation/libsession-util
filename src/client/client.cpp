@@ -1318,10 +1318,11 @@ static constexpr auto IS_REQUEST =
 // Fills in the attachment side of the `last_preview` of every conversation that has one.
 // `previews` pairs the previewed message with the index of the conversation it belongs to.
 //
-// One query for the whole list rather than an aggregate subquery per row: message_attachments is
-// keyed on (message, idx), so `message IN (...) GROUP BY message` is one index range scan per
-// message.  Same reasoning, and the same prepared-statement-per-list-size caveat, as
-// `load_attachments`.
+// One query for the whole list rather than one per row: message_attachments is keyed on
+// (message, idx), so `message IN (...)` is one index range scan per message, and that key is also
+// what makes `ORDER BY message, idx` free -- which matters, because the names have to come back in
+// the order the sender listed them.  Same reasoning, and the same prepared-statement-per-list-size
+// caveat, as `load_attachments`.
 //
 // Messages with no attachments simply do not come back, and need not: a default-constructed
 // preview already says a message has none.
@@ -1333,38 +1334,44 @@ static void load_preview_attachments(
         return;
 
     std::unordered_map<int64_t, size_t> at;
-    for (const auto& [msg, i] : previews)
+    std::vector<int64_t> ids;
+    ids.reserve(previews.size());
+    for (const auto& [msg, i] : previews) {
         at.emplace(msg, i);
+        ids.push_back(msg);
+    }
 
-    // The voice flag is formatted in rather than bound so that the query text stays a constant for
-    // a given list size, and so the bind indices are the message ids and nothing else.
+    // A row per attachment rather than an aggregate, because the names are wanted individually; the
+    // three summary fields are then folded from the same rows instead of being asked for again.
+    // Only the three columns a preview uses, so a list does not carry the sizes, captions and urls
+    // that a message view reads.
     //
     // `substr(...) = 'image/'` rather than `LIKE 'image/%'` because LIKE is ASCII-case-insensitive
     // in SQLite while `gallery_viewable`'s `starts_with` is not, and the two deciding differently
     // about `image/PNG` is exactly the sort of disagreement nobody would think to look for.
-    auto st = c.prepared_st(
-            R"(
-        SELECT message, count(*),
-               sum(content_type IS NOT NULL AND substr(content_type, 1, 6) = 'image/'),
-               max(flags & {}) != 0
-        FROM message_attachments WHERE message IN ({}) GROUP BY message
-    )"_format(ATTACHMENT_FLAG_VOICE_MESSAGE, sqlite::placeholders(previews.size())));
-
-    int n = 1;
-    for (const auto& [msg, i] : previews)
-        st->bind(n++, msg);
-
-    for (auto&& [msg, count, images, voice] :
-         sqlite::IterableStatementWrapper<int64_t, int64_t, int64_t, int>{std::move(st)}) {
+    // Every attachment starts an all-images run that its own answer then confirms or ends, so the
+    // flag means "at least one, and all of them" without a separate count to compare against.
+    for (auto&& [msg, filename, is_image, flags] :
+         c.prepared_results<int64_t, std::optional<std::string>, int, int>(
+                 R"(
+        SELECT message, filename,
+               content_type IS NOT NULL AND substr(content_type, 1, 6) = 'image/',
+               flags
+        FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
+    )"_format(sqlite::placeholders(ids.size())),
+                 sqlite::bind_each{ids})) {
         auto found = at.find(msg);
         if (found == at.end())
             continue;
         auto& preview = convos[found->second].base().last_preview;
         if (!preview)
             continue;
-        preview->attachments = static_cast<int>(count);
-        preview->voice_message = voice != 0;
-        preview->all_images = count > 0 && images == count;
+
+        bool first = preview->filenames.empty();
+        preview->filenames.push_back(std::move(filename).value_or(""));
+        preview->all_images = (first || preview->all_images) && is_image != 0;
+        if (flags & ATTACHMENT_FLAG_VOICE_MESSAGE)
+            preview->voice_message = true;
     }
 }
 

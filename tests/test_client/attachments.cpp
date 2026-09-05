@@ -1525,7 +1525,11 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
         approve(*c, who->session_id);
 
     uint64_t next_id = 500;
-    auto add = [&next_id](SessionProtos::DataMessage& data, std::string_view ctype, int flags = 0) {
+    auto add = [&next_id](
+                       SessionProtos::DataMessage& data,
+                       std::string_view ctype,
+                       std::string_view name,
+                       int flags = 0) {
         auto* a = data.add_attachments();
         a->set_id(next_id);
         a->set_url("http://fs.example/file/{}#d"_format(next_id++));
@@ -1533,6 +1537,8 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
         a->set_size(10);
         if (!ctype.empty())
             a->set_contenttype(std::string{ctype});
+        if (!name.empty())
+            a->set_filename(std::string{name});
         if (flags)
             a->set_flags(flags);
     };
@@ -1540,17 +1546,18 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
     // Attachments and no body at all: the case that rendered as a blank row, because an empty
     // preview string could not say whether there was a message.
     deliver(*c, gallery, "", from_epoch_ms(1000), "h1", "", std::nullopt, [&](auto& data) {
-        add(data, "image/png");
-        add(data, "image/jpeg");
+        add(data, "image/png", "kitten.png");
+        add(data, "image/jpeg", "puppy.jpg");
     });
-    // Not all images, so a row must not offer to show them as one.
+    // Not all images, so a row must not offer to show them as one.  The second file carries no name
+    // at all, which a sender is free to omit.
     deliver(*c, mixed, "", from_epoch_ms(2000), "h2", "", std::nullopt, [&](auto& data) {
-        add(data, "image/png");
-        add(data, "application/pdf");
+        add(data, "image/png", "chart.png");
+        add(data, "application/pdf", "");
     });
     // A voice message, which a row names rather than counts.
     deliver(*c, voice, "", from_epoch_ms(3000), "h3", "", std::nullopt, [&](auto& data) {
-        add(data, "audio/ogg", 1);
+        add(data, "audio/ogg", "clip.ogg", 1);
     });
     // Body *and* attachments together -- the combination that rules out describing a preview with a
     // single kind enum, since a row wants both halves.
@@ -1561,7 +1568,7 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
             "h4",
             "",
             std::nullopt,
-            [&](auto& data) { add(data, "image/png"); });
+            [&](auto& data) { add(data, "image/png", "photo.png"); });
     sync(*c);
 
     auto convos = c->conversations(wait);
@@ -1577,23 +1584,26 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
 
     auto g = preview_of(gallery);
     CHECK(g.body.empty());
-    CHECK(g.attachments == 2);
+    // Named, and in the order the sender listed them rather than whatever the table hands back.
+    CHECK(g.filenames == std::vector<std::string>{"kitten.png", "puppy.jpg"});
     CHECK(g.all_images);
     CHECK_FALSE(g.voice_message);
     CHECK_FALSE(g.outgoing);
 
     auto m = preview_of(mixed);
-    CHECK(m.attachments == 2);
+    // The unnamed file still occupies its place, so the count stays right and the entries stay
+    // aligned with the attachment indices -- a row draws its own fallback for the empty one.
+    CHECK(m.filenames == std::vector<std::string>{"chart.png", ""});
     CHECK_FALSE(m.all_images);
 
     auto v = preview_of(voice);
-    CHECK(v.attachments == 1);
+    CHECK(v.filenames == std::vector<std::string>{"clip.ogg"});
     CHECK(v.voice_message);
     CHECK_FALSE(v.all_images);
 
     auto w = preview_of(wordy);
     CHECK(w.body == "look at this");
-    CHECK(w.attachments == 1);
+    CHECK(w.filenames == std::vector<std::string>{"photo.png"});
     CHECK(w.all_images);
 }
 
@@ -1611,7 +1621,7 @@ TEST_CASE("Client: a text-only message previews no attachments", "[client][attac
     // A message with no attachments does not come back from the aggregate query at all, so this is
     // what says the defaults it was left with are the right ones.
     CHECK(convos[0].last_preview()->body == "just words");
-    CHECK(convos[0].last_preview()->attachments == 0);
+    CHECK(convos[0].last_preview()->filenames.empty());
     CHECK_FALSE(convos[0].last_preview()->all_images);
     CHECK_FALSE(convos[0].last_preview()->voice_message);
 }

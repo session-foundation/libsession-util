@@ -46,10 +46,18 @@ struct MessagePreview {
     /// much fits is a property of the row it is being drawn into and not of the message.
     std::string body;
 
-    /// How many attachments it has, or 0 for none.  A count and nothing more: what the files
-    /// individually are — names, types, sizes — is `Conversation::messages()`'s business, not a
-    /// list row's.
-    int attachments = 0;
+    /// The name of each attachment, in the order the sender listed them, and empty for the whole
+    /// message when it has none.
+    ///
+    /// One entry per attachment, so `filenames.size()` *is* the attachment count and the entries
+    /// line up with `Attachment::index`.  An entry is an empty string when that attachment carries
+    /// no name — the sender simply omits the field — so the names cannot be counted as a proxy for
+    /// the attachments, and a row drawing them needs a fallback for the empty ones.
+    ///
+    /// Names but not types or sizes: a single-attachment row saying "invoice.pdf" is worth far more
+    /// than one saying "1 file", while the rest of what an attachment is remains
+    /// `Conversation::messages()`'s business.
+    std::vector<std::string> filenames;
 
     /// True if we sent it, for a row that prefixes "You: ".
     bool outgoing = false;
