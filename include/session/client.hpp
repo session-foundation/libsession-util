@@ -683,6 +683,10 @@ class Client {
     template <typename T>
     void _set_conversation_setting(const ConversationId& id, std::string_view column, T value);
     void _set_blocked(const ConversationId& id, bool blocked);
+    // The second of the two ways a conversation gets approved.  The first is _send_message, which
+    // approves the recipient on the way past because writing to someone is approving them; this one
+    // approves outright, and sends the message request response that says so in place of the
+    // message it did not send.
     void _approve(const ConversationId& id);
     // A peer telling us they accepted a message request of ours.  Nothing but the acceptance is
     // read out of it: the profile it may carry says no more than the next message from them will,
