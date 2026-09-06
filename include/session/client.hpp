@@ -61,6 +61,7 @@
 namespace SessionProtos {
 class Content;
 class DataExtractionNotification;
+class MessageRequestResponse;
 class UnsendRequest;
 }
 
@@ -652,9 +653,10 @@ class Client {
     // accumulate in _early_status forever.
     std::unordered_map<int64_t, int64_t> _sync_sends;  // core send id -> client message id
 
-    // Sends whose outcome nobody is waiting for -- the media-saved notification is the only one so
-    // far.  Tracked rather than left unregistered so that their statuses are dropped as they
-    // arrive, instead of accumulating in _early_status against ids that will never be claimed.
+    // Sends whose outcome nobody is waiting for: the messages Client sends about a conversation
+    // rather than in it.  Tracked rather than left unregistered so that their statuses are dropped
+    // as they arrive, instead of accumulating in _early_status against ids that will never be
+    // claimed.
     std::unordered_set<int64_t> _quiet_sends;
 
     // The actual work, all of it assuming it is already on the loop thread.  The public methods
@@ -681,6 +683,13 @@ class Client {
     template <typename T>
     void _set_conversation_setting(const ConversationId& id, std::string_view column, T value);
     void _set_blocked(const ConversationId& id, bool blocked);
+    void _approve(const ConversationId& id);
+    // A peer telling us they accepted a message request of ours.  Nothing but the acceptance is
+    // read out of it: the profile it may carry says no more than the next message from them will,
+    // and unlike that one it is not attached to anything we would store.
+    void _on_message_request_response(
+            std::span<const std::byte, 33> sender,
+            const SessionProtos::MessageRequestResponse& res);
     void _clear_messages(const ConversationId& id);
     void _delete_conversation(const ConversationId& id, bool keep_messages);
     void _delete_contact(const ConversationId& id);
