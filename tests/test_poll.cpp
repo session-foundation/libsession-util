@@ -309,7 +309,8 @@ TEST_CASE("Poll: a truncated namespace is continued before it is reported final"
     CHECK(namespaces_in(second) == std::vector<int16_t>{21});
     CHECK(params_for(second, 21)["last_hash"] == "hash1");
 
-    // Nothing left behind it: an empty answer is still an answer, and is what makes the batch final.
+    // Nothing left behind it: an empty answer is still an answer, and is what makes the batch
+    // final.
     auto reply2 = mock_net->sent_requests[1].callback;
     reply2(true, false, 200, {}, make_empty_response(second).dump());
 

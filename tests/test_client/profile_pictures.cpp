@@ -1,4 +1,5 @@
 #include <nettle/gcm.h>
+
 #include <session/attachments.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/random.hpp>
@@ -46,7 +47,8 @@ void set_picture(
 
 }  // namespace
 
-TEST_CASE("Client: a stream-encrypted picture round-trips through the cache", "[client][pictures]") {
+TEST_CASE(
+        "Client: a stream-encrypted picture round-trips through the cache", "[client][pictures]") {
     TempCacheDir dir;
     TempClient c;
     auto* net = attach_mock_network(c->core);
@@ -57,8 +59,7 @@ TEST_CASE("Client: a stream-encrypted picture round-trips through the cache", "[
 
     // As a current client uploads one: the stream scheme, with the url saying so.
     auto seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
-    auto [encrypted, key] =
-            attachment::encrypt(seed, image, attachment::Domain::PROFILE_PIC);
+    auto [encrypted, key] = attachment::encrypt(seed, image, attachment::Domain::PROFILE_PIC);
     net->served["pic1"] = encrypted;
     auto url = network::file_server::generate_download_url("pic1", {}, true);
 
@@ -151,8 +152,9 @@ TEST_CASE("Client: a picture from before the stream scheme still opens", "[clien
     CHECK(*got == image);
 }
 
-TEST_CASE("Client: a picture that will not decrypt is an error, not an absence",
-          "[client][pictures]") {
+TEST_CASE(
+        "Client: a picture that will not decrypt is an error, not an absence",
+        "[client][pictures]") {
     TempCacheDir dir;
     TempClient c;
     auto* net = attach_mock_network(c->core);

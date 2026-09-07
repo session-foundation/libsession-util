@@ -146,7 +146,8 @@ TEST_CASE("Configs: a namespace names exactly one config", "[core][configs]") {
     CHECK(c->configs.for_namespace(config::Namespace::UserProfile) ==
           base(c->configs.user_profile()));
     CHECK(c->configs.for_namespace(config::Namespace::Contacts) == base(c->configs.contacts()));
-    CHECK(c->configs.for_namespace(config::Namespace::UserGroups) == base(c->configs.user_groups()));
+    CHECK(c->configs.for_namespace(config::Namespace::UserGroups) ==
+          base(c->configs.user_groups()));
     CHECK(c->configs.for_namespace(config::Namespace::ConvoInfoVolatile) ==
           base(c->configs.convo_info_volatile()));
 
@@ -307,8 +308,7 @@ TEST_CASE("Configs: one batch reports everything it changed, once", "[core][conf
     REQUIRE(w.reported.size() == 1);
     auto changed = w.reported[0];
     std::ranges::sort(changed);
-    CHECK(changed ==
-          std::vector{config::Namespace::UserProfile, config::Namespace::Contacts});
+    CHECK(changed == std::vector{config::Namespace::UserProfile, config::Namespace::Contacts});
 }
 
 TEST_CASE("Configs: a conflicting merge at our own seqno is reported", "[core][configs][notify]") {

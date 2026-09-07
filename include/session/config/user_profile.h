@@ -315,9 +315,9 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 
 /// API: user_profile/user_profile_get_notify_media_saved
 ///
-/// Returns true if we tell somebody when we save a file they sent us.  True is the default, and what
-/// an account that has never set this returns: Session's clients report it, so it is what a sender
-/// expects.
+/// Returns true if we tell somebody when we save a file they sent us.  True is the default, and
+/// what an account that has never set this returns: Session's clients report it, so it is what a
+/// sender expects.
 ///
 /// Declaration:
 /// ```cpp

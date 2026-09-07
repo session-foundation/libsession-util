@@ -152,12 +152,11 @@ TEST_CASE(
                 std::nullopt));
     std::vector<core::SwarmMessage> batch;
     for (int i = 0; i < 5; i++)
-        batch.push_back(
-                core::SwarmMessage{
-                        wire[i],
-                        "b{}"_format(i),
-                        from_epoch_ms(1000 + i),
-                        from_epoch_ms(1'000'000'000'000)});
+        batch.push_back(core::SwarmMessage{
+                wire[i],
+                "b{}"_format(i),
+                from_epoch_ms(1000 + i),
+                from_epoch_ms(1'000'000'000'000)});
 
     c->core.loop().call_get([&] {
         c->core.receive_messages(batch, config::Namespace::Default, true);

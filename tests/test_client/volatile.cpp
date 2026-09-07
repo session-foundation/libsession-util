@@ -123,4 +123,3 @@ TEST_CASE("Client: read state for a conversation we do not have is ignored", "[c
     CHECK_FALSE(c->conversation(id, wait));
     CHECK(c->conversations(wait).empty());
 }
-

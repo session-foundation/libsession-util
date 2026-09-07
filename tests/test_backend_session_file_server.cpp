@@ -47,10 +47,8 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
     // Ignores the pubkey if it matches the default one
-    parsed_download_url = file_server::parse_download_url(
-            fmt::format(
-                    "https://example.com/file/abc123#p={}"sv,
-                    file_server::DEFAULT_CONFIG.pubkey_hex));
+    parsed_download_url = file_server::parse_download_url(fmt::format(
+            "https://example.com/file/abc123#p={}"sv, file_server::DEFAULT_CONFIG.pubkey_hex));
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->scheme == "https"sv);
     CHECK(parsed_download_url->host == "example.com"sv);

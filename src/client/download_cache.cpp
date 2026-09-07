@@ -1,14 +1,14 @@
 #include "download_cache.hpp"
 
-#include <oxen/log.hpp>
 #include <oxenc/hex.h>
+
+#include <cstring>
+#include <fstream>
+#include <oxen/log.hpp>
 #include <session/attachments.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
 #include <session/random.hpp>
-
-#include <cstring>
-#include <fstream>
 
 namespace session::client::cache {
 
@@ -17,11 +17,11 @@ static auto cat = log::Cat("client");
 
 namespace {
 
-std::string_view base_url(std::string_view url) {
-    if (auto q = url.find_first_of("?#"); q != std::string_view::npos)
-        url = url.substr(0, q);
-    return url;
-}
+    std::string_view base_url(std::string_view url) {
+        if (auto q = url.find_first_of("?#"); q != std::string_view::npos)
+            url = url.substr(0, q);
+        return url;
+    }
 
 }  // namespace
 
@@ -43,8 +43,7 @@ std::optional<std::vector<std::byte>> read(
 
         std::vector<std::byte> encrypted(static_cast<size_t>(in.tellg()));
         in.seekg(0);
-        in.read(
-                reinterpret_cast<char*>(encrypted.data()),
+        in.read(reinterpret_cast<char*>(encrypted.data()),
                 static_cast<std::streamsize>(encrypted.size()));
 
         return attachment::decrypt(encrypted, key);

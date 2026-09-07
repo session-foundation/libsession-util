@@ -22,7 +22,13 @@ TEST_CASE("Client: a reply names what it answers", "[client][replies]") {
 
     auto first = from_epoch_ms(1000);
     deliver(*c, peer, "the original", first, "h1", "", std::nullopt, nullptr, 7777);
-    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "the answer",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
@@ -43,14 +49,20 @@ TEST_CASE("Client: a reply names what it answers", "[client][replies]") {
     CHECK_FALSE(original.reply.has_value());
 }
 
-TEST_CASE("Client: a reply to a message we do not have still names its author",
-          "[client][replies]") {
+TEST_CASE(
+        "Client: a reply to a message we do not have still names its author", "[client][replies]") {
     TempClient c;
     SenderKeys peer;
 
     auto missing = from_epoch_ms(500);
-    deliver(*c, peer, "answering something we never got", from_epoch_ms(2000), "h1", "",
-            std::nullopt, quoting(peer.session_id, missing, 4242));
+    deliver(*c,
+            peer,
+            "answering something we never got",
+            from_epoch_ms(2000),
+            "h1",
+            "",
+            std::nullopt,
+            quoting(peer.session_id, missing, 4242));
     sync(*c);
 
     auto msgs = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait);
@@ -71,7 +83,13 @@ TEST_CASE("Client: a reply resolves once its target arrives", "[client][replies]
     // Out of order: the answer first.  This is the case that makes resolving-on-read necessary
     // rather than merely tidy -- resolved once at receipt, this reference would stay empty forever.
     auto first = from_epoch_ms(1000);
-    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "the answer",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
@@ -99,7 +117,13 @@ TEST_CASE("Client: msgid disambiguates a same-millisecond target", "[client][rep
     auto same = from_epoch_ms(1000);
     deliver(*c, peer, "first", same, "h1", "", std::nullopt, nullptr, 111);
     deliver(*c, peer, "second", same, "h2", "", std::nullopt, nullptr, 222);
-    deliver(*c, peer, "answering the second", from_epoch_ms(2000), "h3", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "answering the second",
+            from_epoch_ms(2000),
+            "h3",
+            "",
+            std::nullopt,
             quoting(peer.session_id, same, 222));
     sync(*c);
 
@@ -127,7 +151,13 @@ TEST_CASE("Client: an ambiguous target resolves stably", "[client][replies]") {
     auto same = from_epoch_ms(1000);
     deliver(*c, peer, "first", same, "h1", "", std::nullopt, nullptr, 111);
     deliver(*c, peer, "second", same, "h2", "", std::nullopt, nullptr, 222);
-    deliver(*c, peer, "answering one of them", from_epoch_ms(2000), "h3", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "answering one of them",
+            from_epoch_ms(2000),
+            "h3",
+            "",
+            std::nullopt,
             quoting(peer.session_id, same));
     sync(*c);
 
@@ -150,7 +180,13 @@ TEST_CASE("Client: a quote with an unusable author is dropped", "[client][replie
 
     auto target = from_epoch_ms(1000);
     deliver(*c, peer, "the original", target, "h0", "", std::nullopt, nullptr, 999);
-    deliver(*c, peer, "body survives", from_epoch_ms(2000), "h1", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "body survives",
+            from_epoch_ms(2000),
+            "h1",
+            "",
+            std::nullopt,
             [](SessionProtos::DataMessage& d) {
                 auto* q = d.mutable_quote();
                 q->set_msgtimestamp(1000);
@@ -158,7 +194,13 @@ TEST_CASE("Client: a quote with an unusable author is dropped", "[client][replie
             });
     // A well-formed one alongside it, so that "no reply" here means the bad reference was rejected
     // rather than that nothing writes references at all.
-    deliver(*c, peer, "a good reply", from_epoch_ms(3000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "a good reply",
+            from_epoch_ms(3000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, target, 999));
     sync(*c);
 
@@ -183,7 +225,13 @@ TEST_CASE("Client: a reply is re-reported when its target arrives", "[client][re
     auto convo = ConversationId::dm(peer.session_id);
 
     auto target_ts = from_epoch_ms(1000);
-    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "the answer",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, target_ts, 7777));
     sync(*c);
 
@@ -197,9 +245,8 @@ TEST_CASE("Client: a reply is re-reported when its target arrives", "[client][re
     deliver(*c, peer, "the original", target_ts, "h1", "", std::nullopt, nullptr, 7777);
     sync(*c);
 
-    auto reported = std::ranges::find_if(rec.msg_updated, [&](const auto& p) {
-        return p.second.id == reply_id;
-    });
+    auto reported = std::ranges::find_if(
+            rec.msg_updated, [&](const auto& p) { return p.second.id == reply_id; });
     REQUIRE(reported != rec.msg_updated.end());
     REQUIRE(reported->second.reply);
     CHECK(reported->second.reply->message_id.has_value());
@@ -213,7 +260,13 @@ TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][re
 
     auto target_ts = from_epoch_ms(1000);
     deliver(*c, peer, "the original", target_ts, "h1", "", std::nullopt, nullptr, 7777);
-    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "the answer",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, target_ts, 7777));
     sync(*c);
 
@@ -228,12 +281,10 @@ TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][re
 
     // The target itself is reported, and so is the reply that points at it: what it should draw
     // has changed even though its own row has not.
-    CHECK(std::ranges::any_of(rec.msg_updated, [&](const auto& p) {
-        return p.second.id == target_id;
-    }));
-    CHECK(std::ranges::any_of(rec.msg_updated, [&](const auto& p) {
-        return p.second.id == reply_id;
-    }));
+    CHECK(std::ranges::any_of(
+            rec.msg_updated, [&](const auto& p) { return p.second.id == target_id; }));
+    CHECK(std::ranges::any_of(
+            rec.msg_updated, [&](const auto& p) { return p.second.id == reply_id; }));
 }
 
 TEST_CASE("Client: a reply carries the message it answers", "[client][replies]") {
@@ -243,7 +294,13 @@ TEST_CASE("Client: a reply carries the message it answers", "[client][replies]")
 
     auto first = from_epoch_ms(1000);
     deliver(*c, peer, "what was said", first, "h1", "", std::nullopt, nullptr, 7777);
-    deliver(*c, peer, "the answer", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "the answer",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
@@ -268,7 +325,14 @@ TEST_CASE("Client: a quoted attachment-only message arrives whole", "[client][re
 
     // No body at all: exactly the case a body-only summary could not draw.
     auto first = from_epoch_ms(1000);
-    deliver(*c, peer, "", first, "h1", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            first,
+            "h1",
+            "",
+            std::nullopt,
             [](SessionProtos::DataMessage& d) {
                 auto* a = d.add_attachments();
                 a->set_id(1);
@@ -278,7 +342,13 @@ TEST_CASE("Client: a quoted attachment-only message arrives whole", "[client][re
                 a->set_filename("photo.png");
             },
             7777);
-    deliver(*c, peer, "nice one", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "nice one",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
@@ -305,7 +375,13 @@ TEST_CASE("Client: reply loading stops one level down", "[client][replies]") {
     auto b_ts = from_epoch_ms(2000);
     deliver(*c, peer, "A", a_ts, "h1", "", std::nullopt, nullptr, 111);
     deliver(*c, peer, "B", b_ts, "h2", "", std::nullopt, quoting(peer.session_id, a_ts, 111), 222);
-    deliver(*c, peer, "C", from_epoch_ms(3000), "h3", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "C",
+            from_epoch_ms(3000),
+            "h3",
+            "",
+            std::nullopt,
             quoting(peer.session_id, b_ts, 222));
     sync(*c);
 
@@ -334,9 +410,21 @@ TEST_CASE("Client: several replies to one message share one copy", "[client][rep
 
     auto first = from_epoch_ms(1000);
     deliver(*c, peer, "the original", first, "h1", "", std::nullopt, nullptr, 7777);
-    deliver(*c, peer, "answer one", from_epoch_ms(2000), "h2", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "answer one",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
-    deliver(*c, peer, "answer two", from_epoch_ms(3000), "h3", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "answer two",
+            from_epoch_ms(3000),
+            "h3",
+            "",
+            std::nullopt,
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
@@ -362,12 +450,25 @@ TEST_CASE("Client: many distinct reply targets load correctly", "[client][replie
     for (int i = 0; i < n; i++) {
         auto ts = from_epoch_ms(1000 + i);
         stamps.push_back(ts);
-        deliver(*c, peer, "original {}"_format(i), ts, "o{}"_format(i), "", std::nullopt, nullptr,
+        deliver(*c,
+                peer,
+                "original {}"_format(i),
+                ts,
+                "o{}"_format(i),
+                "",
+                std::nullopt,
+                nullptr,
                 100 + i);
     }
     for (int i = 0; i < n; i++)
-        deliver(*c, peer, "answer {}"_format(i), from_epoch_ms(5000 + i), "a{}"_format(i), "",
-                std::nullopt, quoting(peer.session_id, stamps[i], 100 + i));
+        deliver(*c,
+                peer,
+                "answer {}"_format(i),
+                from_epoch_ms(5000 + i),
+                "a{}"_format(i),
+                "",
+                std::nullopt,
+                quoting(peer.session_id, stamps[i], 100 + i));
     sync(*c);
 
     auto msgs = c->conversation(convo, wait)->messages(wait);

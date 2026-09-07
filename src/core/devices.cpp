@@ -846,12 +846,12 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     // Dynamic ss subspan accessor of ml_ss_raw, but *doesn't* go through the pos_map (unlike the
     // above constructs), and only goes up to the actual number of devices, not the padded number
     // (because this is never transmitted, and so not shuffled or padded).
-    auto ml_ss = std::views::iota(size_t{0}, recipients.size()) |
-                 std::views::transform([&](size_t i) {
-                     return std::span<std::byte, mlkem768::SHAREDSECRETBYTES>{
-                             ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES,
-                             mlkem768::SHAREDSECRETBYTES};
-                 });
+    auto ml_ss =
+            std::views::iota(size_t{0}, recipients.size()) | std::views::transform([&](size_t i) {
+                return std::span<std::byte, mlkem768::SHAREDSECRETBYTES>{
+                        ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES,
+                        mlkem768::SHAREDSECRETBYTES};
+            });
 
     cleared_b32 rnd;
     int i = -1;
@@ -1054,7 +1054,7 @@ void Devices::receive_device_group_message(std::span<const std::byte> data) {
         // device that was never in the group: our own row before the group is established, and a
         // denied link request.  Those must still be able to register.
         auto kicked = c.prepared_maybe_get<std::optional<int64_t>>(
-                              "SELECT kicked_timestamp FROM devices WHERE unique_id = ?", id)
+                               "SELECT kicked_timestamp FROM devices WHERE unique_id = ?", id)
                               .value_or(std::nullopt);
         if (kicked) {
             log::warning(

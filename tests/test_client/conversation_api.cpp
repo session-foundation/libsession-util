@@ -105,8 +105,9 @@ TEST_CASE("Client: a conversation knows which kind it is", "[client][convos]") {
     CHECK(convo->unread() == 0);
 }
 
-TEST_CASE("Client: a handler-form operation outlives the conversation it came from",
-          "[client][convos]") {
+TEST_CASE(
+        "Client: a handler-form operation outlives the conversation it came from",
+        "[client][convos]") {
     TempClient c;
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
@@ -156,7 +157,6 @@ TEST_CASE("Client: every conversation kind starts with its base", "[client][conv
     CHECK(static_cast<const void*>(&group) == static_cast<const Conversation*>(&group));
     CHECK(static_cast<const void*>(&community) == static_cast<const Conversation*>(&community));
 }
-
 
 TEST_CASE("Client: auto-download is per conversation and stays here", "[client][convos]") {
     TempClient c;

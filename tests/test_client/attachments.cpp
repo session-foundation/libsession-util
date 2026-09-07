@@ -162,7 +162,8 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[client][attachments]") {
+TEST_CASE(
+        "Client: saving an attachment fetches, decrypts and reports it", "[client][attachments]") {
     TempClient c;
     SenderKeys peer;
     auto* net = attach_mock_network(c->core);
@@ -177,7 +178,14 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     auto seed = random::random(32);
     auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
 
-    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& data) {
                 auto* a = data.add_attachments();
                 a->set_id(1);
@@ -201,7 +209,9 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            msg_id, 0, dest,
+            msg_id,
+            0,
+            dest,
             [&](const AttachmentProgress& p) { reports.push_back(p); },
             [&](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
@@ -256,8 +266,9 @@ TEST_CASE("Client: saving an attachment fetches, decrypts and reports it", "[cli
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing",
-          "[client][attachments]") {
+TEST_CASE(
+        "Client: a save can be kept to ourselves, and a bad one writes nothing",
+        "[client][attachments]") {
     TempClient c;
     SenderKeys peer;
     auto* net = attach_mock_network(c->core);
@@ -287,7 +298,10 @@ TEST_CASE("Client: a save can be kept to ourselves, and a bad one writes nothing
         auto done = std::make_shared<std::promise<std::optional<std::string>>>();
         auto waiter = done->get_future();
         c->Client::save_attachment(
-                msg_id, 0, dest, nullptr,
+                msg_id,
+                0,
+                dest,
+                nullptr,
                 [done](std::optional<std::string> err, std::filesystem::path) {
                     done->set_value(std::move(err));
                 },
@@ -389,7 +403,10 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            msg->id, 0, dest, nullptr,
+            msg->id,
+            0,
+            dest,
+            nullptr,
             [&done](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
             });
@@ -414,8 +431,9 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: a save does not destroy files it was not asked to touch",
-          "[client][attachments]") {
+TEST_CASE(
+        "Client: a save does not destroy files it was not asked to touch",
+        "[client][attachments]") {
     TempClient c;
     auto* net = attach_mock_network(c->core);
 
@@ -454,7 +472,10 @@ TEST_CASE("Client: a save does not destroy files it was not asked to touch",
     std::promise<std::pair<std::optional<std::string>, std::filesystem::path>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            id, 0, dest, nullptr,
+            id,
+            0,
+            dest,
+            nullptr,
             [&done](std::optional<std::string> err, std::filesystem::path where) {
                 done.set_value({std::move(err), std::move(where)});
             });
@@ -474,8 +495,8 @@ TEST_CASE("Client: a save does not destroy files it was not asked to touch",
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: an approved replacement is not renamed out of the way",
-          "[client][attachments]") {
+TEST_CASE(
+        "Client: an approved replacement is not renamed out of the way", "[client][attachments]") {
     TempClient c;
     auto* net = attach_mock_network(c->core);
 
@@ -506,7 +527,10 @@ TEST_CASE("Client: an approved replacement is not renamed out of the way",
     std::promise<std::filesystem::path> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            id, 0, dest, nullptr,
+            id,
+            0,
+            dest,
+            nullptr,
             [&done](std::optional<std::string>, std::filesystem::path where) {
                 done.set_value(std::move(where));
             },
@@ -525,8 +549,9 @@ TEST_CASE("Client: an approved replacement is not renamed out of the way",
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: saving what we sent someone else does not claim they saved it",
-          "[client][attachments]") {
+TEST_CASE(
+        "Client: saving what we sent someone else does not claim they saved it",
+        "[client][attachments]") {
     TempClient c;
     auto* net = attach_mock_network(c->core);
 
@@ -553,8 +578,7 @@ TEST_CASE("Client: saving what we sent someone else does not claim they saved it
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            id, 0, dest, nullptr,
-            [&done](std::optional<std::string> err, std::filesystem::path) {
+            id, 0, dest, nullptr, [&done](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
             });
     sync(*c);
@@ -601,7 +625,8 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
     auto sent = c->message(id, wait);
     REQUIRE(sent.has_value());
     REQUIRE(sent->attachments.size() == 2);
-    // Nobody has said anything yet, and an upload reaching the file server is not someone saving it.
+    // Nobody has said anything yet, and an upload reaching the file server is not someone saving
+    // it.
     CHECK_FALSE(sent->attachments[0].saved_at.has_value());
     CHECK_FALSE(sent->attachments[1].saved_at.has_value());
 
@@ -630,11 +655,13 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
     };
 
     auto saved_at = from_epoch_ms(9'000'000);
-    notify([&](auto* note) {
-        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
-        note->set_msgid(msgid);
-        note->set_attindex(1);
-    }, saved_at);
+    notify(
+            [&](auto* note) {
+                note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+                note->set_msgid(msgid);
+                note->set_attindex(1);
+            },
+            saved_at);
 
     auto after = c->message(id, wait);
     REQUIRE(after.has_value());
@@ -646,11 +673,13 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
 
     // -1 is "all of them, together", which is what saving from a gallery view reports.
     auto all_at = from_epoch_ms(9'500'000);
-    notify([&](auto* note) {
-        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
-        note->set_msgid(msgid);
-        note->set_attindex(-1);
-    }, all_at);
+    notify(
+            [&](auto* note) {
+                note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+                note->set_msgid(msgid);
+                note->set_attindex(-1);
+            },
+            all_at);
 
     auto all = c->message(id, wait);
     REQUIRE(all->attachments[0].saved_at == all_at);
@@ -661,11 +690,13 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
     // A notification naming a message we do not have changes nothing, and neither does one that
     // names no message at all -- which is every notification the other clients send today, since
     // their `timestamp` field means something different in each of them.
-    notify([&](auto* note) {
-        note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
-        note->set_msgid(msgid + 1);
-        note->set_attindex(0);
-    }, from_epoch_ms(9'900'000));
+    notify(
+            [&](auto* note) {
+                note->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(sent->timestamp)));
+                note->set_msgid(msgid + 1);
+                note->set_attindex(0);
+            },
+            from_epoch_ms(9'900'000));
     notify([&](auto* note) { note->set_timestamp(12345); }, from_epoch_ms(9'900'000));
 
     auto unchanged = c->message(id, wait);
@@ -705,7 +736,14 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
 
     // No `d` fragment on the url, a 64-byte key and a digest: that combination is what tells the
     // save which of the two schemes to use, and nothing else does.
-    deliver(*c, peer, "", from_epoch_ms(3000), "legacy_hash", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(3000),
+            "legacy_hash",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& data) {
                 auto* a = data.add_attachments();
                 a->set_id(9);
@@ -713,8 +751,7 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
                 a->set_key(std::string{
                         reinterpret_cast<const char*>(LEGACY_KEY.data()), LEGACY_KEY.size()});
                 a->set_digest(std::string{
-                        reinterpret_cast<const char*>(LEGACY_DIGEST.data()),
-                        LEGACY_DIGEST.size()});
+                        reinterpret_cast<const char*>(LEGACY_DIGEST.data()), LEGACY_DIGEST.size()});
                 a->set_size(LEGACY_TEXT.size());
                 a->set_filename("legacy.txt");
             },
@@ -732,7 +769,10 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            msgs[0].id, 0, dest, nullptr,
+            msgs[0].id,
+            0,
+            dest,
+            nullptr,
             [&done](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
             });
@@ -795,7 +835,8 @@ TEST_CASE(
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
             [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
                 reports.emplace_back(idx, sent, total, result);
-            }, wait);
+            },
+            wait);
     sync(*c);
 
     auto msg = c->message(id, wait);
@@ -833,9 +874,8 @@ TEST_CASE(
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
-            [&](size_t, int64_t, int64_t, std::optional<int> result) {
-                results.push_back(result);
-            }, wait);
+            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
+            wait);
     sync(*c);
 
     // With no network the upload cannot start, so the one report is its failure -- which is the
@@ -872,9 +912,7 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     std::vector<std::optional<int>> results;
     CHECK(c->retry_send(
             id,
-            [&](size_t, int64_t, int64_t, std::optional<int> result) {
-                results.push_back(result);
-            },
+            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
             wait));
     sync(*c);
     REQUIRE(results.size() == 1);
@@ -887,9 +925,7 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     results.clear();
     CHECK(c->retry_send(
             id,
-            [&](size_t, int64_t, int64_t, std::optional<int> result) {
-                results.push_back(result);
-            },
+            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
             wait));
     sync(*c);
     REQUIRE(results.size() == 1);
@@ -900,15 +936,15 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     CHECK_FALSE(c->retry_send(id, wait));
 }
 
-TEST_CASE("Client: a stream attachment must be the size its sender claimed",
-          "[client][attachments][size]") {
+TEST_CASE(
+        "Client: a stream attachment must be the size its sender claimed",
+        "[client][attachments][size]") {
     // The pointer's size is exact -- the file server is told the byte count up front and refuses
     // anything else -- so a file that decrypts to a different length is not a file we asked for.
     // Nothing else catches this for a stream attachment: the format strips its own padding and
     // never consults the pointer, so before this the claim was simply ignored.
     // One short, one long: over-reporting and under-reporting are both lies.
     int64_t claimed = GENERATE(8999, 9001);
-
 
     TempClient c;
     SenderKeys peer;
@@ -919,7 +955,14 @@ TEST_CASE("Client: a stream attachment must be the size its sender claimed",
     auto seed = random::random(32);
     auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
 
-    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
             [&, claimed](SessionProtos::DataMessage& data) {
                 auto* a = data.add_attachments();
                 a->set_id(1);
@@ -961,7 +1004,8 @@ TEST_CASE("Client: a stream attachment must be the size its sender claimed",
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("Client: two askers for one attachment share one download", "[client][attachments][join]") {
+TEST_CASE(
+        "Client: two askers for one attachment share one download", "[client][attachments][join]") {
     // A conversation opening while its attachments are being fetched asks for bytes that are not in
     // the cache yet.  Without joining, that starts a second download of the same file: the cache is
     // still empty, so a display sees a miss and fetches it again.
@@ -977,7 +1021,14 @@ TEST_CASE("Client: two askers for one attachment share one download", "[client][
     auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
     net->served["shared"] = ciphertext;
 
-    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& data) {
                 auto* a = data.add_attachments();
                 a->set_id(1);
@@ -994,7 +1045,8 @@ TEST_CASE("Client: two askers for one attachment share one download", "[client][
     std::vector<std::vector<AttachmentProgress>> seen(2);
     for (int i = 0; i < 2; i++)
         c->attachment_data(
-                msg_id, 0,
+                msg_id,
+                0,
                 [&, i](const AttachmentProgress& p) { seen[i].push_back(p); },
                 [&, i](std::optional<std::string> err, std::vector<std::byte> d) {
                     REQUIRE_FALSE(err.has_value());
@@ -1025,11 +1077,11 @@ TEST_CASE("Client: two askers for one attachment share one download", "[client][
     // And having finished, a third ask is served from the cache with no download at all.
     net->downloads.clear();
     std::optional<std::vector<std::byte>> third;
-    c->attachment_data(msg_id, 0, nullptr,
-                       [&](std::optional<std::string> err, std::vector<std::byte> d) {
-                           REQUIRE_FALSE(err.has_value());
-                           third = std::move(d);
-                       });
+    c->attachment_data(
+            msg_id, 0, nullptr, [&](std::optional<std::string> err, std::vector<std::byte> d) {
+                REQUIRE_FALSE(err.has_value());
+                third = std::move(d);
+            });
     sync(*c);
     CHECK(net->downloads.empty());
     REQUIRE(third);
@@ -1057,7 +1109,14 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
     net->served["both"] = ciphertext;
 
-    deliver(*c, peer, "", from_epoch_ms(1000), "h1", "", std::nullopt,
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& data) {
                 auto* a = data.add_attachments();
                 a->set_id(1);
@@ -1072,11 +1131,11 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
 
     // A display asks first, so the file is being accumulated.
     std::optional<std::vector<std::byte>> shown;
-    c->attachment_data(msg_id, 0, nullptr,
-                       [&](std::optional<std::string> err, std::vector<std::byte> d) {
-                           REQUIRE_FALSE(err.has_value());
-                           shown = std::move(d);
-                       });
+    c->attachment_data(
+            msg_id, 0, nullptr, [&](std::optional<std::string> err, std::vector<std::byte> d) {
+                REQUIRE_FALSE(err.has_value());
+                shown = std::move(d);
+            });
     sync(*c);
     REQUIRE(net->downloads.size() == 1);
 
@@ -1086,7 +1145,9 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     std::promise<std::optional<std::string>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
-            msg_id, 0, dest,
+            msg_id,
+            0,
+            dest,
             [&](const AttachmentProgress& p) { saw.push_back(p); },
             [&](std::optional<std::string> err, std::filesystem::path) {
                 done.set_value(std::move(err));
@@ -1143,7 +1204,13 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
     net->served["doc"] = doc_ct;
 
     auto arrive = [&](std::string hash, bool with_doc) {
-        deliver(*c, peer, "", from_epoch_ms(1000), hash, "", std::nullopt,
+        deliver(*c,
+                peer,
+                "",
+                from_epoch_ms(1000),
+                hash,
+                "",
+                std::nullopt,
                 [&](SessionProtos::DataMessage& data) {
                     auto* a = data.add_attachments();
                     a->set_id(1);
@@ -1228,9 +1295,10 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         CHECK(progress.back().second.result == 0);
 
         // In the cache, so opening the conversation costs nothing...
-        CHECK(std::filesystem::exists(
-                cache::path_for(dir.path, cache::ATTACHMENT_DIR,
-                                network::file_server::generate_download_url("img", {}, true))));
+        CHECK(std::filesystem::exists(cache::path_for(
+                dir.path,
+                cache::ATTACHMENT_DIR,
+                network::file_server::generate_download_url("img", {}, true))));
 
         // ...and the sender is *not* told, because nobody has saved anything.  That notification
         // belongs to a save, whether or not the bytes came from the cache.
@@ -1269,13 +1337,18 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
         auto url = network::file_server::generate_download_url(file_id, {}, true);
         urls.push_back(url);
 
-        deliver(*c, peer, "", from_epoch_ms(1000 + i), "h{}"_format(i), "", std::nullopt,
+        deliver(*c,
+                peer,
+                "",
+                from_epoch_ms(1000 + i),
+                "h{}"_format(i),
+                "",
+                std::nullopt,
                 [&, url](SessionProtos::DataMessage& d) {
                     auto* a = d.add_attachments();
                     a->set_id(static_cast<uint64_t>(i + 1));
                     a->set_url(url);
-                    a->set_key(std::string{
-                            reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
                     a->set_size(data.size());
                     a->set_contenttype("image/png");
                 });
@@ -1298,7 +1371,8 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     sync(*c);
 
     // Now a limit that only two of the three fit under.
-    auto one = std::filesystem::file_size(cache::path_for(dir.path, cache::ATTACHMENT_DIR, urls[0]));
+    auto one =
+            std::filesystem::file_size(cache::path_for(dir.path, cache::ATTACHMENT_DIR, urls[0]));
     c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), wait);
 
     // Nothing happens until something is added, which is the only moment the total can grow.
@@ -1311,7 +1385,13 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     auto [more_ct, more_key] = attachment::encrypt(seed, more, attachment::Domain::ATTACHMENT);
     net->served["f3"] = more_ct;
     auto more_url = network::file_server::generate_download_url("f3", {}, true);
-    deliver(*c, peer, "", from_epoch_ms(2000), "h3", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(2000),
+            "h3",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& d) {
                 auto* a = d.add_attachments();
                 a->set_id(9);
@@ -1337,8 +1417,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     auto rows = c->core.database().conn().prepared_get<int64_t>(
             "SELECT count(*) FROM attachment_cache");
     size_t on_disk = 0;
-    for (const auto& e :
-         std::filesystem::directory_iterator{dir.path / cache::ATTACHMENT_DIR})
+    for (const auto& e : std::filesystem::directory_iterator{dir.path / cache::ATTACHMENT_DIR})
         if (!e.path().filename().string().ends_with(cache::PARTIAL_SUFFIX))
             on_disk++;
     CHECK(static_cast<size_t>(rows) == on_disk);
@@ -1363,13 +1442,18 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     net->served["real"] = ct;
     auto url = network::file_server::generate_download_url("real", {}, true);
 
-    deliver(*c, peer, "", from_epoch_ms(1000), "hh", "", std::nullopt,
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "hh",
+            "",
+            std::nullopt,
             [&](SessionProtos::DataMessage& d) {
                 auto* a = d.add_attachments();
                 a->set_id(1);
                 a->set_url(url);
-                a->set_key(
-                        std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
                 a->set_size(data.size());
                 a->set_contenttype("image/png");
             });
@@ -1409,9 +1493,10 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     c->set_cache_dir(dir.path);
 
     // Reopened *again* rather than waited on, because destruction is what a sweep is guaranteed
-    // against: the destructor joins the sweeper, and the sweeper does not finish until the reconcile
-    // it posted has run.  A `sync` here would only prove the loop was idle, which it is well before
-    // the listing is done.  This one is given no cache directory, so it does not sweep in turn.
+    // against: the destructor joins the sweeper, and the sweeper does not finish until the
+    // reconcile it posted has run.  A `sync` here would only prove the loop was idle, which it is
+    // well before the listing is done.  This one is given no cache directory, so it does not sweep
+    // in turn.
     c.reopen();
 
     CHECK(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / real_name));

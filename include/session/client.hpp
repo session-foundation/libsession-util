@@ -1,9 +1,8 @@
 #pragma once
 
-#include <oxen/quic/loop.hpp>
-
 #include <filesystem>
 #include <optional>
+#include <oxen/quic/loop.hpp>
 #include <session/client/attachment.hpp>
 #include <session/client/callbacks.hpp>
 #include <session/client/conversation.hpp>
@@ -62,7 +61,7 @@ namespace SessionProtos {
 class Content;
 class DataExtractionNotification;
 class UnsendRequest;
-}
+}  // namespace SessionProtos
 
 namespace session::client {
 
@@ -232,9 +231,9 @@ class Client {
     /// Sends to a conversation named by id, creating it if it does not exist.
     ///
     /// The same operation as `Conversation::send_message`, and forwards to it; it is here as well
-    /// because this is the one thing that cannot require a conversation to already exist — messaging
-    /// an account you have never spoken to is how the conversation begins.  With one in hand, send
-    /// through it and skip the lookup.
+    /// because this is the one thing that cannot require a conversation to already exist —
+    /// messaging an account you have never spoken to is how the conversation begins.  With one in
+    /// hand, send through it and skip the lookup.
     ///
     /// See `Conversation::send_message` for what the arguments mean and what `on_upload` reports.
     ///
@@ -258,7 +257,6 @@ class Client {
             wait_t);
     int64_t send_message(const ConversationId& id, OutgoingMessage msg, wait_t);
 
-
     /// Sends a failed message again, resuming rather than restarting: attachments that already
     /// reached the file server are left alone and only the ones that did not are uploaded, because
     /// what each upload achieved is recorded against the message.  A message whose files all got
@@ -279,8 +277,7 @@ class Client {
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
             failable_function<void(bool started)> cb);
-    bool retry_send(
-            int64_t message_id, Conversation::upload_progress on_upload, wait_t);
+    bool retry_send(int64_t message_id, Conversation::upload_progress on_upload, wait_t);
     bool retry_send(int64_t message_id, wait_t);
 
     /// Deletes one message from this device: its body, its decrypted content and everything it
@@ -295,8 +292,8 @@ class Client {
     /// looking new.
     ///
     /// Files are not touched.  An attachment's path names a file the user chose -- one they picked
-    /// to send, or a place they asked a download to be put -- so it is theirs in both directions and
-    /// nothing here has ever unlinked one.  The rows that described the attachments do go.
+    /// to send, or a place they asked a download to be put -- so it is theirs in both directions
+    /// and nothing here has ever unlinked one.  The rows that described the attachments do go.
     ///
     /// Deleting an unread incoming message makes it read, since there is no longer anything to
     /// read; the conversation's unread count follows.
@@ -395,8 +392,7 @@ class Client {
     /// stored wire form, one whose content has been deleted, and one whose content some later
     /// pruning removed.  Also nullopt if the stored bytes no longer parse, which is corruption
     /// rather than absence and is logged as such.
-    void message_debug(
-            int64_t message_id, failable_function<void(std::optional<std::string>)> cb);
+    void message_debug(int64_t message_id, failable_function<void(std::optional<std::string>)> cb);
     std::optional<std::string> message_debug(int64_t message_id, wait_t);
 
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
@@ -412,11 +408,12 @@ class Client {
     /// `dest` and is renamed only once it has been decrypted and verified, so an interrupted save
     /// leaves no half-file that looks finished.
     ///
-    /// **`cb` reports where it actually went**, which is not always `dest`.  Whether `dest` was free
-    /// is something the caller decided when it asked its user; the rename happens when the download
-    /// finishes, which may be minutes later, and anything that has appeared there in between is a
-    /// file nobody agreed to lose.  So by default the finished file takes the next free `name (2)`
-    /// instead — before the extension, since only that still opens on a double-click.
+    /// **`cb` reports where it actually went**, which is not always `dest`.  Whether `dest` was
+    /// free is something the caller decided when it asked its user; the rename happens when the
+    /// download finishes, which may be minutes later, and anything that has appeared there in
+    /// between is a file nobody agreed to lose.  So by default the finished file takes the next
+    /// free `name (2)` instead — before the extension, since only that still opens on a
+    /// double-click.
     ///
     /// A caller whose user has *already* been shown what is there and said replace it passes
     /// `replace` and gets `dest` whatever has happened since.  That is not the same decision and
@@ -440,8 +437,8 @@ class Client {
     /// false is not overruled.
     ///
     /// Which of Session's two attachment encryptions applies is read from the url, so a caller
-    /// neither chooses nor needs to know: current clients still send the legacy scheme, and files we
-    /// send use the stream one.
+    /// neither chooses nor needs to know: current clients still send the legacy scheme, and files
+    /// we send use the stream one.
     ///
     /// The error a failure reports is worth showing rather than a generic one: an attachment that
     /// the file server no longer holds, one whose sender described it wrongly, and one that failed
@@ -481,17 +478,16 @@ class Client {
     /// nothing else writes.  Point this at a directory with other things in it and they will go.
     ///
     /// Calling this starts one such pass, in the background, against what the database says should
-    /// be there.  It is a net for what no code of ours was running to see -- a crash between writing
-    /// a file and recording it, a contact whose row went by cascade -- so it is done once, here,
-    /// rather than on a timer: those are things that happen while we are not looking, and this is
-    /// the moment we look.  It runs off the event loop and reports only to the log.
+    /// be there.  It is a net for what no code of ours was running to see -- a crash between
+    /// writing a file and recording it, a contact whose row went by cascade -- so it is done once,
+    /// here, rather than on a timer: those are things that happen while we are not looking, and
+    /// this is the moment we look.  It runs off the event loop and reports only to the log.
     ///
     /// Contents are encrypted under a key generated once and kept in the database, so they outlive
     /// the message or config entry whose key originally opened them — and so the files are not
     /// readable by whoever ends up with the disk.  That protection is only as good as the
     /// database's: with an unencrypted database the key sits in plaintext beside them.
     void set_cache_dir(std::filesystem::path dir);
-
 
     /// A conversation's picture, decrypted and ready to decode.
     ///
@@ -579,8 +575,8 @@ class Client {
     /// Whether to tell somebody when we save a file they sent us.
     ///
     /// Follows the account, so turning it off on one device turns it off everywhere.  Composes with
-    /// `save_attachment`'s `notify_sender` in one direction only: this can refuse a notification and
-    /// cannot require one, so a caller passing false is never overruled, and a client with no
+    /// `save_attachment`'s `notify_sender` in one direction only: this can refuse a notification
+    /// and cannot require one, so a caller passing false is never overruled, and a client with no
     /// setting of its own still honours a choice made elsewhere.
     void notify_media_saved(failable_function<void(bool)> cb);
     bool notify_media_saved(wait_t);
@@ -733,7 +729,8 @@ class Client {
     // Writes `data` into the attachment cache under `url`, and records it.  The row is an index
     // over the file, so it is written after the file exists.
     void _cache_attachment(
-            const std::string& url, std::span<const std::byte, 32> key,
+            const std::string& url,
+            std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
     void _touch_cached(const std::string& name);
@@ -780,8 +777,7 @@ class Client {
 
     // The deciding half of `_sweep_cache`, on the loop.  Takes the directory listings because
     // taking them is the slow part and does not belong here.
-    void _reconcile_cache(
-            std::vector<std::string> attachments, std::vector<std::string> pictures);
+    void _reconcile_cache(std::vector<std::string> attachments, std::vector<std::string> pictures);
 
     // Runs the listing half of a sweep.  Joined before anything it touches goes away, which is why
     // it hands its result back with `call_get`: joining a thread that had merely *posted* a job
@@ -793,7 +789,6 @@ class Client {
             size_t index,
             std::function<void(const AttachmentProgress&)> on_progress,
             failable_function<void(std::vector<std::byte>)> cb);
-
 
     // Decides what an arriving message's attachments are worth fetching unasked, sets whether it is
     // shown as a gallery, and starts whatever it decided on.  Does nothing without a cache
@@ -828,7 +823,6 @@ class Client {
             const ConversationId& id,
             const OutgoingMessage& msg,
             std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
-
 
     // Uploads the message's first attachment that has no url yet and, when there are none left,
     // finishes the send.  Each upload's completion calls this again, so the chain runs one file at
@@ -865,8 +859,8 @@ class Client {
     // which are different for no reason anyone chose — see `attachment::legacy_display_pic_decrypt`
     // — and which nothing in the bytes distinguishes.
     enum class DownloadKind {
-        attachment,    ///< A file sent with a message.
-        display_pic,   ///< A profile picture or a group avatar.
+        attachment,   ///< A file sent with a message.
+        display_pic,  ///< A profile picture or a group avatar.
     };
 
     // Downloads `url`, decrypts it, and hands the plaintext to `on_plain` — possibly in pieces, and
@@ -883,9 +877,9 @@ class Client {
     //   - no key at all -> plaintext.  Community images are stored that way.
     //
     // `kind` is a parameter rather than something inferred from the key's length because the caller
-    // knows which it asked for, and inference would be a guess standing in for a fact: it happens to
-    // work today only because the two legacy key sizes differ, and would misroute silently the first
-    // time something else turned up with a 32-byte key and no `d`.
+    // knows which it asked for, and inference would be a guess standing in for a fact: it happens
+    // to work today only because the two legacy key sizes differ, and would misroute silently the
+    // first time something else turned up with a 32-byte key and no `d`.
     //
     // The stream scheme decrypts as it arrives; both legacy ones have to accumulate, because their
     // authentication covers the whole ciphertext and cannot be checked until all of it is here.
@@ -895,11 +889,11 @@ class Client {
     // each chunk as it arrives, so a failure surfaces when the bad chunk does -- which may be the
     // first or may be most of the way in, but is not "once the whole file is here".
     //
-    // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment adds
-    // its own index.  `on_done` fires exactly once, with the failure if there was one.
+    // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment
+    // adds its own index.  `on_done` fires exactly once, with the failure if there was one.
     //
-    // Throws, before starting anything, if the url is not a download url, if no network is attached,
-    // or if the key or digest is the wrong length for the scheme that resolves to.
+    // Throws, before starting anything, if the url is not a download url, if no network is
+    // attached, or if the key or digest is the wrong length for the scheme that resolves to.
     void _download_decrypted(
             const std::string& url,
             DownloadKind kind,
@@ -922,9 +916,9 @@ class Client {
     // Serves a file from the cache, joins a fetch of it already running, or starts one.
     //
     // The joining is what this exists for.  Two things want the same file routinely -- an arrival
-    // starts a download and the display then asks for the very thing being downloaded -- so a second
-    // request attaches to the first, picking up its progress from wherever it has reached, rather
-    // than fetching the same bytes twice and caching them twice.
+    // starts a download and the display then asks for the very thing being downloaded -- so a
+    // second request attaches to the first, picking up its progress from wherever it has reached,
+    // rather than fetching the same bytes twice and caching them twice.
     //
     // `on_hit` runs when the cache answered and `store` after a fetch completes, both on the loop.
     // They are the whole of the difference between a cached attachment, which is indexed and
@@ -950,8 +944,7 @@ class Client {
 
     // Fetches a display picture into the cache for nobody in particular, reporting to
     // `display_picture_progress` as it goes.
-    void _fetch_picture(
-            const ConversationId& id, std::string url, std::vector<std::byte> key);
+    void _fetch_picture(const ConversationId& id, std::string url, std::vector<std::byte> key);
 
     // Starts the download behind save_attachment.  Everything after the row lookup happens off the
     // loop, on the network's thread: the file is decrypted and written there, and nothing about it
@@ -1089,8 +1082,9 @@ class Client {
     //
     // Re-derived from the rows rather than applied alongside each change, so the mapping lives in
     // one place and cannot drift from the tables it describes: a caller has to remember to call
-    // this, but it cannot remember to call it *wrongly*.  Idempotent -- assigning a config field its
-    // existing value does not dirty it -- so it is safe to call whenever a row might have moved.
+    // this, but it cannot remember to call it *wrongly*.  Idempotent -- assigning a config field
+    // its existing value does not dirty it -- so it is safe to call whenever a row might have
+    // moved.
     //
     // Not for our own account: our profile is UserProfile's, and we are not a contact.
     void _sync_contact(const ConversationId& id);

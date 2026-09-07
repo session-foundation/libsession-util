@@ -130,8 +130,8 @@ class Conversation {
     ///
     /// Deleted messages are left out unless `include_deleted` is passed.  Out by default because a
     /// deleted message carries no body, so a caller that has not thought about `Message::deleted`
-    /// would draw an empty row that looks like a bug.  A client that wants to show "message deleted"
-    /// asks for them, and gets them in place, in order.
+    /// would draw an empty row that looks like a bug.  A client that wants to show "message
+    /// deleted" asks for them, and gets them in place, in order.
     ///
     /// Filtered in the query rather than left to the caller, because the alternative breaks paging:
     /// a page of 50 that is mostly deleted would hand back a handful of rows with nothing to say
@@ -151,21 +151,18 @@ class Conversation {
     std::vector<Message> messages(int limit, wait_t) const;
     std::vector<Message> messages(int limit, std::optional<MessageCursor> before, wait_t) const;
     std::vector<Message> messages(
-            int limit,
-            std::optional<MessageCursor> before,
-            bool include_deleted,
-            wait_t) const;
+            int limit, std::optional<MessageCursor> before, bool include_deleted, wait_t) const;
 
     /// Removes every deleted message's leftover row from this conversation, and says how many went.
     ///
-    /// A deletion leaves a row behind deliberately — see `Client::delete_message` — and this is what
-    /// finally removes them, for a client that would rather not accumulate them or show them.
+    /// A deletion leaves a row behind deliberately — see `Client::delete_message` — and this is
+    /// what finally removes them, for a client that would rather not accumulate them or show them.
     ///
     /// **This can bring a message back.** A message deleted only here is still in our swarm, and
-    /// that row's swarm hash is the only thing that recognises it if it is delivered again — which a
-    /// storage server makes likely rather than hypothetical, since it stops honouring a `last_hash`
-    /// once that has expired and answers the next poll with the whole retention window.  Removing
-    /// the row removes the memory of it, and the message returns looking new.
+    /// that row's swarm hash is the only thing that recognises it if it is delivered again — which
+    /// a storage server makes likely rather than hypothetical, since it stops honouring a
+    /// `last_hash` once that has expired and answers the next poll with the whole retention window.
+    /// Removing the row removes the memory of it, and the message returns looking new.
     ///
     /// The alternative — deleting our swarm copy too, so there is nothing to come back — is worse
     /// and is deliberately not done: that copy is what our *other devices* poll, so destroying it
@@ -220,9 +217,7 @@ class Conversation {
     /// alone: a timer with no mode does not expire, and a mode with no timer has nothing to count.
     /// `expiration_mode::none` clears the timer whatever is passed with it.
     void set_expiry(
-            config::expiration_mode mode,
-            std::chrono::seconds timer,
-            failable_function<void()> cb);
+            config::expiration_mode mode, std::chrono::seconds timer, failable_function<void()> cb);
     void set_expiry(config::expiration_mode mode, std::chrono::seconds timer, wait_t);
 
     /// Sets what this conversation fetches without being asked.
@@ -292,10 +287,11 @@ class Conversation {
     /// @throws std::invalid_argument if any attachment's file cannot be opened or exceeds the file
     /// server's limit, or if `reply_to` names a message that does not exist or belongs to another
     /// conversation; thrown on the calling thread, before anything is stored or dispatched.
-    using upload_progress =
-            std::function<void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>;
+    using upload_progress = std::function<void(
+            size_t index, int64_t sent, int64_t total, std::optional<int> result)>;
     void send_message(
-            OutgoingMessage msg, upload_progress on_upload,
+            OutgoingMessage msg,
+            upload_progress on_upload,
             failable_function<void(int64_t message_id)> cb);
     void send_message(OutgoingMessage msg, failable_function<void(int64_t message_id)> cb);
     int64_t send_message(OutgoingMessage msg, upload_progress on_upload, wait_t);
@@ -497,14 +493,14 @@ class AnyConversation {
 
 // Forwarded rather than reimplemented, so that an overload added to Conversation is reachable here
 // without anything being added below.
-#define SESSION_CONVO_FORWARD(name)                                        \
-    template <typename... A>                                               \
-    decltype(auto) name(A&&... a) {                                        \
-        return base().name(std::forward<A>(a)...);                         \
-    }                                                                      \
-    template <typename... A>                                               \
-    decltype(auto) name(A&&... a) const {                                  \
-        return base().name(std::forward<A>(a)...);                         \
+#define SESSION_CONVO_FORWARD(name)                \
+    template <typename... A>                       \
+    decltype(auto) name(A&&... a) {                \
+        return base().name(std::forward<A>(a)...); \
+    }                                              \
+    template <typename... A>                       \
+    decltype(auto) name(A&&... a) const {          \
+        return base().name(std::forward<A>(a)...); \
     }
 
     SESSION_CONVO_FORWARD(messages)

@@ -7,17 +7,18 @@
 // rather than split by direction.
 //
 // **A handler form must not capture `this`.**  It returns before the work runs, and the caller is
-// under no obligation to keep this object alive until then: the natural way to write any of these is
-// on a temporary (`client.conversation(id, …)` hands one to a handler, and
+// under no obligation to keep this object alive until then: the natural way to write any of these
+// is on a temporary (`client.conversation(id, …)` hands one to a handler, and
 // `*client.conversation(id, wait)` is a temporary outright), and a list element dies whenever the
 // list is replaced.  So each captures the two things the work needs -- the Client, which outlives
 // everything here, and the id, which is a value -- and nothing else.  Capturing `this` reads the id
 // out of freed memory, which surfaces as a `ConversationId::Type` outside the enum and an
 // "unhandled conversation kind" from a long way away.
 //
-// The waiting forms are exempt: `call_get` runs the work before returning, inline when it is already
-// the loop's thread, so there is no window in which the object could have gone.  That asymmetry is
-// also why tests written entirely in the waiting form prove nothing about the handler form.
+// The waiting forms are exempt: `call_get` runs the work before returning, inline when it is
+// already the loop's thread, so there is no window in which the object could have gone.  That
+// asymmetry is also why tests written entirely in the waiting form prove nothing about the handler
+// form.
 
 namespace session::client {
 
@@ -107,16 +108,16 @@ void Conversation::set_priority(int priority, wait_t) {
 }
 
 void Conversation::set_notifications(config::notify_mode mode, failable_function<void()> cb) {
-    _client->_async([c = _client, id = id, mode] { c->_set_notifications(id, mode); },
-                    std::move(cb));
+    _client->_async(
+            [c = _client, id = id, mode] { c->_set_notifications(id, mode); }, std::move(cb));
 }
 void Conversation::set_notifications(config::notify_mode mode, wait_t) {
     _client->loop.call_get([this, mode] { _client->_set_notifications(id, mode); });
 }
 
 void Conversation::set_mute_until(std::chrono::sys_seconds until, failable_function<void()> cb) {
-    _client->_async([c = _client, id = id, until] { c->_set_mute_until(id, until); },
-                    std::move(cb));
+    _client->_async(
+            [c = _client, id = id, until] { c->_set_mute_until(id, until); }, std::move(cb));
 }
 void Conversation::set_mute_until(std::chrono::sys_seconds until, wait_t) {
     _client->loop.call_get([this, until] { _client->_set_mute_until(id, until); });
@@ -124,16 +125,17 @@ void Conversation::set_mute_until(std::chrono::sys_seconds until, wait_t) {
 
 void Conversation::set_expiry(
         config::expiration_mode mode, std::chrono::seconds timer, failable_function<void()> cb) {
-    _client->_async([c = _client, id = id, mode, timer] { c->_set_expiry(id, mode, timer); },
-                    std::move(cb));
+    _client->_async(
+            [c = _client, id = id, mode, timer] { c->_set_expiry(id, mode, timer); },
+            std::move(cb));
 }
 void Conversation::set_expiry(config::expiration_mode mode, std::chrono::seconds timer, wait_t) {
     _client->loop.call_get([this, mode, timer] { _client->_set_expiry(id, mode, timer); });
 }
 
 void Conversation::set_auto_download(AutoDownload mode, failable_function<void()> cb) {
-    _client->_async([c = _client, id = id, mode] { c->_set_auto_download(id, mode); },
-                    std::move(cb));
+    _client->_async(
+            [c = _client, id = id, mode] { c->_set_auto_download(id, mode); }, std::move(cb));
 }
 void Conversation::set_auto_download(AutoDownload mode, wait_t) {
     _client->loop.call_get([this, mode] { _client->_set_auto_download(id, mode); });
@@ -142,7 +144,8 @@ void Conversation::set_auto_download(AutoDownload mode, wait_t) {
 // -- Sending ------------------------------------------------------------------------------------
 
 void Conversation::send_message(
-        OutgoingMessage msg, upload_progress on_upload,
+        OutgoingMessage msg,
+        upload_progress on_upload,
         failable_function<void(int64_t message_id)> cb) {
     _client->_require_sendable("send_message", id, msg);
     _client->_async(
@@ -160,9 +163,8 @@ int64_t Conversation::send_message(OutgoingMessage msg, wait_t) {
 }
 int64_t Conversation::send_message(OutgoingMessage msg, upload_progress on_upload, wait_t) {
     _client->_require_sendable("send_message", id, msg);
-    return _client->loop.call_get([&] {
-        return _client->_send_message(id, msg, std::move(on_upload));
-    });
+    return _client->loop.call_get(
+            [&] { return _client->_send_message(id, msg, std::move(on_upload)); });
 }
 
 // -- Destroying ---------------------------------------------------------------------------------
@@ -190,17 +192,16 @@ void Conversation::delete_conversation(wait_t) {
 }
 void Conversation::delete_conversation(bool keep_messages, wait_t) {
     _client->_require_dm("delete_conversation", id);
-    _client->loop.call_get([this, keep_messages] {
-        _client->_delete_conversation(id, keep_messages);
-    });
+    _client->loop.call_get(
+            [this, keep_messages] { _client->_delete_conversation(id, keep_messages); });
 }
 
 // -- One-to-one only ----------------------------------------------------------------------------
 
 void DM::set_blocked(bool blocked, failable_function<void()> cb) {
     _client->_require_contact("set_blocked", id);
-    _client->_async([c = _client, id = id, blocked] { c->_set_blocked(id, blocked); },
-                    std::move(cb));
+    _client->_async(
+            [c = _client, id = id, blocked] { c->_set_blocked(id, blocked); }, std::move(cb));
 }
 void DM::set_blocked(bool blocked, wait_t) {
     _client->_require_contact("set_blocked", id);
@@ -210,7 +211,9 @@ void DM::set_blocked(bool blocked, wait_t) {
 void DM::set_nickname(std::string_view nickname, failable_function<void()> cb) {
     _client->_require_contact("set_nickname", id);
     _client->_async(
-            [c = _client, id = id, nickname = std::string{nickname}] { c->_set_nickname(id, nickname); },
+            [c = _client, id = id, nickname = std::string{nickname}] {
+                c->_set_nickname(id, nickname);
+            },
             std::move(cb));
 }
 void DM::set_nickname(std::string_view nickname, wait_t) {

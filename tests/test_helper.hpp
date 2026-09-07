@@ -3,16 +3,15 @@
 #include <fmt/format.h>
 #include <oxenc/base64.h>
 
+#include <filesystem>
 #include <fstream>
 #include <map>
-#include <session/attachments.hpp>
-#include <session/network/backends/session_file_server.hpp>
-
-#include <filesystem>
 #include <nlohmann/json.hpp>
+#include <session/attachments.hpp>
 #include <session/core.hpp>
-#include <session/format.hpp>
 #include <session/core/devices.hpp>
+#include <session/format.hpp>
+#include <session/network/backends/session_file_server.hpp>
 #include <session/network/key_types.hpp>
 #include <session/network/routing/network_router.hpp>
 #include <session/network/session_network.hpp>
@@ -77,8 +76,7 @@ class MockNetwork : public network::Network {
     std::map<std::string, std::vector<std::byte>> served;
     int next_file_id = 1000;
 
-    void upload_file(
-            network::FileUploadRequest request, std::span<const std::byte> seed) override {
+    void upload_file(network::FileUploadRequest request, std::span<const std::byte> seed) override {
         // Encrypted the same way the routers do it, so what a save reads back is what a real
         // upload would have left on the server: same scheme, same padding, same key derivation.
         std::vector<std::byte> plain;
@@ -93,8 +91,7 @@ class MockNetwork : public network::Network {
         auto id = std::to_string(next_file_id++);
         served.emplace(id, std::move(ciphertext));
 
-        network::file_metadata meta{
-                id, static_cast<int64_t>(served.at(id).size()), {}, {}};
+        network::file_metadata meta{id, static_cast<int64_t>(served.at(id).size()), {}, {}};
         if (request.on_progress)
             request.on_progress(meta.size, meta.size);
         if (request.on_complete)
@@ -116,8 +113,7 @@ inline size_t serve_downloads(
         MockNetwork& net, std::span<const std::byte> data, size_t chunk = 4096) {
     auto pending = std::exchange(net.downloads, {});
     for (auto& r : pending) {
-        network::file_metadata meta{
-                "served", static_cast<int64_t>(data.size()), {}, {}};
+        network::file_metadata meta{"served", static_cast<int64_t>(data.size()), {}, {}};
         for (size_t at = 0; at < data.size(); at += chunk)
             r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
         r.on_complete(meta, false);
@@ -139,8 +135,7 @@ inline size_t serve_downloads(MockNetwork& net, size_t chunk = 4096) {
         }
 
         std::span<const std::byte> data{found->second};
-        network::file_metadata meta{
-                info->file_id, static_cast<int64_t>(data.size()), {}, {}};
+        network::file_metadata meta{info->file_id, static_cast<int64_t>(data.size()), {}, {}};
         for (size_t at = 0; at < data.size(); at += chunk)
             r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
         r.on_complete(meta, false);
@@ -290,8 +285,7 @@ class FakeRouter : public network::IRouter {
     // Destination pubkey -> how that node answers.  Anything not named here answers as unreachable,
     // which makes "only this node works" the short thing to write.
     std::map<network::ed25519_pubkey, Reply> replies;
-    Reply default_reply{
-            false, false, network::ERROR_INVALID_DESTINATION, "Node is not reachable"};
+    Reply default_reply{false, false, network::ERROR_INVALID_DESTINATION, "Node is not reachable"};
 
     // Every destination tried, in order.  The point of most assertions.
     std::vector<network::ed25519_pubkey> tried;
@@ -386,7 +380,8 @@ class TestHelper {
     }
 
     // The cursor a retrieve from this namespace+node would send: the newest hash that node handed
-    // us and still holds.  Derived rather than stored, so this asks the same question the poll does.
+    // us and still holds.  Derived rather than stored, so this asks the same question the poll
+    // does.
     static std::optional<std::string> namespace_last_hash(
             core::Core& core, int16_t ns, const network::ed25519_pubkey& sn_pubkey) {
         return core.db.conn().prepared_maybe_get<std::string>(
@@ -455,8 +450,7 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
     // tests to detect that a poll completed and delivered at least one message.
     static bool has_any_namespace_sync(core::Core& core, config::Namespace ns) {
         auto count = core.db.conn().prepared_get<int64_t>(
-                "SELECT COUNT(*) FROM swarm_hashes WHERE namespace = ?",
-                static_cast<int16_t>(ns));
+                "SELECT COUNT(*) FROM swarm_hashes WHERE namespace = ?", static_cast<int16_t>(ns));
         return count > 0;
     }
 

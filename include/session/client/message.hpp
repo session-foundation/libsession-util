@@ -190,8 +190,8 @@ struct Message {
     /// Whether it *is* being shown that way.
     ///
     /// Stored, because it is a decision rather than a property: it is made when the message is
-    /// processed — on if the conversation was auto-downloading then — and the conversation's setting
-    /// may have changed since, so recomputing it later would not give the same answer.
+    /// processed — on if the conversation was auto-downloading then — and the conversation's
+    /// setting may have changed since, so recomputing it later would not give the same answer.
     ///
     /// Never true when `gallery_viewable` is false: a stored decision that no longer agrees with
     /// the current rule is dropped rather than honoured, so a message that qualified under an older

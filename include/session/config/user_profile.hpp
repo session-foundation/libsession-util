@@ -258,7 +258,8 @@ class UserProfile : public ConfigBase {
 
     /// API: user_profile/UserProfile::get_nts_delete_attach_before
     ///
-    /// As `get_nts_delete_before`, but covering the attachments alone: the messages themselves stay.
+    /// As `get_nts_delete_before`, but covering the attachments alone: the messages themselves
+    /// stay.
     ///
     /// Only ever holds a value that says something `get_nts_delete_before` does not: deleting a
     /// message takes its attachments with it, so setting either of the pair clears this one when

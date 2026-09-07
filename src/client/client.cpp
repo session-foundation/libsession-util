@@ -1,10 +1,10 @@
 #include <SQLiteCpp/Transaction.h>
 #include <SessionProtos.pb.h>
-#include <debug_print.hpp>
 #include <oxenc/hex.h>
 
 #include <algorithm>
 #include <charconv>
+#include <debug_print.hpp>
 #include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/quic/loop.hpp>
@@ -16,10 +16,10 @@
 #include <session/config/user_profile.hpp>
 #include <session/format.hpp>
 #include <session/hash.hpp>
-#include <session/random.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/session_network.hpp>
 #include <session/placeholders.hpp>
+#include <session/random.hpp>
 #include <session/sqlite.hpp>
 #include <set>
 #include <stdexcept>
@@ -305,10 +305,9 @@ static bool approve_recipient(sqlite::Connection& c, const ConversationId& id, C
         return false;
     auto account = identity_id(c, id);
     auto made = ensure_contact(c, account, true);
-    auto flagged =
-            c.prepared_exec(
-                    "UPDATE contacts SET approved = 1 WHERE account = ? AND NOT approved", account) >
-            0;
+    auto flagged = c.prepared_exec(
+                           "UPDATE contacts SET approved = 1 WHERE account = ? AND NOT approved",
+                           account) > 0;
     return made || flagged;
 }
 
@@ -653,8 +652,7 @@ void Client::retry_send(
             std::move(cb));
 }
 
-bool Client::retry_send(
-        int64_t message_id, Conversation::upload_progress on_upload, wait_t) {
+bool Client::retry_send(int64_t message_id, Conversation::upload_progress on_upload, wait_t) {
     return loop.call_get([this, message_id, on_upload = std::move(on_upload)] {
         return _retry_send(message_id, on_upload);
     });
@@ -679,7 +677,8 @@ void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb
 }
 
 bool Client::delete_message(int64_t message_id, wait_t) {
-    return loop.call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
+    return loop.call_get(
+            [this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
 void Client::set_cache_dir(std::filesystem::path dir) {
@@ -777,7 +776,6 @@ void Client::_reconcile_cache(
                 unreferenced);
 }
 
-
 const b32& Client::_cache_encryption_key() {
     if (!_cache_key) {
         auto& key = _cache_key.emplace();
@@ -806,7 +804,8 @@ void Client::profile_picture(
 }
 
 void Client::profile_picture(
-        const ConversationId& id, failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+        const ConversationId& id,
+        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
     profile_picture(id, nullptr, std::move(cb));
 }
 
@@ -886,7 +885,8 @@ static void set_limit(core::Globals& g, std::string_view key, std::optional<int6
         g.erase(key);
 }
 
-void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, failable_function<void()> cb) {
+void Client::set_attachment_cache_limit(
+        std::optional<int64_t> bytes, failable_function<void()> cb) {
     _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
 }
 void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, wait_t) {
@@ -899,7 +899,8 @@ std::optional<int64_t> Client::attachment_cache_limit(wait_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
-void Client::set_auto_download_max_size(std::optional<int64_t> bytes, failable_function<void()> cb) {
+void Client::set_auto_download_max_size(
+        std::optional<int64_t> bytes, failable_function<void()> cb) {
     _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
 }
 void Client::set_auto_download_max_size(std::optional<int64_t> bytes, wait_t) {
@@ -982,11 +983,10 @@ void Client::_attachment_data(
     // The caller's own progress reporting, identified and hopped out to their thread.
     std::function<void(int64_t, int64_t, std::optional<int>)> progress;
     if (on_progress)
-        progress = _dispatch_progress(
-                [on_progress = std::move(on_progress), message_id, index](
-                        int64_t done, int64_t total, std::optional<int> r) {
-                    on_progress(AttachmentProgress{message_id, index, done, total, r});
-                });
+        progress = _dispatch_progress([on_progress = std::move(on_progress), message_id, index](
+                                              int64_t done, int64_t total, std::optional<int> r) {
+            on_progress(AttachmentProgress{message_id, index, done, total, r});
+        });
 
     std::function<void(std::span<const std::byte>)> store;
     if (!_cache_dir.empty())
@@ -1119,10 +1119,11 @@ void Client::send_message(
         std::function<void(std::optional<std::string>, int64_t)> cb) {
     _require_sendable("send_message", id, msg);
 
-    _async([this, id, msg = std::move(msg), on_upload = std::move(on_upload)] {
-        return _send_message(id, msg, on_upload);
-    },
-           std::move(cb));
+    _async(
+            [this, id, msg = std::move(msg), on_upload = std::move(on_upload)] {
+                return _send_message(id, msg, on_upload);
+            },
+            std::move(cb));
 }
 
 void Client::send_message(
@@ -1145,7 +1146,9 @@ void Client::message_requests(
 }
 
 void Client::set_blocked(
-        const ConversationId& id, bool blocked, std::function<void(std::optional<std::string>)> cb) {
+        const ConversationId& id,
+        bool blocked,
+        std::function<void(std::optional<std::string>)> cb) {
     _require_contact("set_blocked", id);
     _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
 }
@@ -1200,7 +1203,9 @@ static std::optional<DM> as_dm(std::optional<AnyConversation> convo) {
     return std::nullopt;
 }
 
-void Client::dm(const ConversationId& id, std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
+void Client::dm(
+        const ConversationId& id,
+        std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
     _require_dm("dm", id);
     _async([this, id] { return as_dm(_conversation(id)); }, std::move(cb));
 }
@@ -1220,7 +1225,9 @@ void Client::open_dm(
 
 DM Client::open_dm(const ConversationId& id, wait_t) {
     _require_dm("open_dm", id);
-    return loop.call_get([this, id] { return *as_dm(std::optional<AnyConversation>{_create_conversation(id)}); });
+    return loop.call_get([this, id] {
+        return *as_dm(std::optional<AnyConversation>{_create_conversation(id)});
+    });
 }
 
 void Client::message(
@@ -1240,11 +1247,9 @@ void Client::save_attachment(
     // Checked on the calling thread so a caller's own mistake surfaces at the call site, where they
     // still have a stack to make sense of it.
     if (std::filesystem::is_directory(dest))
-        throw std::invalid_argument{
-                "save_attachment: {} is a directory"_format(dest.string())};
+        throw std::invalid_argument{"save_attachment: {} is a directory"_format(dest.string())};
     if (auto dir = dest.parent_path(); !dir.empty() && !std::filesystem::is_directory(dir))
-        throw std::invalid_argument{
-                "save_attachment: {} does not exist"_format(dir.string())};
+        throw std::invalid_argument{"save_attachment: {} does not exist"_format(dir.string())};
 
     // Not _async: what that reports is the *start* of the transfer, and the answer a caller wants
     // is whether the file arrived, which is minutes away.  So the callback is carried down to the
@@ -1309,9 +1314,29 @@ template <typename... Bind>
 static std::vector<AnyConversation> query_conversations(
         Client& client, sqlite::Connection& c, const std::string& query, const Bind&... bind) {
     std::vector<AnyConversation> out;
-    for (auto [convo, sid, gid, url, room, display_name, activity, preview, unread, priority,
-               approved, approved_me, marked_unread, blocked, name, nickname, notifications,
-               mute_until, exp_mode, exp_timer, pic_url, pic_key, auto_download] :
+    for (auto [convo,
+               sid,
+               gid,
+               url,
+               room,
+               display_name,
+               activity,
+               preview,
+               unread,
+               priority,
+               approved,
+               approved_me,
+               marked_unread,
+               blocked,
+               name,
+               nickname,
+               notifications,
+               mute_until,
+               exp_mode,
+               exp_timer,
+               pic_url,
+               pic_key,
+               auto_download] :
          c.prepared_results<
                  int64_t,
                  std::optional<sqlite::blob_guts<b33>>,
@@ -1415,8 +1440,7 @@ std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     auto convo = find_conversation(c, id);
     if (!convo)
         return std::nullopt;
-    auto found = query_conversations(
-            *this, c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
+    auto found = query_conversations(*this, c, "{} WHERE c.id = ?"_format(CONVO_COLUMNS), *convo);
     if (found.empty())
         return std::nullopt;
     return std::move(found.front());
@@ -1524,8 +1548,7 @@ void Client::_set_marked_unread(const ConversationId& id, bool unread) {
 // The settings below all live on the conversation row and all reach the config the same way, so
 // they share one shape: update where it differs, and if it did, re-derive and report.
 template <typename T>
-void Client::_set_conversation_setting(
-        const ConversationId& id, std::string_view column, T value) {
+void Client::_set_conversation_setting(const ConversationId& id, std::string_view column, T value) {
     int changed = 0;
     {
         auto c = core.database().conn();
@@ -1923,8 +1946,12 @@ bool Client::_delete_message_everywhere(int64_t message_id) {
     sys_ms timestamp{};
     {
         auto c = core.database().conn();
-        auto row = c.prepared_maybe_get<int, std::optional<std::string>, int64_t,
-                                        std::optional<int64_t>, sqlite::blob_guts<b33>>(
+        auto row = c.prepared_maybe_get<
+                int,
+                std::optional<std::string>,
+                int64_t,
+                std::optional<int64_t>,
+                sqlite::blob_guts<b33>>(
                 R"(
             SELECT m.outgoing, m.swarm_hash, m.timestamp, m.msgid, a.session_id
             FROM messages m
@@ -2214,21 +2241,19 @@ bool Client::_update_profile(
 
     // `IS NOT` rather than `!=`: these columns are NULL until a profile is known, and `NULL != 'x'`
     // is NULL, so `!=` would never fire for the first name or picture we learn.
-    bool changed =
-            source == ProfileSource::config
-                    ? c.prepared_exec(
-                              R"(
+    bool changed = source == ProfileSource::config ? c.prepared_exec(
+                                                             R"(
 UPDATE accounts SET name = ?2, profile_pic_url = ?3, profile_pic_key = ?4, profile_updated = ?5
 WHERE id = ?1
   AND (name, profile_pic_url, profile_pic_key, profile_updated) IS NOT (?2, ?3, ?4, ?5)
 )",
-                              account,
-                              name,
-                              pic_url,
-                              pic_key,
-                              updated) > 0
-                    : c.prepared_exec(
-                              R"(
+                                                             account,
+                                                             name,
+                                                             pic_url,
+                                                             pic_key,
+                                                             updated) > 0
+                                                   : c.prepared_exec(
+                                                             R"(
 UPDATE accounts
    SET name = coalesce(?2, name),
        profile_pic_url = coalesce(?3, profile_pic_url),
@@ -2241,11 +2266,11 @@ UPDATE accounts
                coalesce(?4, profile_pic_key),
                ?5)
 )",
-                              account,
-                              name,
-                              pic_url,
-                              pic_key,
-                              updated) > 0;
+                                                             account,
+                                                             name,
+                                                             pic_url,
+                                                             pic_key,
+                                                             updated) > 0;
 
     // Read back rather than compared against the argument: under `message` a null url leaves the
     // old one in place, so what the account now points at is not what was passed in.
@@ -2309,8 +2334,7 @@ void Client::_prefetch_picture(sqlite::Connection& c, int64_t account, const std
     }
 }
 
-void Client::_fetch_picture(
-        const ConversationId& id, std::string url, std::vector<std::byte> key) {
+void Client::_fetch_picture(const ConversationId& id, std::string url, std::vector<std::byte> key) {
     try {
         std::function<void(int64_t, int64_t, std::optional<int>)> progress;
         if (_cbs->display_picture_progress)
@@ -2324,7 +2348,11 @@ void Client::_fetch_picture(
         // coming, and a picture that will not come down now is tried again the moment something
         // asks for it.
         _fetch_cached(
-                {url, std::move(key), {}, std::nullopt, DownloadKind::display_pic,
+                {url,
+                 std::move(key),
+                 {},
+                 std::nullopt,
+                 DownloadKind::display_pic,
                  cache::PROFILE_DIR},
                 std::move(progress),
                 nullptr,
@@ -2363,9 +2391,9 @@ void Client::_reconcile_contacts() {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
-        // Ordered rather than a vector because the deletion pass below looks every stored contact up
-        // in it: scanning instead would make a routine merge quadratic in the size of the contact
-        // list, which is exactly the size that is allowed to be large.
+        // Ordered rather than a vector because the deletion pass below looks every stored contact
+        // up in it: scanning instead would make a routine merge quadratic in the size of the
+        // contact list, which is exactly the size that is allowed to be large.
         std::set<b33> in_config;
 
         for (const auto& entry : contacts) {
@@ -2397,7 +2425,8 @@ void Client::_reconcile_contacts() {
             // message that arrived late must not displace a newer one.
             bool renamed = false;
             if (epoch_seconds(entry.profile_updated) >=
-                c.prepared_get<int64_t>("SELECT profile_updated FROM accounts WHERE id = ?", account))
+                c.prepared_get<int64_t>(
+                        "SELECT profile_updated FROM accounts WHERE id = ?", account))
                 renamed = _update_profile(
                         c,
                         account,
@@ -2417,10 +2446,9 @@ void Client::_reconcile_contacts() {
             // Read before the upsert rather than derived from it: what moves a conversation between
             // the two lists is this one column, and the upsert reports only that *something* in the
             // row changed.
-            bool was_request =
-                    !c.prepared_get<int>(
-                            "SELECT coalesce((SELECT approved FROM contacts WHERE account = ?), 0)",
-                            account);
+            bool was_request = !c.prepared_get<int>(
+                    "SELECT coalesce((SELECT approved FROM contacts WHERE account = ?), 0)",
+                    account);
 
             // Existence here *is* being a contact, so this is an upsert rather than an update: the
             // row appearing is the fact being recorded.
@@ -2431,21 +2459,21 @@ void Client::_reconcile_contacts() {
             // clients clear both flags on their way to deleting a contact, and a device that merged
             // the clearing but not the deletion would otherwise file the conversation back under
             // message requests.
-            bool new_contact = c.prepared_exec(
-                                       R"(
+            bool new_contact =
+                    c.prepared_exec(
+                            R"(
 INSERT INTO contacts (account, nickname, approved, approved_me, blocked) VALUES (?1, ?2, ?3, ?4, ?5)
 ON CONFLICT (account) DO UPDATE
     SET nickname = ?2, approved = max(approved, ?3), approved_me = max(approved_me, ?4), blocked = ?5
 WHERE (nickname, approved, approved_me, blocked)
    IS NOT (?2, max(approved, ?3), max(approved_me, ?4), ?5)
 )",
-                                       account,
-                                       entry.nickname.empty()
-                                               ? std::optional<std::string>{}
-                                               : std::optional<std::string>{entry.nickname},
-                                       entry.approved ? 1 : 0,
-                                       entry.approved_me ? 1 : 0,
-                                       entry.blocked ? 1 : 0) > 0;
+                            account,
+                            entry.nickname.empty() ? std::optional<std::string>{}
+                                                   : std::optional<std::string>{entry.nickname},
+                            entry.approved ? 1 : 0,
+                            entry.approved_me ? 1 : 0,
+                            entry.blocked ? 1 : 0) > 0;
 
             // The config saying a contact exists is what brings the conversation into being -- a
             // conversation is not defined by having messages in it, or emptying one would lose it.
@@ -2453,9 +2481,7 @@ WHERE (nickname, approved, approved_me, blocked)
             bool created = false;
             if (!convo) {
                 auto row = ensure_conversation(
-                        c,
-                        id,
-                        entry.created > 0 ? from_epoch_s(entry.created) : clock_now_ms());
+                        c, id, entry.created > 0 ? from_epoch_s(entry.created) : clock_now_ms());
                 convo = row.id;
                 created = row.created;
             }
@@ -2475,8 +2501,7 @@ WHERE id = ?1
                             entry.mute_until,
                             static_cast<int>(entry.exp_mode),
                             static_cast<int64_t>(entry.exp_timer.count()),
-                            entry.created > 0 ? entry.created
-                                              : epoch_seconds(clock_now_ms())) > 0;
+                            entry.created > 0 ? entry.created : epoch_seconds(clock_now_ms())) > 0;
 
             // Retroactive by definition: what a delete-before instruction is about is the history
             // that was there when someone chose to destroy it, so it is applied to what we hold and
@@ -2486,8 +2511,8 @@ WHERE id = ?1
             if (entry.delete_before > std::chrono::sys_seconds{})
                 history_changed = delete_messages_before(c, *convo, sys_ms{entry.delete_before});
             if (entry.delete_attach_before > std::chrono::sys_seconds{})
-                history_changed |= delete_attachments_before(
-                        c, *convo, sys_ms{entry.delete_attach_before});
+                history_changed |=
+                        delete_attachments_before(c, *convo, sys_ms{entry.delete_attach_before});
             if (history_changed)
                 cleared.push_back(id);
 
@@ -2507,8 +2532,8 @@ WHERE id = ?1
         // *hiding* is a negative priority and arrives as an ordinary settings change above, so an
         // absent entry can only mean the stronger thing.
         //
-        // The account row stays: we may have seen them in a group or community, and their profile is
-        // needed to render that.  What is deleted is the relationship, not the person.
+        // The account row stays: we may have seen them in a group or community, and their profile
+        // is needed to render that.  What is deleted is the relationship, not the person.
         //
         // Safe because the outward sweep runs first (see _reconcile_all): a contact of ours the
         // config has never heard of gets published rather than reaching here.
@@ -2612,17 +2637,16 @@ WHERE id = ?1 AND (pro_revocation_tag, pro_expiry) IS NOT (?2, ?3)
             // backwards on purpose, so that a client can reset one -- and a conflict between two
             // devices at the same seqno resolves by a tie-break that knows nothing about which
             // value is newer.  Left alone, that would make messages someone has read unread again.
-            bool read_changed =
-                    c.prepared_exec(
-                            R"(
+            bool read_changed = c.prepared_exec(
+                                        R"(
 UPDATE conversations
 SET last_read = ?2,
     unread_count = (SELECT COUNT(*) FROM messages
                      WHERE conversation = ?1 AND {} AND timestamp > ?2)
 WHERE id = ?1 AND last_read < ?2
 )"_format(UNREAD),
-                            *convo,
-                            entry.last_read) > 0;
+                                        *convo,
+                                        entry.last_read) > 0;
 
             // The flag is an ordinary setting, though: someone marking a conversation unread on
             // another device is telling us to, and there is no ordering to preserve.
@@ -2678,7 +2702,8 @@ void Client::_sync_convo_volatile(const ConversationId& id) {
     auto& volatiles = core.configs.convo_info_volatile();
 
     // Built on the entry that is there, which is what keeps the Pro fields alive: they are set from
-    // a proof we verified rather than from any row here, so there is nothing to re-derive them from.
+    // a proof we verified rather than from any row here, so there is nothing to re-derive them
+    // from.
     auto entry = volatiles.get_or_construct_1to1(oxenc::to_hex(id.session_id()));
 
     // Forwards only here too, and for the same reason as the merge: our value can be the stale one,
@@ -2709,8 +2734,7 @@ void Client::_sync_conversation(const ConversationId& id) {
 }
 
 void Client::_sync_contact(const ConversationId& id) {
-    if (id.type() != ConversationId::Type::dm ||
-        is_me(id.session_id()))
+    if (id.type() != ConversationId::Type::dm || is_me(id.session_id()))
         return;
 
     auto& contacts = core.configs.contacts();
@@ -2718,18 +2742,18 @@ void Client::_sync_contact(const ConversationId& id) {
 
     auto c = core.database().conn();
     auto row = c.prepared_maybe_get<
-            std::optional<std::string>,   // name
+            std::optional<std::string>,  // name
             std::optional<std::string>,  // profile_pic_url
             // By value rather than as a `blob`, which is a view into the column: the statement is
             // finished by the time this tuple is returned, so a view in it is already dangling and
             // the key reads back with its first bytes overwritten.
             std::optional<sqlite::blob_guts<b32>>,  // profile_pic_key
             int64_t,                                // profile_updated
-            int64_t,                      // pro_flags
-            std::optional<std::string>,   // nickname
-            int,                          // approved
-            int,                          // approved_me
-            int>(                         // blocked
+            int64_t,                                // pro_flags
+            std::optional<std::string>,             // nickname
+            int,                                    // approved
+            int,                                    // approved_me
+            int>(                                   // blocked
             R"(
         SELECT a.name, a.profile_pic_url, a.profile_pic_key, a.profile_updated, a.pro_flags,
                ct.nickname, ct.approved, ct.approved_me, ct.blocked
@@ -2746,7 +2770,14 @@ void Client::_sync_contact(const ConversationId& id) {
         return;
     }
 
-    auto [name, pic_url, pic_key, profile_updated, pro_flags, nickname, approved, approved_me,
+    auto [name,
+          pic_url,
+          pic_key,
+          profile_updated,
+          pro_flags,
+          nickname,
+          approved,
+          approved_me,
           blocked] = *row;
 
     auto convo = c.prepared_maybe_get<int, int, int64_t, int, int64_t, int64_t>(
@@ -2790,8 +2821,7 @@ void Client::_sync_contact(const ConversationId& id) {
 }
 
 void Client::_reveal_note_to_self(const ConversationId& id) {
-    if (id.type() != ConversationId::Type::dm ||
-        !is_me(id.session_id()))
+    if (id.type() != ConversationId::Type::dm || !is_me(id.session_id()))
         return;
 
     auto& profile = core.configs.user_profile();
@@ -2848,9 +2878,9 @@ void Client::_reconcile_user_profile() {
                 ProfileSource::config);
 
         // The config is what says a conversation exists -- a conversation is not defined by having
-        // messages in it, or emptying one would lose it, and reimporting an account would lose every
-        // conversation that happened to be empty.  For note to self that statement is the priority
-        // itself: negative means there is no such conversation, so no row is made for one.
+        // messages in it, or emptying one would lose it, and reimporting an account would lose
+        // every conversation that happened to be empty.  For note to self that statement is the
+        // priority itself: negative means there is no such conversation, so no row is made for one.
         //
         // Guarded by find_conversation rather than calling ensure_conversation outright, because
         // that helper bumps last_activity on a row that already exists: unguarded, every config
@@ -2863,21 +2893,19 @@ void Client::_reconcile_user_profile() {
         }
 
         if (convo) {
-            order_changed =
-                    c.prepared_exec(
-                            "UPDATE conversations SET priority = ?2"
-                            " WHERE id = ?1 AND priority IS NOT ?2",
-                            *convo,
-                            priority) > 0;
-            convo_changed =
-                    c.prepared_exec(
-                            R"(
+            order_changed = c.prepared_exec(
+                                    "UPDATE conversations SET priority = ?2"
+                                    " WHERE id = ?1 AND priority IS NOT ?2",
+                                    *convo,
+                                    priority) > 0;
+            convo_changed = c.prepared_exec(
+                                    R"(
 UPDATE conversations SET exp_mode = ?2, exp_timer = ?3
 WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 )",
-                            *convo,
-                            exp_mode,
-                            exp_timer) > 0;
+                                    *convo,
+                                    exp_mode,
+                                    exp_timer) > 0;
 
             // Retroactive, and idempotent, for the reasons given in _reconcile_contacts.
             auto delete_before = profile.get_nts_delete_before();
@@ -2917,7 +2945,8 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 // reads -- which matters more than being right in a case the wire cannot disambiguate.  And it
 // collapses a multi-match to one row rather than multiplying the outer query.
 //
-// Guarded by the NULL check so a message that is not a reply -- almost all of them -- costs nothing.
+// Guarded by the NULL check so a message that is not a reply -- almost all of them -- costs
+// nothing.
 static constexpr auto WIRE_REF_TARGET = R"(
     CASE WHEN m.reply_timestamp IS NULL THEN NULL ELSE (
         SELECT min(q.id) FROM messages q
@@ -2976,7 +3005,16 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     for (const auto& m : msgs)
         st->bind(n++, m.id);
 
-    for (auto&& [message, idx, ctype, fname, caption, flags, width, height, size, uploaded,
+    for (auto&& [message,
+                 idx,
+                 ctype,
+                 fname,
+                 caption,
+                 flags,
+                 width,
+                 height,
+                 size,
+                 uploaded,
                  saved_at] :
          sqlite::IterableStatementWrapper<
                  int64_t,
@@ -3037,47 +3075,57 @@ static std::vector<Message> build_messages(
         SQLite::Statement& st) {
     std::vector<Message> out;
     while (st.executeStep()) {
-        auto [id, swarm_hash, sender, outgoing, ts, body, send_state, sync_send_state, deleted,
-              gallery, reply_author, reply_ts, reply_id] =
-                sqlite::get<int64_t,
-                            std::optional<std::string>,
-                            sqlite::blob_guts<b33>,
-                            int,
-                            int64_t,
-                            std::string,
-                            std::optional<int>,
-                            std::optional<int>,
-                            std::optional<int>,
-                            int,
-                            std::optional<sqlite::blob_guts<b33>>,
-                            std::optional<int64_t>,
-                            std::optional<int64_t>>(st);
-        out.push_back(
-                Message{.id = id,
-                        .conversation = convo,
-                        .sender = sender,
-                        .outgoing = outgoing != 0,
-                        .timestamp = from_epoch_ms(ts),
-                        .body = std::move(body),
-                        .send_state = send_state
-                                            ? std::optional{static_cast<SendState>(*send_state)}
-                                            : std::nullopt,
-                        .sync_send_state = sync_send_state ? std::optional{static_cast<SendState>(
-                                                                     *sync_send_state)}
-                                                           : std::nullopt,
-                        .hash = std::move(swarm_hash),
-                        .gallery = gallery != 0,
-                        // The author and timestamp are what the wire carried, so they are known
-                        // whether or not the reference resolved; `message_id` is the resolution.
-                        // The message itself is filled in afterwards, in one query for the page.
-                        .reply = reply_author && reply_ts
-                                       ? std::optional{Reply{
-                                                 .author = *reply_author,
-                                                 .timestamp = from_epoch_ms(*reply_ts),
-                                                 .message_id = reply_id}}
-                                       : std::nullopt,
-                        .deleted = deleted ? std::optional{static_cast<Deletion>(*deleted)}
-                                           : std::nullopt});
+        auto [id,
+              swarm_hash,
+              sender,
+              outgoing,
+              ts,
+              body,
+              send_state,
+              sync_send_state,
+              deleted,
+              gallery,
+              reply_author,
+              reply_ts,
+              reply_id] =
+                sqlite::get<
+                        int64_t,
+                        std::optional<std::string>,
+                        sqlite::blob_guts<b33>,
+                        int,
+                        int64_t,
+                        std::string,
+                        std::optional<int>,
+                        std::optional<int>,
+                        std::optional<int>,
+                        int,
+                        std::optional<sqlite::blob_guts<b33>>,
+                        std::optional<int64_t>,
+                        std::optional<int64_t>>(st);
+        out.push_back(Message{
+                .id = id,
+                .conversation = convo,
+                .sender = sender,
+                .outgoing = outgoing != 0,
+                .timestamp = from_epoch_ms(ts),
+                .body = std::move(body),
+                .send_state = send_state ? std::optional{static_cast<SendState>(*send_state)}
+                                         : std::nullopt,
+                .sync_send_state = sync_send_state
+                                         ? std::optional{static_cast<SendState>(*sync_send_state)}
+                                         : std::nullopt,
+                .hash = std::move(swarm_hash),
+                .gallery = gallery != 0,
+                // The author and timestamp are what the wire carried, so they are known
+                // whether or not the reference resolved; `message_id` is the resolution.
+                // The message itself is filled in afterwards, in one query for the page.
+                .reply = reply_author && reply_ts ? std::optional{Reply{
+                                                            .author = *reply_author,
+                                                            .timestamp = from_epoch_ms(*reply_ts),
+                                                            .message_id = reply_id}}
+                                                  : std::nullopt,
+                .deleted =
+                        deleted ? std::optional{static_cast<Deletion>(*deleted)} : std::nullopt});
     }
 
     // Done here rather than by each caller so that every path that produces Messages produces whole
@@ -3085,9 +3133,9 @@ static std::vector<Message> build_messages(
     load_attachments(c, out);
 
     // Only now can the question be answered, since it is about the attachments.  A stored decision
-    // that the current rule no longer supports is dropped rather than honoured -- and dropped in the
-    // database too, so that the next read does not have to reach the same conclusion again, and so
-    // that a client toggling it sees the same state we just reported.
+    // that the current rule no longer supports is dropped rather than honoured -- and dropped in
+    // the database too, so that the next read does not have to reach the same conclusion again, and
+    // so that a client toggling it sees the same state we just reported.
     for (auto& m : out) {
         m.gallery_viewable = gallery_viewable(m.attachments);
         if (m.gallery && !m.gallery_viewable) {
@@ -3242,43 +3290,43 @@ std::optional<std::string> Client::_message_debug(int64_t message_id) {
 
 namespace {
 
-// The reference a quote puts on the wire, read from the message being replied to.
-struct WireRef {
-    b33 author;
-    sys_ms timestamp;
-    std::optional<int64_t> msgid;
-};
+    // The reference a quote puts on the wire, read from the message being replied to.
+    struct WireRef {
+        b33 author;
+        sys_ms timestamp;
+        std::optional<int64_t> msgid;
+    };
 
-// Nullopt if the message is gone by the time the send happens: a send is not worth failing over a
-// reference that can simply be omitted.
-std::optional<WireRef> wire_ref(sqlite::Connection& c, int64_t message_id) {
-    auto row = c.prepared_maybe_get<sqlite::blob_guts<b33>, int64_t, std::optional<int64_t>>(
-            R"(
+    // Nullopt if the message is gone by the time the send happens: a send is not worth failing over
+    // a reference that can simply be omitted.
+    std::optional<WireRef> wire_ref(sqlite::Connection& c, int64_t message_id) {
+        auto row = c.prepared_maybe_get<sqlite::blob_guts<b33>, int64_t, std::optional<int64_t>>(
+                R"(
         SELECT a.session_id, m.timestamp, m.msgid
         FROM messages m JOIN accounts a ON a.id = m.sender
         WHERE m.id = ?
     )",
-            message_id);
-    if (!row)
-        return std::nullopt;
+                message_id);
+        if (!row)
+            return std::nullopt;
 
-    auto& [author, ts, msgid] = *row;
-    return WireRef{.author = author, .timestamp = from_epoch_ms(ts), .msgid = msgid};
-}
+        auto& [author, ts, msgid] = *row;
+        return WireRef{.author = author, .timestamp = from_epoch_ms(ts), .msgid = msgid};
+    }
 
-// Writes a quote naming `ref` onto an outgoing DataMessage.
-//
-// Only the reference goes on.  `text` and the quoted attachments are left unset, because current
-// clients do not populate them either, and one that arrives is not to be trusted: a sender can put
-// whatever words they like in someone else's mouth that way.  Receivers render from their own copy
-// of the message, or from nothing.
-void set_quote(SessionProtos::DataMessage& data, const WireRef& ref) {
-    auto* q = data.mutable_quote();
-    q->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(ref.timestamp)));
-    q->set_author(oxenc::to_hex(ref.author.begin(), ref.author.end()));
-    if (ref.msgid)
-        q->set_msgid(*ref.msgid);
-}
+    // Writes a quote naming `ref` onto an outgoing DataMessage.
+    //
+    // Only the reference goes on.  `text` and the quoted attachments are left unset, because
+    // current clients do not populate them either, and one that arrives is not to be trusted: a
+    // sender can put whatever words they like in someone else's mouth that way.  Receivers render
+    // from their own copy of the message, or from nothing.
+    void set_quote(SessionProtos::DataMessage& data, const WireRef& ref) {
+        auto* q = data.mutable_quote();
+        q->set_msgtimestamp(static_cast<uint64_t>(epoch_ms(ref.timestamp)));
+        q->set_author(oxenc::to_hex(ref.author.begin(), ref.author.end()));
+        if (ref.msgid)
+            q->set_msgid(*ref.msgid);
+    }
 
 }  // namespace
 
@@ -3649,82 +3697,77 @@ void Client::_upload_next(
         };
     }
 
-    req.on_complete =
-            [this, client_id, index, on_upload, plaintext_size](
-                    std::variant<std::pair<network::file_metadata, cleared_b32>, int16_t> result,
-                    bool /*timeout*/) {
-                // Delivered on the network's loop; everything below touches the database, which is
-                // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
-                // own continuation -- so a failure has to be turned into the message failing, which
-                // is what the application is watching.
-                loop.call([this,
-                           client_id,
-                           index,
-                           on_upload,
-                           plaintext_size,
-                           result = std::move(result)] {
-                    try {
-                        if (auto* err = std::get_if<int16_t>(&result)) {
-                            log::warning(
-                                    cat,
-                                    "Upload of attachment {} of message {} failed: {}",
-                                    index,
-                                    client_id,
-                                    *err);
-                            if (on_upload)
-                                on_upload(index, 0, 0, *err);
-                            return _fail_attachment_send(client_id);
-                        }
+    req.on_complete = [this, client_id, index, on_upload, plaintext_size](
+                              std::variant<std::pair<network::file_metadata, cleared_b32>, int16_t>
+                                      result,
+                              bool /*timeout*/) {
+        // Delivered on the network's loop; everything below touches the database, which is
+        // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
+        // own continuation -- so a failure has to be turned into the message failing, which
+        // is what the application is watching.
+        loop.call([this, client_id, index, on_upload, plaintext_size, result = std::move(result)] {
+            try {
+                if (auto* err = std::get_if<int16_t>(&result)) {
+                    log::warning(
+                            cat,
+                            "Upload of attachment {} of message {} failed: {}",
+                            index,
+                            client_id,
+                            *err);
+                    if (on_upload)
+                        on_upload(index, 0, 0, *err);
+                    return _fail_attachment_send(client_id);
+                }
 
-                        const auto& [meta, key] = std::get<0>(result);
-                        // upload_file always encrypts with the stream scheme, so the url has to say
-                        // so: without the fragment a recipient reaches for the legacy scheme and
-                        // cannot open the file at all.
-                        auto url = network::file_server::generate_download_url(
-                                meta.id,
-                                core.network()->file_server_config,
-                                /*stream_encrypted=*/true);
+                const auto& [meta, key] = std::get<0>(result);
+                // upload_file always encrypts with the stream scheme, so the url has to say
+                // so: without the fragment a recipient reaches for the legacy scheme and
+                // cannot open the file at all.
+                auto url = network::file_server::generate_download_url(
+                        meta.id,
+                        core.network()->file_server_config,
+                        /*stream_encrypted=*/true);
 
-                        {
-                            auto c = core.database().conn();
-                            // The file's own size, not the encrypted one the server reports back:
-                            // `size` on the pointer means the plaintext length everywhere else in
-                            // Session, and for a legacy-encrypted attachment it is what a recipient
-                            // trims the padding by, so an encrypted size there would be wrong in a
-                            // way that breaks decryption rather than merely misreporting.
-                            c.prepared_exec(
-                                    "UPDATE message_attachments SET url = ?, key = ?, size = ?"
-                                    " WHERE message = ? AND idx = ?",
-                                    url,
-                                    std::span<const std::byte>{key},
-                                    plaintext_size,
-                                    client_id,
-                                    static_cast<int64_t>(index));
-                        }
+                {
+                    auto c = core.database().conn();
+                    // The file's own size, not the encrypted one the server reports back:
+                    // `size` on the pointer means the plaintext length everywhere else in
+                    // Session, and for a legacy-encrypted attachment it is what a recipient
+                    // trims the padding by, so an encrypted size there would be wrong in a
+                    // way that breaks decryption rather than merely misreporting.
+                    c.prepared_exec(
+                            "UPDATE message_attachments SET url = ?, key = ?, size = ?"
+                            " WHERE message = ? AND idx = ?",
+                            url,
+                            std::span<const std::byte>{key},
+                            plaintext_size,
+                            client_id,
+                            static_cast<int64_t>(index));
+                }
 
-                        log::debug(
-                                cat,
-                                "Uploaded attachment {} of message {} ({} bytes) to {}",
-                                index,
-                                client_id,
-                                meta.size,
-                                url);
+                log::debug(
+                        cat,
+                        "Uploaded attachment {} of message {} ({} bytes) to {}",
+                        index,
+                        client_id,
+                        meta.size,
+                        url);
 
-                        if (on_upload)
-                            on_upload(index, meta.size, meta.size, 0);
+                if (on_upload)
+                    on_upload(index, meta.size, meta.size, 0);
 
-                        _upload_next(client_id, on_upload);
-                    } catch (const std::exception& e) {
-                        log::error(
-                                cat,
-                                "Recording attachment {} of message {} failed: {}",
-                                index,
-                                client_id,
-                                e.what());
-                        _fail_attachment_send(client_id);
-                    }
-                });
-            };
+                _upload_next(client_id, on_upload);
+            } catch (const std::exception& e) {
+                log::error(
+                        cat,
+                        "Recording attachment {} of message {} failed: {}",
+                        index,
+                        client_id,
+                        e.what());
+                _fail_attachment_send(client_id);
+            }
+        });
+    };
 
     log::debug(cat, "Uploading attachment {} of message {}: {}", idx, client_id, path);
     // Bound to a name: the accessor's span is deliberately unavailable on a temporary.
@@ -3803,14 +3846,14 @@ bool Client::_retry_send(
 // user asked for.
 //
 // `.sessiondl` rather than the conventional `.part` because opening it destroys whatever is already
-// there: somebody's own `report.pdf.part`, from a browser or another downloader, is a plausible file
-// to find next to `report.pdf`, and one named after us is not.  Numbered when even that is taken,
-// which is what lets two saves of the same file into one directory proceed at once.
+// there: somebody's own `report.pdf.part`, from a browser or another downloader, is a plausible
+// file to find next to `report.pdf`, and one named after us is not.  Numbered when even that is
+// taken, which is what lets two saves of the same file into one directory proceed at once.
 //
-// Claiming the name *is* the open, given `std::ios::noreplace` -- C++23, so not here yet, since this
-// builds at C++20 and the macro is guarded on the language version rather than on the library.  With
-// it the open fails when the file exists and two saves cannot pick the same name however they are
-// timed.  Without it the check and the open are two steps, so they still can; that is a much
+// Claiming the name *is* the open, given `std::ios::noreplace` -- C++23, so not here yet, since
+// this builds at C++20 and the macro is guarded on the language version rather than on the library.
+// With it the open fails when the file exists and two saves cannot pick the same name however they
+// are timed.  Without it the check and the open are two steps, so they still can; that is a much
 // narrower window than the fixed name it replaces, which collided every time, and the loser of the
 // race gets a failed save rather than anyone losing a file of their own.  Building at C++23 closes
 // it with no other change.
@@ -3843,8 +3886,7 @@ static std::filesystem::path open_partial(std::ofstream& out, const std::filesys
 // browsers and both desktop file managers produce.
 static std::filesystem::path numbered(const std::filesystem::path& dest, int n) {
     auto out = dest;
-    out.replace_filename(
-            "{} ({}){}"_format(dest.stem().string(), n, dest.extension().string()));
+    out.replace_filename("{} ({}){}"_format(dest.stem().string(), n, dest.extension().string()));
     return out;
 }
 
@@ -3982,7 +4024,7 @@ void Client::_download_decrypted(
     req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
     req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
 
-    req.on_data =[state, stream, on_progress, throttle, cancel](
+    req.on_data = [state, stream, on_progress, throttle, cancel](
                           const network::file_metadata& meta, std::span<const std::byte> data) {
         if (state->failure)
             return;
@@ -4036,8 +4078,7 @@ void Client::_download_decrypted(
 
         if (auto* err = std::get_if<int16_t>(&result))
             return fail(
-                    timeout ? "download timed out"s
-                            : "download failed with status {}"_format(*err),
+                    timeout ? "download timed out"s : "download failed with status {}"_format(*err),
                     *err);
 
         if (state->failure)
@@ -4055,9 +4096,8 @@ void Client::_download_decrypted(
                     // and never consults the pointer -- so without it a sender can describe one
                     // file and deliver another.
                     if (claimed_size && state->delivered != *claimed_size)
-                        throw std::runtime_error{
-                                "attachment is {}B but its sender said {}B"_format(
-                                        state->delivered, *claimed_size)};
+                        throw std::runtime_error{"attachment is {}B but its sender said {}B"_format(
+                                state->delivered, *claimed_size)};
                     break;
 
                 case Scheme::plaintext:
@@ -4173,8 +4213,7 @@ void Client::_evict_cache(const std::string& keep) {
     if (!limit)
         return;
 
-    auto total = c.prepared_get<std::optional<int64_t>>(
-                          "SELECT sum(size) FROM attachment_cache")
+    auto total = c.prepared_get<std::optional<int64_t>>("SELECT sum(size) FROM attachment_cache")
                          .value_or(0);
     if (total <= *limit)
         return;
@@ -4240,71 +4279,69 @@ void Client::_save_attachment(
 
     auto finish = [this, state, message_id, index, notify_sender, replace, cb](
                           std::optional<std::string> error) {
-                auto fail = [&](std::string why) {
-                    state->out.close();
-                    std::error_code ec;
-                    std::filesystem::remove(state->partial, ec);
-                    _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
-                };
+        auto fail = [&](std::string why) {
+            state->out.close();
+            std::error_code ec;
+            std::filesystem::remove(state->partial, ec);
+            _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
+        };
 
-                if (error)
-                    return fail(std::move(*error));
+        if (error)
+            return fail(std::move(*error));
 
-                try {
-                    state->out.close();
-                    if (!state->out)
-                        throw std::runtime_error{
-                                "writing {} failed"_format(state->partial.string())};
+        try {
+            state->out.close();
+            if (!state->out)
+                throw std::runtime_error{"writing {} failed"_format(state->partial.string())};
 
-                    // Only now does it get a name a user would recognise -- and only now can it be
-                    // known whether the one they asked for is still free, which is why the choice
-                    // is here rather than where the caller made it.
-                    state->saved_to = final_path(state->dest, replace);
-                    std::filesystem::rename(state->partial, state->saved_to);
-                } catch (const std::exception& e) {
-                    return fail(e.what());
-                }
+            // Only now does it get a name a user would recognise -- and only now can it be
+            // known whether the one they asked for is still free, which is why the choice
+            // is here rather than where the caller made it.
+            state->saved_to = final_path(state->dest, replace);
+            std::filesystem::rename(state->partial, state->saved_to);
+        } catch (const std::exception& e) {
+            return fail(e.what());
+        }
 
-                _report(cb, std::optional<std::string>{}, state->saved_to);
+        _report(cb, std::optional<std::string>{}, state->saved_to);
 
-                // Both of these say the same thing -- that the recipient now has the file -- one to
-                // ourselves and one to the sender, and neither is true until it is on disk under
-                // its final name, which is why they are here rather than anywhere earlier.
-                // Recording it does not depend on telling them: a caller who saved privately still
-                // gets to see that they did.
-                //
-                // Both are also only true when the recipient is *us*.  `saved_at` says the
-                // recipient saved it, which is what lets a sender read it as "the file reached a
-                // person rather than a file server", so stamping it for our own save of something
-                // we sent would claim they have a file they may never have opened.  A note to self
-                // is exempt: there the recipient is us, so saving it really is the recipient
-                // saving it.
-                loop.call([this, message_id, index, notify_sender] {
-                    if (_saved_by_recipient(message_id))
-                        _record_saved(message_id, index, clock_now_ms());
+        // Both of these say the same thing -- that the recipient now has the file -- one to
+        // ourselves and one to the sender, and neither is true until it is on disk under
+        // its final name, which is why they are here rather than anywhere earlier.
+        // Recording it does not depend on telling them: a caller who saved privately still
+        // gets to see that they did.
+        //
+        // Both are also only true when the recipient is *us*.  `saved_at` says the
+        // recipient saved it, which is what lets a sender read it as "the file reached a
+        // person rather than a file server", so stamping it for our own save of something
+        // we sent would claim they have a file they may never have opened.  A note to self
+        // is exempt: there the recipient is us, so saving it really is the recipient
+        // saving it.
+        loop.call([this, message_id, index, notify_sender] {
+            if (_saved_by_recipient(message_id))
+                _record_saved(message_id, index, clock_now_ms());
 
-                    // The account's own answer overrides the caller's, and only downwards.
-                    // Somebody who has said not to report their saves has said it for every client
-                    // on the account, and a client that forgot to ask -- or never grew the setting
-                    // -- would otherwise report them anyway.  A caller passing false is still
-                    // respected: this can refuse a notification, never require one.
-                    if (notify_sender && core.configs.user_profile().get_notify_media_saved())
-                        _notify_media_saved(message_id, index);
-                });
+            // The account's own answer overrides the caller's, and only downwards.
+            // Somebody who has said not to report their saves has said it for every client
+            // on the account, and a client that forgot to ask -- or never grew the setting
+            // -- would otherwise report them anyway.  A caller passing false is still
+            // respected: this can refuse a notification, never require one.
+            if (notify_sender && core.configs.user_profile().get_notify_media_saved())
+                _notify_media_saved(message_id, index);
+        });
     };
 
     // Writes what was fetched to the destination and finishes as a completed download would, for
     // the two paths that hand over a whole buffer rather than streaming into it.
-    auto write_and_finish = [state, finish](
-                                    std::optional<std::string> error,
-                                    const std::vector<std::byte>& data) {
-        if (error)
-            return finish(std::move(error));
-        state->out.write(
-                reinterpret_cast<const char*>(data.data()),
-                static_cast<std::streamsize>(data.size()));
-        finish(std::nullopt);
-    };
+    auto write_and_finish =
+            [state, finish](std::optional<std::string> error, const std::vector<std::byte>& data) {
+                if (error)
+                    return finish(std::move(error));
+                state->out.write(
+                        reinterpret_cast<const char*>(data.data()),
+                        static_cast<std::streamsize>(data.size()));
+                finish(std::nullopt);
+            };
 
     // Served from the cache when it is there.  Indistinguishable to everyone else: the file lands
     // where it was asked to, and the sender is still told we saved it, because being able to skip
@@ -4336,8 +4373,7 @@ void Client::_save_attachment(
             found->second.progress.push_back(report);
         }
         found->second.waiting.push_back(
-                [write_and_finish](
-                        std::optional<std::string> error, std::vector<std::byte> data) {
+                [write_and_finish](std::optional<std::string> error, std::vector<std::byte> data) {
                     write_and_finish(std::move(error), data);
                 });
         return;
@@ -4507,8 +4543,7 @@ void Client::_notify_media_saved(int64_t message_id, size_t index) {
         note->set_msgid(*msgid);
     note->set_attindex(static_cast<int32_t>(index));
 
-    log::debug(
-            cat, "Telling the sender we saved attachment {} of message {}", index, message_id);
+    log::debug(cat, "Telling the sender we saved attachment {} of message {}", index, message_id);
 
     // Registered rather than fired blind: Core reports on every send, and a status for an id nobody
     // claims would sit in _early_status for the life of the process.
@@ -4562,8 +4597,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
         if (reply_author && reply_ts)
             set_quote(
                     *data,
-                    WireRef{
-                            .author = *reply_author,
+                    WireRef{.author = *reply_author,
                             .timestamp = from_epoch_ms(*reply_ts),
                             .msgid = reply_msgid});
 
