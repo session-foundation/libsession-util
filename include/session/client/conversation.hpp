@@ -346,9 +346,9 @@ class DM : public Conversation {
     /// True while this is a message request rather than a conversation: someone we have never
     /// written to has written to us.
     ///
-    /// Approval is not something anyone sets — it is recorded by messages flowing.  Writing to
-    /// someone approves them, so answering a request is what accepts it, and there is no way back:
-    /// what un-requests a conversation is deleting the contact, not clearing a flag.
+    /// Cleared by approving them, which `approve()` does outright and writing to them does on the
+    /// way past, an answer being an acceptance.  Either way there is no way back: what un-requests
+    /// a conversation is deleting the contact, not clearing a flag.
     ///
     /// Requests are conversations in every other respect — they have history, an unread count and a
     /// name — which is why this is a property of one rather than a kind of its own.  What differs
@@ -361,10 +361,11 @@ class DM : public Conversation {
     /// The mirror of `request`: we have written to someone who has never written back, so they have
     /// us in *their* message requests and have not answered.
     ///
-    /// Set from the same evidence, read the other way round — nobody sends anything to say they
-    /// accepted, so the only thing that clears this is a message from them.  A display showing
-    /// "waiting for them to accept" wants this; the conversation is otherwise ordinary and is in
-    /// `conversations()` like any other, because it is one we chose to start.
+    /// Set from the same evidence, read the other way round: what clears it is their approving us,
+    /// which reaches us either as the acceptance `approve()` sends or as a message from them, since
+    /// writing is approving.  A display showing "waiting for them to accept" wants this; the
+    /// conversation is otherwise ordinary and is in `conversations()` like any other, because it is
+    /// one we chose to start.
     ///
     /// The two are mutually exclusive: their having written to us is exactly what makes this false
     /// and what can make `request` true.
@@ -395,6 +396,26 @@ class DM : public Conversation {
     /// most contacts have no nickname.
     std::string name;
     std::string nickname;
+
+    /// Accepts a message request without answering it: records that we approved them, which moves
+    /// the conversation out of `message_requests()` and into `conversations()`, and tells them we
+    /// did.
+    ///
+    /// The other way to approve someone is to write to them, which is what an answer already does.
+    /// This is Session's Accept button: the same approval, arrived at without saying anything.
+    /// Synced like any other, so a request accepted here is not still waiting on another device.
+    ///
+    /// No way back, as there is none from answering: what un-requests a conversation is
+    /// `delete_contact`, not a second call clearing the flag.  Approving somebody already approved
+    /// does nothing and tells them nothing.
+    ///
+    /// Telling them is best effort and is not waited on: there is nothing to acknowledge it, and
+    /// the acceptance is ours whether or not it arrives.  Our first message to them says the same
+    /// thing again.
+    ///
+    /// @throws std::invalid_argument if the id is not a one-to-one conversation, or is our own.
+    void approve(failable_function<void()> cb);
+    void approve(wait_t);
 
     /// Sets or clears the name we have given them, which is ours rather than theirs and follows us
     /// between devices.  An empty nickname removes it, so `display_name` falls back to `name`.

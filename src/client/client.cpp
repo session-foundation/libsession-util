@@ -294,12 +294,12 @@ static bool ensure_contact(sqlite::Connection& c, int64_t account, bool approved
                    approved ? 1 : 0) > 0;
 }
 
-// Records that we have approved whoever an outgoing message is addressed to, and says whether that
-// changed anything.  Must be called inside the caller's transaction.
+// Records that we have approved an account, and says whether that changed anything.  Must be called
+// inside the caller's transaction.
 //
-// Writing to someone is what approving them is -- there is no separate accept -- so answering a
-// message request is what takes it out of the requests list.  Never for note to self, which is not
-// a contact and cannot be a request.
+// Reached from both directions, because approval is one fact however it was arrived at: writing to
+// someone approves them on the way past, and accepting a request approves them outright.  Never for
+// note to self, which is not a contact and cannot be a request.
 static bool approve_recipient(sqlite::Connection& c, const ConversationId& id, Client& client) {
     if (client.is_me(id.session_id()))
         return false;
@@ -1681,6 +1681,69 @@ void Client::_set_blocked(const ConversationId& id, bool blocked) {
 
     if (!changed)
         return;
+    _sync_contact(id);
+    _touch(id);
+}
+
+void Client::_approve(const ConversationId& id) {
+    bool approved = false;
+    {
+        auto c = core.database().conn();
+        SQLite::Transaction tx{c.sql};
+        approved = approve_recipient(c, id, *this);
+        tx.commit();
+    }
+
+    // Already approved, by an answer or by an earlier accept.  The lists are where they belong and
+    // they have been told, so a second accept is not a second acceptance to announce.
+    if (!approved)
+        return;
+
+    _sync_contact(id);
+    _emit_lists_replaced();
+
+    // Best effort, and deliberately not waited on: there is nothing to acknowledge it, and the
+    // acceptance is recorded whether or not it arrives.  Session's other clients send this on the
+    // same button and read it the same way, and without it the only thing that would tell them is
+    // our first message -- which accepting is precisely the choice not to send.
+    auto now = clock_now_ms();
+    SessionProtos::Content content;
+    content.set_sigtimestamp(static_cast<uint64_t>(epoch_ms(now)));
+    content.mutable_messagerequestresponse()->set_isapproved(true);
+
+    // Registered rather than fired blind: Core reports on every send, and a status for an id nobody
+    // claims would sit in _early_status for the life of the process.
+    _quiet_sends.insert(core.send_dm(id.session_id(), content, now));
+}
+
+void Client::_on_message_request_response(
+        std::span<const std::byte, 33> sender, const SessionProtos::MessageRequestResponse& res) {
+    // Only an acceptance is acted on.  Approval has no reverse -- what a refusal does is delete
+    // the contact, which reaches us as the entry going from the Contacts config -- so the false
+    // form has nothing here to mean.
+    if (!res.isapproved())
+        return;
+
+    // Only for an account that is already a contact of ours, which writing to them made them: a
+    // response from someone we have never written to answers a request we never made, and there is
+    // no relationship of ours for it to be a fact about.
+    bool changed = false;
+    {
+        auto c = core.database().conn();
+        changed = c.prepared_exec(
+                          R"(
+            UPDATE contacts SET approved_me = 1
+            WHERE account = (SELECT id FROM accounts WHERE session_id = ?) AND NOT approved_me
+        )",
+                          sender) > 0;
+    }
+
+    if (!changed)
+        return;
+
+    // No _emit_lists_replaced: only our own approval moves a conversation between the lists.  This
+    // is theirs, so the conversation stays where it was and what changed is a field of it.
+    auto id = ConversationId::dm(sender);
     _sync_contact(id);
     _touch(id);
 }
@@ -4748,6 +4811,14 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     // away rather than adding anything -- so it is handled here and goes no further.
     if (content.has_unsendrequest()) {
         _on_unsend_request(msg.sender_session_id, content.unsendrequest());
+        return;
+    }
+
+    // Someone telling us they accepted a message request of ours.  Not history either -- it says
+    // something about the relationship rather than adding to what was said in it -- so it is
+    // handled here and goes no further.
+    if (content.has_messagerequestresponse()) {
+        _on_message_request_response(msg.sender_session_id, content.messagerequestresponse());
         return;
     }
 

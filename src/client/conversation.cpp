@@ -197,6 +197,15 @@ void Conversation::delete_conversation(bool keep_messages, wait_t) {
 
 // -- One-to-one only ----------------------------------------------------------------------------
 
+void DM::approve(failable_function<void()> cb) {
+    _client->_require_contact("approve", id);
+    _client->_async([c = _client, id = id] { c->_approve(id); }, std::move(cb));
+}
+void DM::approve(wait_t) {
+    _client->_require_contact("approve", id);
+    _client->loop.call_get([this] { _client->_approve(id); });
+}
+
 void DM::set_blocked(bool blocked, failable_function<void()> cb) {
     _client->_require_contact("set_blocked", id);
     _client->_async([c = _client, id = id, blocked] { c->_set_blocked(id, blocked); },
