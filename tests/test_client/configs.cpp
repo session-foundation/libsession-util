@@ -59,9 +59,9 @@ TEST_CASE("Client: re-deriving a contact changes nothing", "[client][configs]") 
     merge_contacts(*c.client, pushed);
 
     // The property that makes the mapping trustworthy: applying a config to the tables and then
-    // deriving a config back from those tables is the identity.  Anything lost, rounded or defaulted
-    // on the way through shows up here as a config that went dirty -- and a mapping that dirties on
-    // every pass would push a pointless update after every merge, forever.
+    // deriving a config back from those tables is the identity.  Anything lost, rounded or
+    // defaulted on the way through shows up here as a config that went dirty -- and a mapping that
+    // dirties on every pass would push a pointless update after every merge, forever.
     auto& contacts = c->core.configs.contacts();
     REQUIRE_FALSE(contacts.needs_push());
     TestHelper::sync_contact(*c.client, id);
@@ -78,8 +78,10 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
     auto them = "05" + std::string(64, 'c');
     auto id = dm_from_hex(them);
 
-    auto pushed = contacts_from_another_device(
-            *c.client, them, [](auto& e) { e.set_name("Anakin"); e.approved = true; });
+    auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) {
+        e.set_name("Anakin");
+        e.approved = true;
+    });
     merge_contacts(*c.client, pushed);
     REQUIRE(c->conversation(id, wait));
 
@@ -100,24 +102,27 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
 
     // Conversation and history both gone, and reported.
     CHECK_FALSE(c->conversation(id, wait));
-    CHECK(conn.prepared_get<int64_t>(
-                  "SELECT count(*) FROM messages WHERE sender = ?", account) == 0);
+    CHECK(conn.prepared_get<int64_t>("SELECT count(*) FROM messages WHERE sender = ?", account) ==
+          0);
     CHECK(std::ranges::find(gone, id) != gone.end());
 
     // But not the account: we may have seen them in a group, and their profile renders that.
     CHECK(conn.prepared_get<int64_t>(
                   "SELECT count(*) FROM accounts WHERE session_id = ?", id.session_id()) == 1);
-    CHECK(conn.prepared_get<int64_t>(
-                  "SELECT count(*) FROM contacts WHERE account = ?", account) == 0);
+    CHECK(conn.prepared_get<int64_t>("SELECT count(*) FROM contacts WHERE account = ?", account) ==
+          0);
 }
 
-TEST_CASE("Client: a contact whose dump was lost is published, not destroyed", "[client][configs]") {
+TEST_CASE(
+        "Client: a contact whose dump was lost is published, not destroyed", "[client][configs]") {
     TempClient c;
     auto them = "05" + std::string(64, 'e');
     auto id = dm_from_hex(them);
 
-    auto pushed = contacts_from_another_device(
-            *c.client, them, [](auto& e) { e.set_name("Rey"); e.approved = true; });
+    auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) {
+        e.set_name("Rey");
+        e.approved = true;
+    });
     merge_contacts(*c.client, pushed);
     REQUIRE(c->conversation(id, wait));
 
@@ -520,7 +525,8 @@ TEST_CASE("Client: the save-notification preference follows the account", "[clie
     CHECK(c->notify_media_saved(wait));
 }
 
-TEST_CASE("Client: a conversation reports the picture it has been told about", "[client][configs]") {
+TEST_CASE(
+        "Client: a conversation reports the picture it has been told about", "[client][configs]") {
     TempClient c;
     auto them = "05" + std::string(64, 'b');
     auto id = dm_from_hex(them);

@@ -1358,7 +1358,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
-
     config.increase_no_file_limit = cpp_defaults.increase_no_file_limit;
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
@@ -1488,41 +1487,36 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(opt::disable_subnet_diversity{});
 
         if (config->min_retry_delay_ms > 0 || config->max_retry_delay_ms > 0)
-            cpp_opts.emplace_back(
-                    opt::retry_delay{
-                            std::chrono::milliseconds{config->min_retry_delay_ms},
-                            std::chrono::milliseconds{config->max_retry_delay_ms}});
+            cpp_opts.emplace_back(opt::retry_delay{
+                    std::chrono::milliseconds{config->min_retry_delay_ms},
+                    std::chrono::milliseconds{config->max_retry_delay_ms}});
 
         // A `0` value is valid for this option
         cpp_opts.emplace_back(opt::redirect_retry_count{config->redirect_retry_count});
 
         if (config->num_nodes_to_check_for_network_offset > 0)
-            cpp_opts.emplace_back(
-                    opt::num_nodes_to_check_for_network_offset{
-                            config->num_nodes_to_check_for_network_offset});
+            cpp_opts.emplace_back(opt::num_nodes_to_check_for_network_offset{
+                    config->num_nodes_to_check_for_network_offset});
 
         if (config->min_resume_clock_resync_interval_minutes > 0)
-            cpp_opts.emplace_back(
-                    opt::min_resume_clock_resync_interval{std::chrono::minutes{
-                            config->min_resume_clock_resync_interval_minutes}});
+            cpp_opts.emplace_back(opt::min_resume_clock_resync_interval{
+                    std::chrono::minutes{config->min_resume_clock_resync_interval_minutes}});
 
         // Snode cache
         if (config->cache_dir)
             cpp_opts.emplace_back(opt::cache_directory{std::filesystem::path{config->cache_dir}});
 
         if (config->fallback_snode_pool_path)
-            cpp_opts.emplace_back(
-                    opt::fallback_snode_pool_path{
-                            std::filesystem::path{config->fallback_snode_pool_path}});
+            cpp_opts.emplace_back(opt::fallback_snode_pool_path{
+                    std::filesystem::path{config->fallback_snode_pool_path}});
 
         if (config->cache_expiration_minutes > 0)
             cpp_opts.emplace_back(
                     opt::cache_expiration{std::chrono::minutes{config->cache_expiration_minutes}});
 
         if (config->cache_min_lifetime_ms > 0)
-            cpp_opts.emplace_back(
-                    opt::cache_min_lifetime{
-                            std::chrono::milliseconds{config->cache_min_lifetime_ms}});
+            cpp_opts.emplace_back(opt::cache_min_lifetime{
+                    std::chrono::milliseconds{config->cache_min_lifetime_ms}});
 
         if (config->cache_min_size > 0)
             cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
@@ -1531,12 +1525,10 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(opt::cache_min_swarm_size{config->cache_min_swarm_size});
 
         // A `0` value is valid for these options
-        cpp_opts.emplace_back(
-                opt::cache_num_nodes_to_use_for_refresh{
-                        config->cache_num_nodes_to_use_for_refresh});
-        cpp_opts.emplace_back(
-                opt::cache_min_num_refresh_presence_to_include_node{
-                        config->cache_min_num_refresh_presence_to_include_node});
+        cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{
+                config->cache_num_nodes_to_use_for_refresh});
+        cpp_opts.emplace_back(opt::cache_min_num_refresh_presence_to_include_node{
+                config->cache_min_num_refresh_presence_to_include_node});
 
         if (config->cache_node_strike_threshold > 0)
             cpp_opts.emplace_back(
@@ -1550,25 +1542,20 @@ LIBSESSION_C_API bool session_network_init(
                     cpp_opts.emplace_back(opt::path_length{config->path_length});
 
                 if (config->onionreq_path_strike_threshold > 0)
-                    cpp_opts.emplace_back(
-                            opt::onionreq_path_strike_threshold{
-                                    config->onionreq_path_strike_threshold});
+                    cpp_opts.emplace_back(opt::onionreq_path_strike_threshold{
+                            config->onionreq_path_strike_threshold});
 
                 if (config->onionreq_path_build_retry_limit > 0)
-                    cpp_opts.emplace_back(
-                            opt::onionreq_path_build_retry_limit{
-                                    config->onionreq_path_build_retry_limit});
+                    cpp_opts.emplace_back(opt::onionreq_path_build_retry_limit{
+                            config->onionreq_path_build_retry_limit});
 
                 if (config->onionreq_min_path_count_standard > 0)
-                    cpp_opts.emplace_back(
-                            opt::onionreq_min_path_count{
-                                    PathCategory::standard,
-                                    config->onionreq_min_path_count_standard});
+                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
+                            PathCategory::standard, config->onionreq_min_path_count_standard});
 
                 if (config->onionreq_min_path_count_file > 0)
-                    cpp_opts.emplace_back(
-                            opt::onionreq_min_path_count{
-                                    PathCategory::file, config->onionreq_min_path_count_file});
+                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
+                            PathCategory::file, config->onionreq_min_path_count_file});
 
                 if (config->onionreq_single_path_mode)
                     cpp_opts.emplace_back(opt::onionreq_single_path_mode{});
@@ -1582,9 +1569,8 @@ LIBSESSION_C_API bool session_network_init(
                                     config->onionreq_path_rotation_frequency_minutes}});
 
                 if (config->onionreq_edge_node_cache_duration_days > 0)
-                    cpp_opts.emplace_back(
-                            opt::onionreq_edge_node_cache_duration{std::chrono::days{
-                                    config->onionreq_edge_node_cache_duration_days}});
+                    cpp_opts.emplace_back(opt::onionreq_edge_node_cache_duration{
+                            std::chrono::days{config->onionreq_edge_node_cache_duration_days}});
                 break;
 
             case SESSION_NETWORK_ROUTER_SESSION_ROUTER:
@@ -1600,14 +1586,12 @@ LIBSESSION_C_API bool session_network_init(
         switch (config->transport) {
             case SESSION_NETWORK_TRANSPORT_QUIC:
                 if (config->quic_handshake_timeout_seconds > 0)
-                    cpp_opts.emplace_back(
-                            opt::quic_handshake_timeout{
-                                    std::chrono::seconds{config->quic_handshake_timeout_seconds}});
+                    cpp_opts.emplace_back(opt::quic_handshake_timeout{
+                            std::chrono::seconds{config->quic_handshake_timeout_seconds}});
 
                 if (config->quic_keep_alive_seconds > 0)
-                    cpp_opts.emplace_back(
-                            opt::quic_keep_alive{
-                                    std::chrono::seconds{config->quic_keep_alive_seconds}});
+                    cpp_opts.emplace_back(opt::quic_keep_alive{
+                            std::chrono::seconds{config->quic_keep_alive_seconds}});
 
                 if (config->quic_max_udp_payload > 0)
                     cpp_opts.emplace_back(opt::quic_max_udp_payload{config->quic_max_udp_payload});

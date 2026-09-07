@@ -334,8 +334,9 @@ class Core {
 
     // Sends one round of retrieves to `node` for `namespaces`.  A retrieve is capped by the storage
     // server, so one round may not exhaust a namespace; `round` counts continuations and bounds
-    // them.  Every round goes to the same node: the retrieve cursor is stored per (namespace, node),
-    // so continuing against a different swarm member would resume from that member's position.
+    // them.  Every round goes to the same node: the retrieve cursor is stored per (namespace,
+    // node), so continuing against a different swarm member would resume from that member's
+    // position.
     void _send_poll(
             network::Network* net,
             network::service_node node,

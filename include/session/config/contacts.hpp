@@ -102,8 +102,8 @@ struct contact_info {
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
     /// Messages in this conversation older than this are to be deleted, and arriving ones older
-    /// than it dropped.  This is what makes clearing a conversation, and deleting one, mean the same
-    /// thing on every device: the instruction is recorded rather than inferred from when some
+    /// than it dropped.  This is what makes clearing a conversation, and deleting one, mean the
+    /// same thing on every device: the instruction is recorded rather than inferred from when some
     /// config happened to be written.  Epoch (the default) means no such instruction.
     std::chrono::sys_seconds delete_before{};
 

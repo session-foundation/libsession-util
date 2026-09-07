@@ -428,8 +428,7 @@ std::vector<std::byte> legacy_display_pic_decrypt(
     body = body.subspan(0, body.size() - LEGACY_DISPLAY_PIC_TAG_SIZE);
 
     std::vector<std::byte> plaintext(body.size());
-    gcm_aes256_decrypt(
-            &ctx, body.size(), to_unsigned(plaintext.data()), to_unsigned(body.data()));
+    gcm_aes256_decrypt(&ctx, body.size(), to_unsigned(plaintext.data()), to_unsigned(body.data()));
 
     std::array<unsigned char, LEGACY_DISPLAY_PIC_TAG_SIZE> tag_out;
     gcm_aes256_digest(&ctx, tag_out.size(), tag_out.data());
@@ -452,7 +451,8 @@ std::vector<std::byte> legacy_decrypt(
 
     // Bounded by what the file server will actually store, so a caller cannot be talked into
     // holding an arbitrary amount by anything a sender claims.  This has to be all in memory: the
-    // authenticators below cover the whole ciphertext, and nothing may be decrypted until they pass.
+    // authenticators below cover the whole ciphertext, and nothing may be decrypted until they
+    // pass.
     if (encrypted.size() > LEGACY_MAX_ENCRYPTED_SIZE)
         throw std::runtime_error{
                 "Legacy attachment decryption failed: {}B exceeds the {}B maximum"_format(

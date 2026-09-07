@@ -361,10 +361,7 @@ void SessionRouter::_start_file_upload(
                         return nullptr;
 
                     return &_get_file_client(
-                            *pubkey,
-                            "::1",
-                            held.tunnel->local_port,
-                            TUNNELED_QUIC_MAX_UDP_PAYLOAD);
+                            *pubkey, "::1", held.tunnel->local_port, TUNNELED_QUIC_MAX_UDP_PAYLOAD);
                 });
 
         _jq.call([this, upload_id] { _cleanup_upload(upload_id); });
@@ -1095,28 +1092,28 @@ void SessionRouter::_download_internal(DownloadRequest request) {
 
     auto& held = _tunnel(quic_target->address);
     held.tunnel = srouter->establish_udp(
-                quic_target->address,
-                quic_target->port,
-                [weak_self = weak_from_this(), this, request, download_id, file_id](
-                        router::tunnel_info info) mutable {
-                    if (auto self = weak_self.lock())
-                        _quic_download_via_tunnel(
-                                request, download_id, std::move(file_id), std::move(info));
-                },
-                [weak_self = weak_from_this(), this, request, download_id](
-                        router::tunnel_failure failure) {
-                    if (auto self = weak_self.lock()) {
-                        bool timeout = failure == router::tunnel_failure::timeout;
-                        log::error(
-                                cat,
-                                "[Download {}]: Tunnel establishment failed: {}.",
-                                download_id,
-                                timeout ? "timed out" : "remote is unreachable");
-                        _active_downloads.erase(download_id);
-                        request.on_complete(
-                                timeout ? ERROR_BUILD_TIMEOUT : ERROR_INVALID_DESTINATION, timeout);
-                    }
-                });
+            quic_target->address,
+            quic_target->port,
+            [weak_self = weak_from_this(), this, request, download_id, file_id](
+                    router::tunnel_info info) mutable {
+                if (auto self = weak_self.lock())
+                    _quic_download_via_tunnel(
+                            request, download_id, std::move(file_id), std::move(info));
+            },
+            [weak_self = weak_from_this(), this, request, download_id](
+                    router::tunnel_failure failure) {
+                if (auto self = weak_self.lock()) {
+                    bool timeout = failure == router::tunnel_failure::timeout;
+                    log::error(
+                            cat,
+                            "[Download {}]: Tunnel establishment failed: {}.",
+                            download_id,
+                            timeout ? "timed out" : "remote is unreachable");
+                    _active_downloads.erase(download_id);
+                    request.on_complete(
+                            timeout ? ERROR_BUILD_TIMEOUT : ERROR_INVALID_DESTINATION, timeout);
+                }
+            });
     if (!held.tunnel) {
         // Neither callback fires when the remote is unreachable, so this is the only chance to
         // report it.
@@ -1283,10 +1280,7 @@ void SessionRouter::_establish_tunnel(
 
                     for (auto&& [req, cb] : std::move(requests_to_process))
                         _send_via_tunnel(
-                                info.remote,
-                                info.local_port,
-                                std::move(req),
-                                std::move(cb));
+                                info.remote, info.local_port, std::move(req), std::move(cb));
                 }
             },
             [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](

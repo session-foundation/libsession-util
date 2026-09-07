@@ -180,7 +180,9 @@ struct callbacks {
     /// - swarm_hash -- the hash the swarm assigned the stored message, on `success` and when the
     ///   storage server reported one.  Unset for every other status.
     std::function<void(
-            int64_t message_id, MessageSendStatus status, std::optional<std::string_view> swarm_hash)>
+            int64_t message_id,
+            MessageSendStatus status,
+            std::optional<std::string_view> swarm_hash)>
             message_send_status;
 
     /// Callback fired when merging config messages from the swarm changed one or more of the

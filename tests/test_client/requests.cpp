@@ -140,4 +140,3 @@ TEST_CASE("Client: a blocked account's messages are refused", "[client][requests
     deliver(*c, sender, "still there?", from_epoch_ms(7000), "h3");
     CHECK(c->conversation(id, wait)->messages(wait).size() == 2);
 }
-

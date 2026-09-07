@@ -1,8 +1,8 @@
-#include <session/random.hpp>
+#include "../../src/client/download_cache.hpp"
 
 #include <fstream>
+#include <session/random.hpp>
 
-#include "../../src/client/download_cache.hpp"
 #include "common.hpp"
 
 namespace cache = session::client::cache;
@@ -36,8 +36,7 @@ TEST_CASE("Cache: a url names one file, whatever is hung off it", "[client][cach
     auto base = cache::path_for(dir.path, cache::PROFILE_DIR, "http://fs.example/file/1234");
     auto fragment = cache::path_for(
             dir.path, cache::PROFILE_DIR, "http://fs.example/file/1234#pubkey=abcdef");
-    auto query =
-            cache::path_for(dir.path, cache::PROFILE_DIR, "http://fs.example/file/1234?v=2");
+    auto query = cache::path_for(dir.path, cache::PROFILE_DIR, "http://fs.example/file/1234?v=2");
 
     // The bytes at the base url are the bytes; a fragment says how to reach and unpack them, and a
     // query string is not part of which file this is.
@@ -128,8 +127,7 @@ TEST_CASE("Cache: listing offers up what a sweep may consider", "[client][cache]
 
     // Two finished files and not the third: what is offered up is only what a sweep may act on.
     CHECK(names.size() == 2);
-    CHECK(names.contains(
-            cache::path_for(dir.path, cache::PROFILE_DIR, kept).filename().string()));
+    CHECK(names.contains(cache::path_for(dir.path, cache::PROFILE_DIR, kept).filename().string()));
     CHECK_FALSE(names.contains(partial.filename().string()));
 
     // The referencing url carries a fragment, as a stored one may, and still names the same file --

@@ -158,19 +158,14 @@ void Core::_poll() {
 
     log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
 
-    net->get_swarm(
-            globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot poll: no swarm nodes available");
-                    return;
-                }
+    net->get_swarm(globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
+        if (swarm.empty()) {
+            log::warning(cat, "Cannot poll: no swarm nodes available");
+            return;
+        }
 
-                _send_poll(
-                        net,
-                        swarm.front(),
-                        {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()},
-                        0);
-            });
+        _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
+    });
 }
 
 void Core::_send_poll(
@@ -717,10 +712,7 @@ void Core::delete_from_swarm(
 
                 net->send_request(
                         swarm_request(
-                                swarm.front(),
-                                globals.pubkey_x25519(),
-                                "delete",
-                                std::move(body)),
+                                swarm.front(), globals.pubkey_x25519(), "delete", std::move(body)),
                         [this, hashes = std::move(hashes), on_complete](
                                 bool success,
                                 bool timeout,
@@ -867,7 +859,9 @@ void Core::_send_to_swarm(
                                         hash = h->get<std::string>();
                                 } catch (const std::exception& e) {
                                     log::warning(
-                                            cat, "Could not read stored message hash: {}", e.what());
+                                            cat,
+                                            "Could not read stored message hash: {}",
+                                            e.what());
                                 }
                             }
                             on_complete(

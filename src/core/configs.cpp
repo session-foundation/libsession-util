@@ -1,10 +1,9 @@
 #include "session/core/configs.hpp"
 
-#include <oxen/log.hpp>
-#include <oxen/quic/loop.hpp>
-
 #include <algorithm>
 #include <nlohmann/json.hpp>
+#include <oxen/log.hpp>
+#include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
 #include <session/config/base.hpp>
 #include <session/config/contacts.hpp>
@@ -44,8 +43,7 @@ void Configs::_load() {
     // reused as the iteration advances.
     std::unordered_map<std::string, std::vector<std::byte>> dumps;
     for (auto [type, data] : conn().prepared_results<std::string, sqlite::blob>(
-                 "SELECT type, data FROM config_dumps WHERE pubkey = ?",
-                 core.globals.session_id()))
+                 "SELECT type, data FROM config_dumps WHERE pubkey = ?", core.globals.session_id()))
         dumps.emplace(std::move(type), std::vector<std::byte>{data.begin(), data.end()});
 
     auto stored = [&dumps](std::string_view type) -> std::optional<std::span<const std::byte>> {
@@ -236,10 +234,7 @@ void Configs::initialise_new_account() {
 
 std::vector<config::ConfigBase*> Configs::_pushable() {
     _load();
-    return {_user_profile.get(),
-            _contacts.get(),
-            _convo_info_volatile.get(),
-            _user_groups.get()};
+    return {_user_profile.get(), _contacts.get(), _convo_info_volatile.get(), _user_groups.get()};
 }
 
 bool Configs::needs_push() {

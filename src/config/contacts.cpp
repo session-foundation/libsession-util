@@ -217,11 +217,9 @@ void Contacts::set(const contact_info& contact) {
     set_ts(info["d"], contact.delete_before);
     // Deleting the messages takes their attachments with them, so an attachment instruction at or
     // before that point says nothing further and is dropped rather than stored.
-    set_ts(
-            info["D"],
-            contact.delete_attach_before <= contact.delete_before
-                    ? std::chrono::sys_seconds{}
-                    : contact.delete_attach_before);
+    set_ts(info["D"],
+           contact.delete_attach_before <= contact.delete_before ? std::chrono::sys_seconds{}
+                                                                 : contact.delete_attach_before);
 
     set_flag(info["a"], contact.approved);
     set_flag(info["A"], contact.approved_me);

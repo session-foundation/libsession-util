@@ -120,8 +120,8 @@ TEST_CASE(
     CHECK(ptr.contenttype() == "application/octet-stream");
 
     // The file's own size, exactly -- not the encrypted size the file server reports back, which is
-    // larger and is what every other client would misread.  Pinned to the byte rather than to `> 0`,
-    // which is what let the two be confused in the first place.
+    // larger and is what every other client would misread.  Pinned to the byte rather than to `>
+    // 0`, which is what let the two be confused in the first place.
     CHECK(ptr.size() == contents.size());
 
     // The url has to be one the download path can actually use, rather than merely non-empty.

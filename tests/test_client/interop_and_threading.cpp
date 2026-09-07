@@ -13,10 +13,11 @@ TEST_CASE("Client: an asynchronous call reports that it succeeded", "[client][ca
     // class means choosing it for everything.
     std::optional<std::string> reported_error = "not called";
     std::vector<AnyConversation> got;
-    c->Client::conversations([&](std::optional<std::string> error, std::vector<AnyConversation> cs) {
-        reported_error = std::move(error);
-        got = std::move(cs);
-    });
+    c->Client::conversations(
+            [&](std::optional<std::string> error, std::vector<AnyConversation> cs) {
+                reported_error = std::move(error);
+                got = std::move(cs);
+            });
     sync(*c);
 
     // Called exactly once, and saying it worked rather than leaving the caller to assume so.

@@ -160,8 +160,7 @@ TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][rece
     CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
 }
 
-TEST_CASE(
-        "Client: the same message under a different swarm hash is deduped", "[client][receive]") {
+TEST_CASE("Client: the same message under a different swarm hash is deduped", "[client][receive]") {
     TempClient c;
     SenderKeys sender;
     auto convo = ConversationId::dm(sender.session_id);
@@ -169,15 +168,39 @@ TEST_CASE(
     // One message stored twice -- a sender who retried a store that had actually succeeded, say --
     // lands under two swarm hashes.  The swarm hash cannot recognise that; the msgid can, being the
     // one identifier every copy of a message carries.
-    deliver(*c, sender, "said once", from_epoch_ms(5000), "first_hash", "", std::nullopt, nullptr, 7);
-    deliver(*c, sender, "said once", from_epoch_ms(5000), "second_hash", "", std::nullopt, nullptr, 7);
+    deliver(*c,
+            sender,
+            "said once",
+            from_epoch_ms(5000),
+            "first_hash",
+            "",
+            std::nullopt,
+            nullptr,
+            7);
+    deliver(*c,
+            sender,
+            "said once",
+            from_epoch_ms(5000),
+            "second_hash",
+            "",
+            std::nullopt,
+            nullptr,
+            7);
 
     CHECK(c->conversation(convo, wait)->messages(wait).size() == 1);
     CHECK(c->conversation(convo, wait)->unread() == 1);
 
     // Same millisecond, different message: the case the timestamp alone cannot tell apart, and the
     // whole reason the id exists.  Identical body, so nothing but the id distinguishes them.
-    deliver(*c, sender, "said once", from_epoch_ms(5000), "third_hash", "", std::nullopt, nullptr, 8);
+    deliver(*c,
+            sender,
+            "said once",
+            from_epoch_ms(5000),
+            "third_hash",
+            "",
+            std::nullopt,
+            nullptr,
+            8);
     CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
 
     // A sender too old to set one has no identity beyond its timestamp, so two arrivals under
@@ -304,7 +327,8 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     // Even one that arrives late, bearing a timestamp older than what we already read to.
     c->conversation(convo, wait)->mark_read(wait);
     deliver(*c, sender, "late", from_epoch_ms(3500), "h5");
-    CHECK(c->conversation(convo, wait)->unread() == 0);  // known limitation of a timestamp watermark
+    CHECK(c->conversation(convo, wait)->unread() ==
+          0);  // known limitation of a timestamp watermark
 
     // Marking read on a conversation with nothing to read is a no-op, not an error.
     auto empty = ConversationId::dm(
@@ -471,7 +495,8 @@ TEST_CASE("Client: a message can be shown as it was on the wire", "[client][mess
     SenderKeys sender;
     auto convo = ConversationId::dm(sender.session_id);
 
-    deliver(*c,
+    deliver(
+            *c,
             sender,
             "hello there",
             from_epoch_ms(5000),
@@ -517,7 +542,8 @@ TEST_CASE("Client: a message can be shown as it was on the wire", "[client][mess
     CHECK_FALSE(c->message_debug(msgs[0].id + 1000, wait).has_value());
 }
 
-TEST_CASE("Client: deleting a message empties it but keeps its place", "[client][messages][delete]") {
+TEST_CASE(
+        "Client: deleting a message empties it but keeps its place", "[client][messages][delete]") {
     TempClient c;
     SenderKeys sender;
     auto convo = ConversationId::dm(sender.session_id);
@@ -655,8 +681,11 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
     SenderKeys sender;
     auto convo = ConversationId::dm(sender.session_id);
 
-    auto unsend = [&](const SenderKeys& from, const b33& author, int64_t ts,
-                      std::optional<int64_t> msgid, std::string hash) {
+    auto unsend = [&](const SenderKeys& from,
+                      const b33& author,
+                      int64_t ts,
+                      std::optional<int64_t> msgid,
+                      std::string hash) {
         SessionProtos::Content content;
         content.set_sigtimestamp(9000);
         auto* req = content.mutable_unsendrequest();
@@ -744,8 +773,7 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
             if (stamp)
                 p->set_lastupdateseconds(*stamp);
             if (k)
-                d.set_profilekey(std::string{
-                        reinterpret_cast<const char*>(k->data()), k->size()});
+                d.set_profilekey(std::string{reinterpret_cast<const char*>(k->data()), k->size()});
         };
     };
 

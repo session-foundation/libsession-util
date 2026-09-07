@@ -128,8 +128,8 @@ class Configs : public detail::CoreComponent {
     ///
     /// A config is dumped when it changes, which is right when nobody knows any better -- but a
     /// caller working through a batch of messages does know better, and dumping between them writes
-    /// intermediate states nobody will ever read.  Holding one of these says "there is more coming";
-    /// releasing it says "now".
+    /// intermediate states nobody will ever read.  Holding one of these says "there is more
+    /// coming"; releasing it says "now".
     ///
     /// This is what keeps the timer honest.  Debouncing is a guess at where a batch ended, and a
     /// guess is only needed where nothing knows: with a batch held across the work, dumping happens

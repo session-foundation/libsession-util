@@ -49,12 +49,7 @@ struct ScriptedNetwork {
 
     /// A request addressed to the swarm, starting at whichever member the caller would have picked.
     Request to(const service_node& first, std::optional<std::chrono::milliseconds> overall = 60s) {
-        Request req{
-                first,
-                "store",
-                std::vector<std::byte>{},
-                RequestCategory::standard_small,
-                10s};
+        Request req{first, "store", std::vector<std::byte>{}, RequestCategory::standard_small, 10s};
         req.swarm_pubkey = swarm_pubkey;
         req.overall_timeout = overall;
         return req;
