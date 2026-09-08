@@ -174,6 +174,7 @@ struct Recorder {
     std::vector<AnyConversation> added, updated;
     std::vector<ConversationId> removed;
     std::vector<std::vector<AnyConversation>> replaced, requests_replaced;
+    std::vector<std::vector<ConversationId>> reordered, requests_reordered;
 
     /// One entry per *call*, so a test can tell one report of three messages from three reports of
     /// one.  `messages()` below flattens them when only the content matters.
@@ -213,6 +214,16 @@ struct Recorder {
                         [this](std::vector<AnyConversation>&& l) {
                             order.push_back("requests");
                             requests_replaced.push_back(std::move(l));
+                        },
+                .conversation_order_updated =
+                        [this](std::vector<ConversationId> ids) {
+                            order.push_back("reordered");
+                            reordered.push_back(std::move(ids));
+                        },
+                .request_order_updated =
+                        [this](std::vector<ConversationId> ids) {
+                            order.push_back("requests_reordered");
+                            requests_reordered.push_back(std::move(ids));
                         },
                 .messages_added =
                         [this](std::vector<Message>&& m) {
