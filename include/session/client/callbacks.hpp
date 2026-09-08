@@ -27,20 +27,22 @@ namespace session::client {
 ///
 /// **Handlers run on Core's event loop**, not the caller's thread.  A handler must not block and
 /// must not throw (an escaping exception is caught and logged, and the change is not redelivered).
-/// A UI will typically copy the argument into its own queue and wake its render thread.
+/// The conversation or message a handler receives is its own: it was read for this delivery and
+/// nothing else holds it, so a UI moves it into its own queue and wakes its render thread. The
+/// ids are borrowed.
 ///
 /// The conversation list an application maintains from these is expected to be *complete*: ordering
 /// is a comparison against every other conversation, so a partial list cannot be sorted.  Showing
 /// only part of it is fine, holding only part of it is not.
 struct callbacks {
     /// A conversation now exists that did not before.
-    std::function<void(const AnyConversation&)> conversation_added;
+    std::function<void(AnyConversation)> conversation_added;
 
     /// A conversation's contents changed: a new or edited message, a name, an unread count, its
     /// last activity.  Fired once with the conversation's settled state rather than once per
     /// underlying change, so a poll that delivers fifty messages to one conversation fires this
     /// once.
-    std::function<void(const AnyConversation&)> conversation_updated;
+    std::function<void(AnyConversation)> conversation_updated;
 
     /// A conversation is gone and should be dropped from the list.
     std::function<void(const ConversationId&)> conversation_removed;
@@ -62,10 +64,10 @@ struct callbacks {
     std::function<void(std::vector<AnyConversation>)> request_list_replaced;
 
     /// A message was added, whether received or sent from here.
-    std::function<void(const ConversationId&, const Message&)> message_added;
+    std::function<void(const ConversationId&, Message)> message_added;
 
     /// An existing message changed — currently only its send state.
-    std::function<void(const ConversationId&, const Message&)> message_updated;
+    std::function<void(const ConversationId&, Message)> message_updated;
 
     /// Messages were deleted from a conversation, and anything displaying its history should read
     /// it again.

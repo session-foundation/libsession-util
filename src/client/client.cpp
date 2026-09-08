@@ -477,9 +477,10 @@ void Client::_emit_conversation_added(const ConversationId& id) {
     auto convo = _conversation(id);
     if (!convo)
         return;
-    _emit([convo = std::move(*convo)](const callbacks& cbs) {
+    // Mutable so the value moves out: each _emit job runs once, and the handler owns what it gets.
+    _emit([convo = std::move(*convo)](const callbacks& cbs) mutable {
         if (cbs.conversation_added)
-            cbs.conversation_added(convo);
+            cbs.conversation_added(std::move(convo));
     });
 }
 
@@ -501,10 +502,10 @@ void Client::_emit_message_alone(bool added, const ConversationId& id, int64_t m
     auto msg = _message(message_id);
     if (!msg)
         return;
-    _emit([added, id, msg = std::move(*msg)](const callbacks& cbs) {
+    _emit([added, id, msg = std::move(*msg)](const callbacks& cbs) mutable {
         const auto& h = added ? cbs.message_added : cbs.message_updated;
         if (h)
-            h(id, msg);
+            h(id, std::move(msg));
     });
 }
 
@@ -555,9 +556,9 @@ void Client::_flush_pending() {
         auto convo = _conversation(id);
         if (!convo)
             continue;
-        _emit([convo = std::move(*convo)](const callbacks& cbs) {
+        _emit([convo = std::move(*convo)](const callbacks& cbs) mutable {
             if (cbs.conversation_updated)
-                cbs.conversation_updated(convo);
+                cbs.conversation_updated(std::move(convo));
         });
     }
 }
@@ -2146,11 +2147,12 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
 void Client::_emit_lists_replaced() {
     auto convos = _conversations();
     auto requests = _message_requests();
-    _emit([convos = std::move(convos), requests = std::move(requests)](const callbacks& cbs) {
+    _emit([convos = std::move(convos),
+           requests = std::move(requests)](const callbacks& cbs) mutable {
         if (cbs.conversation_list_replaced)
-            cbs.conversation_list_replaced(convos);
+            cbs.conversation_list_replaced(std::move(convos));
         if (cbs.request_list_replaced)
-            cbs.request_list_replaced(requests);
+            cbs.request_list_replaced(std::move(requests));
     });
 }
 
