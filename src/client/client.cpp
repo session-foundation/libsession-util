@@ -548,20 +548,62 @@ void Client::_touch(const ConversationId& id) {
     }
 }
 
+void Client::_touch_reordered(const ConversationId& id) {
+    if (std::ranges::find(_dirty_order, id) == _dirty_order.end())
+        _dirty_order.push_back(id);
+    _touch(id);
+}
+
 void Client::_flush_pending() {
     _flush_scheduled = false;
     auto dirty = std::move(_dirty);
     _dirty.clear();
+    auto dirty_order = std::move(_dirty_order);
+    _dirty_order.clear();
+
+    // Which list a moved row sits in, read off the row this loop already fetches rather than by
+    // asking again: only a DM can be a request, and the two lists are complements, so each moved
+    // row asks for exactly one of them.
+    bool conversations = false, requests = false;
 
     for (const auto& id : dirty) {
         auto convo = _conversation(id);
         if (!convo)
             continue;
+        if (std::ranges::find(dirty_order, id) != dirty_order.end()) {
+            auto* dm = convo->dm();
+            if (dm && dm->request)
+                requests = true;
+            else
+                conversations = true;
+        }
         _emit([convo = std::move(*convo)](const callbacks& cbs) mutable {
             if (cbs.conversation_updated)
                 cbs.conversation_updated(std::move(convo));
         });
     }
+
+    // And the order, if anything in this batch moved rather than merely changed.  A
+    // `conversation_updated` names the row and says nothing about its position, so a subscriber
+    // applying one alone would have to work the order out for itself -- which means reimplementing
+    // this sort, and the two lists are not sorted the same way.
+    //
+    // The ids only, and not a replacement of the rows: the loop above has just sent every changed
+    // row in full, so a replacement here would re-send the rest of the list to describe a change to
+    // one of them, and would send the changed row's snippet a second time.
+    //
+    // Deliberately after that loop rather than before it, which is the guarantee
+    // `conversation_order_updated` documents: the ids reported here always name conversations the
+    // subscriber has already been told about, so an id it does not recognise means it missed a
+    // notification rather than that the two are racing.
+    //
+    // Once for the batch, not once per message: a poll delivering fifty messages to one
+    // conversation reaches here a single time, which is the same reason `_dirty` exists.  And only
+    // when an ordering term actually moved, because most of what dirties a conversation does not --
+    // a read receipt, a nickname, an expiry -- and a query per read conversation is a lot to say
+    // nothing.
+    if (conversations || requests)
+        _emit_order_updated(conversations, requests);
 }
 
 // -- Asynchronous interface ---------------------------------------------------------------------
@@ -1518,6 +1560,73 @@ std::vector<AnyConversation> Client::_message_requests() {
             _self_or_none());
 }
 
+// The ordered ids of a list and nothing else.  `CONVO_COLUMNS` is most of the cost of reading a
+// list -- a display name to coalesce, an unread count, and a correlated subquery for the snippet,
+// per row -- and none of it says anything about where a row sits.  The identity columns are what
+// `subject_to_id` needs, and are already joined for the filter.
+template <typename... Bind>
+static std::vector<ConversationId> query_conversation_ids(
+        sqlite::Connection& c, const std::string& query, const Bind&... bind) {
+    std::vector<ConversationId> out;
+    for (auto [convo, sid, gid, url, room] :
+         c.prepared_results<
+                 int64_t,
+                 std::optional<sqlite::blob_guts<b33>>,
+                 std::optional<sqlite::blob_guts<b33>>,
+                 std::optional<std::string>,
+                 std::optional<std::string>>(query, bind...))
+        out.push_back(subject_to_id(convo, sid, gid, url, room));
+    return out;
+}
+
+// The filter and the ORDER BY are `_conversations`' and `_message_requests`', and have to stay that
+// way: a subscriber arranging rows by an order event and one that has just been handed a
+// replacement must end up with the same list.
+static constexpr auto ORDER_COLUMNS = "SELECT c.id, a.session_id, g.group_id, m.base_url, m.room";
+
+std::vector<ConversationId> Client::_conversation_order() {
+    auto c = core.database().conn();
+    return query_conversation_ids(
+            c,
+            "{} {} WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
+                    ORDER_COLUMNS, SUBJECT_JOIN, IS_REQUEST),
+            _self_or_none());
+}
+
+std::vector<ConversationId> Client::_message_request_order() {
+    auto c = core.database().conn();
+    return query_conversation_ids(
+            c,
+            "{} {} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
+                    ORDER_COLUMNS, SUBJECT_JOIN, IS_REQUEST),
+            _self_or_none());
+}
+
+void Client::_emit_order_updated(bool conversations, bool requests) {
+    // Read, compare, and send only if it differs.  The read is the unavoidable part -- there is no
+    // way to know an order changed without asking -- but the callback, and everything a subscriber
+    // does with it, is saved every time a message lands in the conversation already at the top of
+    // its list, which is what most messages in an active conversation do.
+    if (conversations) {
+        if (auto order = _conversation_order(); order != _reported_order) {
+            _reported_order = order;
+            _emit([order = std::move(order)](const callbacks& cbs) {
+                if (cbs.conversation_order_updated)
+                    cbs.conversation_order_updated(order);
+            });
+        }
+    }
+    if (requests) {
+        if (auto order = _message_request_order(); order != _reported_request_order) {
+            _reported_request_order = order;
+            _emit([order = std::move(order)](const callbacks& cbs) {
+                if (cbs.request_order_updated)
+                    cbs.request_order_updated(order);
+            });
+        }
+    }
+}
+
 std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     auto c = core.database().conn();
     auto convo = find_conversation(c, id);
@@ -2259,6 +2368,22 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
 void Client::_emit_lists_replaced() {
     auto convos = _conversations();
     auto requests = _message_requests();
+
+    // A replacement carries the order as much as an order event does, so record it as reported.
+    // Without this the record would describe an older belief than the subscriber actually holds,
+    // and an order event that happened to match that older belief would be suppressed -- leaving
+    // the subscriber arranged the way this replacement left it, and never corrected.  Taken from
+    // the rows already read rather than by querying again.
+    auto ids = [](const std::vector<AnyConversation>& list) {
+        std::vector<ConversationId> out;
+        out.reserve(list.size());
+        for (const auto& c : list)
+            out.push_back(c.id());
+        return out;
+    };
+    _reported_order = ids(convos);
+    _reported_request_order = ids(requests);
+
     _emit([convos = std::move(convos),
            requests = std::move(requests)](const callbacks& cbs) mutable {
         if (cbs.conversation_list_replaced)
@@ -3504,7 +3629,7 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
-    _touch(id);
+    _touch_reordered(id);
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
 
@@ -3696,7 +3821,7 @@ int64_t Client::_send_message(
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
-    _touch(id);
+    _touch_reordered(id);
 
     log::debug(
             cat,
@@ -5096,7 +5221,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _emit_message(true, convo_id, client_id);
     }
     if (inserted || renamed)
-        _touch(convo_id);
+        _touch_reordered(convo_id);
 
     // Approval moves a conversation between the two lists, so both changed and neither changed in a
     // way that naming one row would describe.

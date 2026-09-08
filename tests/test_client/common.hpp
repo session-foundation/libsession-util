@@ -174,6 +174,7 @@ struct Recorder {
     std::vector<AnyConversation> added, updated;
     std::vector<ConversationId> removed;
     std::vector<std::vector<AnyConversation>> replaced, requests_replaced;
+    std::vector<std::vector<ConversationId>> reordered, requests_reordered;
     std::vector<std::pair<ConversationId, Message>> msg_added, msg_updated;
 
     callbacks handlers() {
@@ -202,6 +203,16 @@ struct Recorder {
                         [this](std::vector<AnyConversation>&& l) {
                             order.push_back("requests");
                             requests_replaced.push_back(std::move(l));
+                        },
+                .conversation_order_updated =
+                        [this](std::vector<ConversationId> ids) {
+                            order.push_back("reordered");
+                            reordered.push_back(std::move(ids));
+                        },
+                .request_order_updated =
+                        [this](std::vector<ConversationId> ids) {
+                            order.push_back("requests_reordered");
+                            requests_reordered.push_back(std::move(ids));
                         },
                 .message_added =
                         [this](const ConversationId& id, Message&& m) {

@@ -1229,8 +1229,46 @@ class Client {
     // dirtied them is finished.
     std::vector<ConversationId> _dirty;
     bool _flush_scheduled = false;
+    // The conversations in this batch whose *place* changed and not merely their contents, so that
+    // `_flush_pending` reports the order once for the batch instead of once per message.
+    //
+    // The ids rather than a flag, because which list to report is a property of the row that moved:
+    // the two lists are strict complements, so a message can only have moved a row within the one
+    // it already sits in, and reporting both would say one true thing and one false one.
+    // `_flush_pending` reads the list off the conversation it has already fetched to emit
+    // `conversation_updated`, so knowing which costs no extra query.
+    std::vector<ConversationId> _dirty_order;
     void _touch(const ConversationId& id);
+    // `_touch`, for a change that moves the row: `last_activity` and `priority` are what both lists
+    // are ordered by, so a subscriber told only that the row changed would not know it had moved.
+    // Named rather than a flag on `_touch` because the two readings are not obvious from a bool at
+    // a call site, and most callers are the plain one -- a nickname or a read receipt changes the
+    // row and leaves it exactly where it was.
+    void _touch_reordered(const ConversationId& id);
     void _flush_pending();
+
+    // The ids, in order, as each list was last reported to the subscriber -- by an order event or
+    // by a replacement, since both tell it the same thing about position.
+    //
+    // Kept so that an order event can be suppressed when the order has not actually changed, which
+    // is the common case and the point of the whole exercise: a message into the conversation
+    // already at the top of its list leaves every row exactly where it was.  Without this, the hot
+    // path reports an unchanged order on every incoming message.
+    //
+    // The cost is one id per conversation per list, against a query and a callback per message
+    // saved.  Only the ids, and only the two lists, which is why this is worth holding when the
+    // rows themselves would not be.
+    std::vector<ConversationId> _reported_order;
+    std::vector<ConversationId> _reported_request_order;
+    // The ordered ids of one list: the `_conversations` and `_message_requests` queries with
+    // everything but the identity columns taken out.  Same filter and same ORDER BY -- they have to
+    // agree, or a client applying an order event would arrange rows differently from a client that
+    // had just been handed a replacement.
+    std::vector<ConversationId> _conversation_order();
+    std::vector<ConversationId> _message_request_order();
+    // Reports whichever of the two lists is asked for, if its order has changed since it was last
+    // reported, and records what it sent.  Called by `_flush_pending`.
+    void _emit_order_updated(bool conversations, bool requests);
 
   public:
     /// The account state this Client is built on: keys, device group, configs, polling.  A

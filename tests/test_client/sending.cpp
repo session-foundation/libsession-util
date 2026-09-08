@@ -110,7 +110,16 @@ TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     sync(*c);
 
     auto convo = ConversationId::dm(sender.session_id);
-    CHECK(r.order == std::vector<std::string>{"added", "message", "updated"});
+    // The order follows the row, because a message moves it: `last_activity` is what both lists
+    // are ordered by, so a subscriber told only that the row changed would not know it had moved.
+    //
+    // The request list and not the conversation list: an inbound message from someone we have not
+    // written to is a request, and the two lists are complements, so only one of them moved.  And
+    // the ids only -- the row itself has just been sent, in full, as `updated`.
+    CHECK(r.order == std::vector<std::string>{"added", "message", "updated", "requests_reordered"});
+    REQUIRE(r.requests_reordered.size() == 1);
+    CHECK(r.requests_reordered[0] == std::vector<ConversationId>{convo});
+    CHECK(r.reordered.empty());
 
     // Every handler is given the state itself, not something to go and look up.
     REQUIRE(r.added.size() == 1);
@@ -122,11 +131,59 @@ TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     CHECK(preview_body(r.updated[0]) == "ping");
     CHECK(r.updated[0].unread() == 1);
 
-    // A second message on an existing conversation does not re-announce the conversation.
+    // A second message on an existing conversation does not re-announce the conversation, and does
+    // not report the order either: this row was already first in its list and still is, so there is
+    // nothing about its position to say.  The new snippet reaches the subscriber as `updated`.
+    //
+    // This is the case the order event exists to make cheap, and it is the common one -- a
+    // back-and-forth in an open conversation moves nothing.
     r.order.clear();
     deliver(*c, sender, "pong", from_epoch_ms(2000), "h2");
     sync(*c);
     CHECK(r.order == std::vector<std::string>{"message", "updated"});
+    CHECK(r.requests_reordered.size() == 1);
+    REQUIRE(r.updated.size() == 2);
+    CHECK(r.updated.back().last_message() == "pong");
+}
+
+TEST_CASE("Client: a message that moves a conversation reports the new order", "[client][signals]") {
+    SenderKeys a, b;
+    Recorder r;
+    TempClient c{r.handlers()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    // b spoke most recently, so b leads.
+    r.order.clear();
+    r.reordered.clear();
+    r.updated.clear();
+
+    // A message to the conversation that was second moves it in front of the other one.  This is
+    // the case the event exists for: one row changed, and where every row sits changed with it.
+    deliver(*c, a, "third", from_epoch_ms(3000), "h3");
+    sync(*c);
+
+    CHECK(r.order == std::vector<std::string>{"message", "updated", "reordered"});
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] == std::vector{ida, idb});
+
+    // The conversation list and not the request list: both of these were approved before anything
+    // arrived, so the request list is empty and did not move.
+    CHECK(r.requests_reordered.empty());
+
+    // And the rows themselves are not re-sent.  The one that moved arrived as `updated`, carrying
+    // its new snippet; the one it moved past was not touched at all, and a replacement would have
+    // sent every field of it to say that something else had changed.
+    CHECK(r.replaced.empty());
+    REQUIRE(r.updated.size() == 1);
+    CHECK(r.updated[0].id() == ida);
+    CHECK(r.updated[0].last_message() == "third");
 }
 
 TEST_CASE(

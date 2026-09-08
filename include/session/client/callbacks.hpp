@@ -39,9 +39,14 @@ namespace session::client {
 /// is not a template on its argument — it is a promise by the caller that the object is spent
 /// afterwards.
 ///
-/// The conversation list an application maintains from these is expected to be *complete*: ordering
-/// is a comparison against every other conversation, so a partial list cannot be sorted.  Showing
-/// only part of it is fine, holding only part of it is not.
+/// The conversation list an application maintains from these is expected to be *complete*: the
+/// order is given as a whole list, so a partial one cannot be placed in it.  Showing only part of
+/// it is fine, holding only part of it is not.
+///
+/// The order itself is **ours, not the application's**.  Every handler that carries a list carries
+/// it already ordered, and `conversation_order_updated` reports a change to that order without
+/// re-sending the rows — so an application never has to sort, and should not, because the two
+/// lists are not sorted the same way and a comparator copied from one gets the other wrong.
 struct callbacks {
     /// A conversation now exists that did not before.
     std::function<void(AnyConversation&&)> conversation_added;
@@ -70,6 +75,42 @@ struct callbacks {
     /// are shared between them — a request is a conversation in every respect except which list it
     /// belongs to — and `Conversation::request` is what says which one a given handler is about.
     std::function<void(std::vector<AnyConversation>&&)> request_list_replaced;
+
+    /// One list's order changed, carrying that list's conversation ids in their new order and
+    /// nothing else.
+    ///
+    /// This is the cheap counterpart to the two `_list_replaced` handlers above.  What moves a
+    /// conversation is `last_activity` and `priority`, and by far the most common thing that moves
+    /// one is a message arriving — which also changes the row, so `conversation_updated` already
+    /// carries the new snippet and unread count.  Sending the whole list again to say the row is
+    /// now first would send every field of every other row to describe a change to one, and would
+    /// send that row's snippet twice.
+    ///
+    /// So the division is: **`conversation_updated` says what a row now contains,
+    /// `conversation_order_updated` says where the rows now are.**  A subscriber applying both has
+    /// the same state a replacement would have given it.
+    ///
+    /// Only fired when the order actually differs from what was last reported, which is what makes
+    /// it cheap in the common case: a message into the conversation already at the top of the list
+    /// leaves it at the top, and nothing is sent at all.
+    ///
+    /// Ordering guarantee, which a subscriber is entitled to rely on: any `conversation_added`,
+    /// `conversation_updated` or `conversation_removed` for the rows involved is delivered
+    /// **before** this, so the ids here always name conversations the subscriber has already been
+    /// told about.  An id in here that the subscriber does not hold — or one it holds that is
+    /// absent — therefore means a notification was missed, and is worth treating as a reason to
+    /// re-read the list rather than as a state to reconcile.
+    std::function<void(std::vector<ConversationId>)> conversation_order_updated;
+
+    /// The same, for the message request list, and separate for the same reason
+    /// `request_list_replaced` is: the two lists are disjoint and are not even ordered the same way
+    /// — conversations by `priority DESC, last_activity DESC, id` and requests by
+    /// `last_activity DESC, id`, with no priority term, because a request cannot be pinned.
+    ///
+    /// A conversation only ever sits in one of the two, so a message arriving fires exactly one of
+    /// these.  Approval moves a row between the lists, which is a change of membership rather than
+    /// of order, and is still reported as a replacement of both.
+    std::function<void(std::vector<ConversationId>)> request_order_updated;
 
     /// A message was added, whether received or sent from here.
     std::function<void(ConversationId&&, Message&&)> message_added;
