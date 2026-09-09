@@ -2067,7 +2067,7 @@ void Client::_set_priority(const ConversationId& id, int priority) {
 
     if (changed > 0) {
         _sync_conversation(id);
-        _emit_lists_replaced();
+        _report_lists_replaced();
     }
 }
 
@@ -2152,7 +2152,7 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
     if (emptied)
         _emit_history_replaced(id);
     if (hidden)
-        _emit_lists_replaced();
+        _report_lists_replaced();
 }
 
 void Client::_delete_contact(const ConversationId& id) {
@@ -2183,7 +2183,7 @@ void Client::_delete_contact(const ConversationId& id) {
 
     if (removed) {
         _emit_conversation_removed(id);
-        _emit_lists_replaced();
+        _report_lists_replaced();
     }
 }
 
@@ -2583,45 +2583,14 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
 // is approval, what removes it from either is hiding or deletion, and a caller that had to work out
 // which of those it just did would eventually get it wrong.  A replacement is idempotent, so the
 // cost of sending one nobody needed is a query.
-void Client::_emit_lists_replaced() {
-    // Both list queries are the expensive part, so neither runs for a handler that is not there.
-    // Checked per list rather than for the pair, since a subscriber may well want one and not the
-    // other -- a client with no requests screen has no use for the request list.
-    const bool want_convos = static_cast<bool>(_cbs->conversation_list_replaced);
-    const bool want_requests = static_cast<bool>(_cbs->request_list_replaced);
-
-    auto convos = want_convos ? _conversations() : std::vector<AnyConversation>{};
-    auto requests = want_requests ? _message_requests() : std::vector<AnyConversation>{};
-
-    // A replacement carries the order as much as an order event does, so record it as reported.
-    // Without this the record would describe an older belief than the subscriber actually holds,
-    // and an order event that happened to match that older belief would be suppressed -- leaving
-    // the subscriber arranged the way this replacement left it, and never corrected.  Taken from
-    // the rows already read rather than by querying again.
-    //
-    // Only for a list actually sent: an unsent one told the subscriber nothing, so the record of
-    // what it holds has to stay as it was.  Overwriting it with the empty list read above would
-    // claim the subscriber had been handed an empty order, and the next order event would be
-    // measured against that.
-    auto ids = [](const std::vector<AnyConversation>& list) {
-        std::vector<ConversationId> out;
-        out.reserve(list.size());
-        for (const auto& c : list)
-            out.push_back(c.id());
-        return out;
-    };
-    if (want_convos)
-        _reported_order = ids(convos);
-    if (want_requests)
-        _reported_request_order = ids(requests);
-
-    _emit([convos = std::move(convos),
-           requests = std::move(requests)](const callbacks& cbs) mutable {
-        if (cbs.conversation_list_replaced)
-            cbs.conversation_list_replaced(std::move(convos));
-        if (cbs.request_list_replaced)
-            cbs.request_list_replaced(std::move(requests));
-    });
+void Client::_report_lists_replaced() {
+    // Both lists, wholly: a row appeared, went, or changed where it sorts.  The subscriber is told
+    // through whichever handler it registered, and that is the point of routing this through the
+    // same path as a moved row rather than sending replacements outright -- a replacement carries
+    // the order, so a subscriber holding only `conversation_order_updated` was told nothing at all
+    // by the eight callers of this, and its arrangement stayed as it was until the next message
+    // happened to move something.
+    _report_lists(true, true, true, true);
 }
 
 // -- Config reconciliation ----------------------------------------------------------------------
@@ -3007,7 +2976,7 @@ WHERE id = ?1
     for (const auto& id : removed)
         _emit_conversation_removed(id);
     if (order_changed || requests_changed || !removed.empty())
-        _emit_lists_replaced();
+        _report_lists_replaced();
 }
 
 void Client::_sync_all_contacts() {
@@ -3362,7 +3331,7 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
     if (history_changed)
         _emit_history_replaced(me);
     if (order_changed)
-        _emit_lists_replaced();
+        _report_lists_replaced();
 }
 
 // -- Messages ---------------------------------------------------------------------------------
@@ -4005,7 +3974,7 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
 
     if (approved) {
         _sync_contact(id);
-        _emit_lists_replaced();
+        _report_lists_replaced();
     }
     if (created)
         _emit_conversation_added(id);
@@ -4197,7 +4166,7 @@ int64_t Client::_send_message(
 
     if (approved) {
         _sync_contact(id);
-        _emit_lists_replaced();
+        _report_lists_replaced();
     }
     if (created)
         _emit_conversation_added(id);
@@ -5917,7 +5886,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     // Approval moves a conversation between the two lists, so both changed and neither changed in a
     // way that naming one row would describe.
     if (approved_them)
-        _emit_lists_replaced();
+        _report_lists_replaced();
 }
 
 void Client::_on_send_status(
