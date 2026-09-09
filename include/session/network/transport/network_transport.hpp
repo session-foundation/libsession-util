@@ -37,6 +37,15 @@ class ITransport {
     /// Runs on the network loop and must not throw.
     std::function<void(const ed25519_pubkey& node)> on_connection_established;
 
+    /// Called when a connection to `node` is gone, for any reason: closed, failed, or timed out.
+    /// Whatever the far end was holding for that connection is gone with it.
+    ///
+    /// Unlike `add_failure_listener` this is not one-shot and not per-node: it reports every
+    /// connection this transport loses, and stays registered.
+    ///
+    /// Runs on the network loop and must not throw.
+    std::function<void(const ed25519_pubkey& node)> on_connection_lost;
+
     virtual ~ITransport() = default;
 
     virtual void suspend() = 0;

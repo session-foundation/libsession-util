@@ -87,6 +87,10 @@ class Network {
     /// does not survive that, so this is where it has to be established again.
     std::function<void(const ed25519_pubkey& node)> on_connection_established;
 
+    /// Hook to be notified when a connection to `node` is gone, for any reason.  A subscription
+    /// held on it is gone too, and the far end will not say so: it simply stops pushing.
+    std::function<void(const ed25519_pubkey& node)> on_connection_lost;
+
     template <typename... Opt>
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,

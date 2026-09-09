@@ -291,6 +291,10 @@ Network::Network(config::Config _conf) :
         if (auto cb = on_connection_established)
             cb(node);
     };
+    _transport->on_connection_lost = [this](const ed25519_pubkey& node) {
+        if (auto cb = on_connection_lost)
+            cb(node);
+    };
 
     // Perform a clock resync
     _jq->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
