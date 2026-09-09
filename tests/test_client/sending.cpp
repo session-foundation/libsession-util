@@ -468,7 +468,14 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     // Reported as a replacement, not as an update to the one conversation whose priority changed:
     // what moved is the list.  Both lists are replaced together, because hiding takes a
     // conversation out of whichever one it was in and the caller does not have to work out which.
-    CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
+    //
+    // And the order alongside it, for this subscriber holding both handlers: pinning moved every
+    // row that was above the pinned one.  The request list is replaced but reports no order, since
+    // it was empty before this and still is.
+    CHECK(r.order == std::vector<std::string>{"replaced", "reordered", "requests"});
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] ==
+          std::vector{ConversationId::dm(a.session_id), ConversationId::dm(b.session_id)});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 2);
     CHECK(r.replaced[0][0].id() == ConversationId::dm(a.session_id));
@@ -477,8 +484,11 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     // Hiding removes it from the replacement list, which is how a subscriber learns it is gone.
     r.order.clear();
     r.replaced.clear();
+    r.reordered.clear();
     c->conversation(ConversationId::dm(a.session_id), wait)->set_priority(-1, wait);
-    CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
+    CHECK(r.order == std::vector<std::string>{"replaced", "reordered", "requests"});
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] == std::vector{ConversationId::dm(b.session_id)});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 1);
     CHECK(r.replaced[0][0].id() == ConversationId::dm(b.session_id));
@@ -487,6 +497,43 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     r.order.clear();
     c->conversation(ConversationId::dm(a.session_id), wait)->set_priority(-1, wait);
     CHECK(r.order.empty());
+}
+
+TEST_CASE("Client: a pin reaches a subscriber that only wants the order", "[client][signals]") {
+    SenderKeys a, b;
+    Recorder r;
+    // No list handlers, so a replacement has nowhere to go.  Pinning changes where every row above
+    // the pinned one sits, and the eight callers that report a wholesale list change used to send
+    // replacements outright -- which said nothing at all to this subscriber, leaving it arranged as
+    // it was until some later message happened to move something.
+    TempClient c{r.order_only()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+    // b spoke last, so b leads.
+    r.order.clear();
+    r.reordered.clear();
+
+    c->conversation(ida, wait)->set_priority(3, wait);
+
+    CHECK(r.order == std::vector<std::string>{"reordered"});
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] == std::vector{ida, idb});
+    CHECK(r.replaced.empty());
+
+    // Hiding it takes it out of the list, which this subscriber learns the same way.
+    r.order.clear();
+    r.reordered.clear();
+    c->conversation(ida, wait)->set_priority(-1, wait);
+
+    CHECK(r.order == std::vector<std::string>{"reordered"});
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] == std::vector{idb});
 }
 
 TEST_CASE("Client: the two copies of a send report separately", "[client][send]") {

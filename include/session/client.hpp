@@ -1204,7 +1204,11 @@ class Client {
 
     void _emit_conversation_added(const ConversationId& id);
     void _emit_conversation_removed(const ConversationId& id);
-    void _emit_lists_replaced();
+    // Reports both lists as wholly changed -- a row added, removed, or moved to a new position --
+    // through whichever handlers the subscriber registered.  A replacement carries the order, so
+    // this cannot send one without also considering the order event, or a subscriber holding only
+    // that handler hears nothing.
+    void _report_lists_replaced();
     void _emit_history_replaced(const ConversationId& id);
     // Reports a message, and then reports every message that replies to it.
     //
