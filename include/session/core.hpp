@@ -205,6 +205,15 @@ namespace detail {
     }
 }  // namespace detail
 
+/// Thrown by `set_network` when a Network is already attached.  See the TODO on that method for
+/// what a replacement would have to do first.
+struct network_already_attached : std::logic_error {
+    network_already_attached() :
+            std::logic_error{
+                    "This Core already has a Network attached; replacing it is not yet "
+                    "supported"} {}
+};
+
 /// Wraps a predefined 32-byte account seed to pass to the Core constructor, overriding any seed
 /// already stored in the database.  Used when restoring an existing account from a seed.
 struct predefined_seed {
@@ -468,6 +477,23 @@ class Core {
 
     /// Set an optional network interface that can be used to make network requests to swarm
     /// members.  Ownership is taken: nothing else may hold on to the Network.
+    ///
+    /// May only be called once, and only from a thread that is not Core's loop; replacing an
+    /// already-attached Network (including with nullptr) throws `network_already_attached`.
+    ///
+    /// TODO: allow the Network to be replaced.  A client that lets the user choose a routing mode
+    /// needs it, and so does anything that has to re-establish swarm state across the swap.  Two
+    /// things block it today:
+    ///
+    /// - This calls `_update_polling()` on the caller's thread, which creates and stops the
+    ///   libevent poll ticker.  `set_poll_interval` marshals onto the loop for exactly that reason.
+    /// - Tearing down a Network *invokes* the callbacks it is holding: failing the requests queued
+    ///   in its router and transport is part of `~Network`.  Those callbacks are Core's, they hold
+    ///   a raw `Network*` (see `_poll`), and a poll continuation among them will call back into a
+    ///   Network whose router has already been destroyed.
+    ///
+    /// So a fix is not a `_loop.call` around this body: polling has to be stopped and in-flight
+    /// swarm work quiesced before the old Network is dropped.
     void set_network(std::unique_ptr<network::Network> network);
 
     /// Constructs the network in place and attaches it, forwarding the arguments to its
