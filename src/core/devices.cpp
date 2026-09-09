@@ -1468,9 +1468,7 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
                                 sqlite::blob_guts<std::array<std::byte, 16>>>(
                                 "SELECT id, sas_seed FROM device_link_requests WHERE device = ?",
                                 item.row_id);
-                        f(static_cast<int>(lr_id),
-                          std::move(item.info),
-                          sas_from_seed(sas_seed));
+                        f(static_cast<int>(lr_id), std::move(item.info), sas_from_seed(sas_seed));
                     }
                     break;
                 case Processing::Registered:
