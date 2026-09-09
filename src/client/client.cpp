@@ -1562,6 +1562,14 @@ std::span<const std::byte> Client::_self_or_none() {
     return core.globals.session_id();
 }
 
+// Which list a conversation is in, for a caller that has changed one row and needs to name the list
+// that made stale rather than both.  One indexed row, against the list query it saves.
+static bool is_request_row(sqlite::Connection& c, int64_t convo, std::span<const std::byte> self) {
+    return c.prepared_get<int64_t>(
+                   "SELECT {} {} WHERE c.id = ?2"_format(IS_REQUEST, SUBJECT_JOIN), self, convo) !=
+           0;
+}
+
 std::vector<AnyConversation> Client::_conversations() {
     auto c = core.database().conn();
     return query_conversations(
@@ -1908,6 +1916,7 @@ void Client::_set_nickname(const ConversationId& id, std::string_view nickname) 
 
 void Client::_set_priority(const ConversationId& id, int priority) {
     int changed = 0;
+    bool request = false;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
@@ -1921,12 +1930,17 @@ void Client::_set_priority(const ConversationId& id, int priority) {
                 "UPDATE conversations SET priority = ?1 WHERE id = ?2 AND priority IS NOT ?1",
                 priority,
                 convo);
+        // Read inside the transaction that changed it, and only when it did: the row stays in
+        // whichever list it was in -- priority moves it within one, never between the two -- so the
+        // other list has not changed and does not need reading.
+        if (changed > 0)
+            request = is_request_row(c, convo, _self_or_none());
         tx.commit();
     }
 
     if (changed > 0) {
         _sync_conversation(id);
-        _report_lists_replaced();
+        _report_lists_replaced(!request, request);
     }
 }
 
@@ -1982,7 +1996,7 @@ void Client::_clear_messages(const ConversationId& id) {
 
 void Client::_delete_conversation(const ConversationId& id, bool keep_messages) {
     auto now = clock_now_ms();
-    bool emptied = false, hidden = false;
+    bool emptied = false, hidden = false, request = false;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
@@ -2001,6 +2015,10 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
         hidden = c.prepared_exec(
                          "UPDATE conversations SET priority = -1 WHERE id = ? AND priority >= 0",
                          *convo) > 0;
+        // While the row is still readable and only when it went: hiding takes it out of the one
+        // list it was in, so the other has not changed.
+        if (hidden)
+            request = is_request_row(c, *convo, _self_or_none());
         tx.commit();
     }
 
@@ -2011,7 +2029,7 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
     if (emptied)
         _emit_history_replaced(id);
     if (hidden)
-        _report_lists_replaced();
+        _report_lists_replaced(!request, request);
 }
 
 void Client::_delete_contact(const ConversationId& id) {
@@ -2042,7 +2060,9 @@ void Client::_delete_contact(const ConversationId& id) {
 
     if (removed) {
         _emit_conversation_removed(id);
-        _report_lists_replaced();
+        // Both, unlike hiding: losing the contact row takes the approval with it, so the row does
+        // not merely leave a list, it stops being classifiable into either.
+        _report_lists_replaced(true, true);
     }
 }
 
@@ -2417,14 +2437,14 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
 // is approval, what removes it from either is hiding or deletion, and a caller that had to work out
 // which of those it just did would eventually get it wrong.  A replacement is idempotent, so the
 // cost of sending one nobody needed is a query.
-void Client::_report_lists_replaced() {
+void Client::_report_lists_replaced(bool convos, bool requests) {
     // Both lists, wholly: a row appeared, went, or changed where it sorts.  The subscriber is told
     // through whichever handler it registered, and that is the point of routing this through the
     // same path as a moved row rather than sending replacements outright -- a replacement carries
     // the order, so a subscriber holding only `conversation_order_updated` was told nothing at all
     // by the eight callers of this, and its arrangement stayed as it was until the next message
     // happened to move something.
-    _report_lists(true, true, true, true);
+    _report_lists(convos, convos, requests, requests);
 }
 
 // -- Config reconciliation ----------------------------------------------------------------------
@@ -2813,8 +2833,11 @@ WHERE id = ?1
         _touch(id);
     for (const auto& id : removed)
         _emit_conversation_removed(id);
+    // Each list only if something in it changed.  A removal can be from either -- what was taken
+    // out is gone from whichever list held it -- so it names both.
     if (order_changed || requests_changed || !removed.empty())
-        _report_lists_replaced();
+        _report_lists_replaced(
+                order_changed || !removed.empty(), requests_changed || !removed.empty());
 }
 
 void Client::_sync_all_contacts() {
@@ -3168,8 +3191,10 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
         _touch(me);
     if (history_changed)
         _emit_history_replaced(me);
+    // Note to self only, and it cannot be a request -- we are not our own contact -- so the request
+    // list cannot have been touched by this.
     if (order_changed)
-        _report_lists_replaced();
+        _report_lists_replaced(true, false);
 }
 
 // -- Messages ---------------------------------------------------------------------------------
@@ -3657,7 +3682,9 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
 
     if (approved) {
         _sync_contact(id);
-        _report_lists_replaced();
+        // Both: approving moves the row out of the requests and into the conversations, so one list
+        // lost it and the other gained it.
+        _report_lists_replaced(true, true);
     }
     if (created)
         _emit_conversation_added(id);
@@ -3849,7 +3876,9 @@ int64_t Client::_send_message(
 
     if (approved) {
         _sync_contact(id);
-        _report_lists_replaced();
+        // Both: approving moves the row out of the requests and into the conversations, so one list
+        // lost it and the other gained it.
+        _report_lists_replaced(true, true);
     }
     if (created)
         _emit_conversation_added(id);
@@ -5260,7 +5289,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     // Approval moves a conversation between the two lists, so both changed and neither changed in a
     // way that naming one row would describe.
     if (approved_them)
-        _report_lists_replaced();
+        _report_lists_replaced(true, true);
 }
 
 void Client::_on_send_status(

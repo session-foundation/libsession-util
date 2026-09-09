@@ -1208,7 +1208,7 @@ class Client {
     // through whichever handlers the subscriber registered.  A replacement carries the order, so
     // this cannot send one without also considering the order event, or a subscriber holding only
     // that handler hears nothing.
-    void _report_lists_replaced();
+    void _report_lists_replaced(bool convos, bool requests);
     void _emit_history_replaced(const ConversationId& id);
     // Reports a message, and then reports every message that replies to it.
     //

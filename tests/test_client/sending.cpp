@@ -466,13 +466,12 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     c->conversation(ConversationId::dm(a.session_id), wait)->set_priority(3, wait);
 
     // Reported as a replacement, not as an update to the one conversation whose priority changed:
-    // what moved is the list.  Both lists are replaced together, because hiding takes a
-    // conversation out of whichever one it was in and the caller does not have to work out which.
+    // what moved is the list.  And the order alongside it, for this subscriber holding both
+    // handlers: pinning moved every row that was above the pinned one.
     //
-    // And the order alongside it, for this subscriber holding both handlers: pinning moved every
-    // row that was above the pinned one.  The request list is replaced but reports no order, since
-    // it was empty before this and still is.
-    CHECK(r.order == std::vector<std::string>{"replaced", "reordered", "requests"});
+    // The conversation list only.  Priority moves a row within the list it is in and never between
+    // the two, so the request list did not change and is not read.
+    CHECK(r.order == std::vector<std::string>{"replaced", "reordered"});
     REQUIRE(r.reordered.size() == 1);
     CHECK(r.reordered[0] ==
           std::vector{ConversationId::dm(a.session_id), ConversationId::dm(b.session_id)});
@@ -486,7 +485,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     r.replaced.clear();
     r.reordered.clear();
     c->conversation(ConversationId::dm(a.session_id), wait)->set_priority(-1, wait);
-    CHECK(r.order == std::vector<std::string>{"replaced", "reordered", "requests"});
+    CHECK(r.order == std::vector<std::string>{"replaced", "reordered"});
     REQUIRE(r.reordered.size() == 1);
     CHECK(r.reordered[0] == std::vector{ConversationId::dm(b.session_id)});
     REQUIRE(r.replaced.size() == 1);
