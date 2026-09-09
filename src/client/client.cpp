@@ -581,6 +581,14 @@ void Client::_flush_pending() {
         if (!convo)
             continue;
         // A hidden row is in neither list, so nothing about it makes either one stale.
+        //
+        // This reads the row's priority now, so it cannot tell a row that was always hidden from
+        // one that has just become hidden -- and the second of those did change both lists, by
+        // leaving one of them.  That case does not arrive here: every write to
+        // `conversations.priority` emits a replacement on its own path rather than dirtying the
+        // row and leaving this to report it, so the removal has already been sent by the time the
+        // row turns up in `_dirty`.  Should a fifth writer of that column ever appear, it has to do
+        // the same, because there is nothing here that could notice the transition.
         if (convo->priority() >= 0) {
             auto* dm = convo->dm();
             const bool request = dm && dm->request;
