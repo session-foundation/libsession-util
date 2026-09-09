@@ -1357,6 +1357,22 @@ static const auto CONVO_COLUMNS = R"(
 static constexpr auto IS_REQUEST =
         "(c.dm IS NOT NULL AND coalesce(ct.approved, 0) = 0 AND a.session_id IS NOT ?1)"sv;
 
+// One fragment per list, shared by both queries that read that list: the one that reads the rows
+// and the one that reads only their order.  The two have to select and sort identically -- a
+// subscriber arranging rows from an order event and one just handed a replacement must arrive at
+// the same list -- and nothing would report them drifting apart.
+static const auto CONVO_FILTER_ORDER =
+        // Hidden (negative priority) conversations are not part of the list at all; pinned ones
+        // lead it, and equal priorities form a block that sorts among itself by recency.
+        "WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
+                IS_REQUEST);
+static const auto REQUEST_FILTER_ORDER =
+        // No priority in the ordering: a request cannot be pinned, since pinning is a property of
+        // the config entry and there is nothing there to pin until it is approved.  Hidden ones are
+        // still omitted -- hiding is the one thing another device *can* say about a request it does
+        // not want to see.
+        "WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(IS_REQUEST);
+
 // Fills in the attachment side of the `last_preview` of every conversation that has one.
 // `previews` pairs the previewed message with the index of the conversation it belongs to.
 //
@@ -1537,27 +1553,13 @@ std::span<const std::byte> Client::_self_or_none() {
 std::vector<AnyConversation> Client::_conversations() {
     auto c = core.database().conn();
     return query_conversations(
-            *this,
-            c,
-            // Hidden (negative priority) conversations are not part of the list at all; pinned ones
-            // lead it, and equal priorities form a block that sorts among itself by recency.
-            "{} WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
-                    CONVO_COLUMNS, IS_REQUEST),
-            _self_or_none());
+            *this, c, "{} {}"_format(CONVO_COLUMNS, CONVO_FILTER_ORDER), _self_or_none());
 }
 
 std::vector<AnyConversation> Client::_message_requests() {
     auto c = core.database().conn();
-    // No priority ordering: a request cannot be pinned -- pinning is a property of the config entry
-    // and there is nothing there to pin until it is approved -- so recency is the only order there
-    // is.  Hidden ones are still omitted, since hiding is the one thing another device *can* say
-    // about a request it does not want to see.
     return query_conversations(
-            *this,
-            c,
-            "{} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
-                    CONVO_COLUMNS, IS_REQUEST),
-            _self_or_none());
+            *this, c, "{} {}"_format(CONVO_COLUMNS, REQUEST_FILTER_ORDER), _self_or_none());
 }
 
 // The ordered ids of a list and nothing else.  `CONVO_COLUMNS` is most of the cost of reading a
@@ -1579,27 +1581,23 @@ static std::vector<ConversationId> query_conversation_ids(
     return out;
 }
 
-// The filter and the ORDER BY are `_conversations`' and `_message_requests`', and have to stay that
-// way: a subscriber arranging rows by an order event and one that has just been handed a
-// replacement must end up with the same list.
-static constexpr auto ORDER_COLUMNS = "SELECT c.id, a.session_id, g.group_id, m.base_url, m.room";
+// Carries its own join, as `CONVO_COLUMNS` does, so that a list query is a column set and a filter
+// and nothing else has to be remembered at the call site.
+static const auto ORDER_COLUMNS = R"(
+    SELECT c.id, a.session_id, g.group_id, m.base_url, m.room
+    {}
+)"_format(SUBJECT_JOIN);
 
 std::vector<ConversationId> Client::_conversation_order() {
     auto c = core.database().conn();
     return query_conversation_ids(
-            c,
-            "{} {} WHERE c.priority >= 0 AND NOT {} ORDER BY c.priority DESC, c.last_activity DESC, c.id"_format(
-                    ORDER_COLUMNS, SUBJECT_JOIN, IS_REQUEST),
-            _self_or_none());
+            c, "{} {}"_format(ORDER_COLUMNS, CONVO_FILTER_ORDER), _self_or_none());
 }
 
 std::vector<ConversationId> Client::_message_request_order() {
     auto c = core.database().conn();
     return query_conversation_ids(
-            c,
-            "{} {} WHERE c.priority >= 0 AND {} ORDER BY c.last_activity DESC, c.id"_format(
-                    ORDER_COLUMNS, SUBJECT_JOIN, IS_REQUEST),
-            _self_or_none());
+            c, "{} {}"_format(ORDER_COLUMNS, REQUEST_FILTER_ORDER), _self_or_none());
 }
 
 void Client::_emit_order_updated(bool conversations, bool requests) {
