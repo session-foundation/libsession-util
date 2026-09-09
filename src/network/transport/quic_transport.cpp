@@ -662,6 +662,18 @@ void QuicTransport::_fail_connection(
             listener();
     }
 
+    if (on_connection_lost) {
+        try {
+            on_connection_lost(ed25519_pubkey::from_hex(address_pubkey_hex));
+        } catch (const std::exception& e) {
+            log::error(
+                    cat,
+                    "Connection-lost listener for {} threw: {}",
+                    address_pubkey_hex,
+                    e.what());
+        }
+    }
+
     // If we have no longer have any active connections then we are disconnected
     if (_active_connection_ids.empty())
         _update_status(ConnectionStatus::disconnected);
