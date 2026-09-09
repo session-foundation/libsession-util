@@ -109,7 +109,10 @@ void QuicTransport::verify_connectivity(
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
             _establish_connection(
-                    {node.remote_pubkey.view(), node.host(), node.omq_port}, request_id, category);
+                    {node.remote_pubkey.view(), node.host(), node.omq_port},
+                    request_id,
+                    category,
+                    false);
     });
 }
 
@@ -267,15 +270,19 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
             "[Request {}] No connection to {}, initiating new connection.",
             request.request_id,
             remote_pubkey_hex);
+    // Everything the connect needs has to be read before the request is moved into the queue.
     std::string initiating_req_id = request.request_id;
+    auto category = request.category;
+    bool tunnelled = request.tunnelled;
     _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(*remote, initiating_req_id, request.category);
+    _establish_connection(*remote, initiating_req_id, category, tunnelled);
 }
 
 void QuicTransport::_establish_connection(
         const oxen::quic::RemoteAddress& address,
         const std::string& initiating_req_id,
-        const RequestCategory /*category*/) {
+        const RequestCategory /*category*/,
+        bool tunnelled) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
 
     try {
@@ -302,7 +309,8 @@ void QuicTransport::_establish_connection(
                 address,
                 creds,
                 oxen::quic::opt::outbound_alpn(ALPN),
-                oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
+                oxen::quic::opt::handshake_timeout{
+                        tunnelled ? _config.tunnel_handshake_timeout : _config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
                 // libquic hands these a live Connection, so they run inline on the loop rather than
                 // as jobs of ours.  ~QuicTransport destroys the endpoint on the loop before the

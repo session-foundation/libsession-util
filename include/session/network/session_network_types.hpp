@@ -168,6 +168,12 @@ struct Request {
     /// behaviour.
     std::optional<uint8_t> desired_path_index;
 
+    /// True when `destination` is the local end of a Session Router tunnel rather than an address
+    /// out on the internet.  The transport cannot tell from the address -- it is a loopback port
+    /// either way -- and it needs to know, because a handshake whose packets cross a whole tunnel
+    /// gets a different budget than one that does not.
+    bool tunnelled = false;
+
     /// Any extra request details which may modify the structure of the request.
     RequestDetails details;
 

@@ -94,6 +94,7 @@ namespace {
 
     config::QuicTransport build_quic_transport_config(const config::Config& main_config) {
         return {main_config.quic_handshake_timeout,
+                main_config.quic_tunnel_handshake_timeout,
                 main_config.quic_keep_alive,
                 main_config.quic_max_udp_payload};
     }
@@ -1411,6 +1412,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.quic_handshake_timeout_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_handshake_timeout)
                     .count();
+    config.quic_tunnel_handshake_timeout_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                    cpp_defaults.quic_tunnel_handshake_timeout)
+                    .count();
     config.quic_keep_alive_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
     config.quic_disable_mtu_discovery = cpp_defaults.quic_max_udp_payload.has_value();
@@ -1595,6 +1600,10 @@ LIBSESSION_C_API bool session_network_init(
                 if (config->quic_handshake_timeout_seconds > 0)
                     cpp_opts.emplace_back(opt::quic_handshake_timeout{
                             std::chrono::seconds{config->quic_handshake_timeout_seconds}});
+
+                if (config->quic_tunnel_handshake_timeout_seconds > 0)
+                    cpp_opts.emplace_back(opt::quic_tunnel_handshake_timeout{std::chrono::seconds{
+                            config->quic_tunnel_handshake_timeout_seconds}});
 
                 if (config->quic_keep_alive_seconds > 0)
                     cpp_opts.emplace_back(opt::quic_keep_alive{

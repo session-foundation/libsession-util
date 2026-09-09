@@ -68,7 +68,20 @@ struct Config {
     std::chrono::days onionreq_edge_node_cache_duration = std::chrono::days{10};
 
     // Quic Transport Options
-    std::chrono::milliseconds quic_handshake_timeout{3s};
+
+    /// How long a QUIC handshake straight out to a node's own address gets: the guard node of an
+    /// onion request, a direct-mode destination, a connectivity check.  One internet round trip and
+    /// a little slack.
+    std::chrono::milliseconds quic_handshake_timeout{5s};
+
+    /// How long a QUIC handshake gets when its packets go through a Session Router tunnel.
+    ///
+    /// A separate figure because it measures something else entirely: the connection is nominally
+    /// to ::1, but every packet of it crosses the whole tunnel, so the budget has to cover a
+    /// multi-hop round trip rather than a direct one.  That it currently sits at a value other
+    /// constants here also happen to use means nothing -- move either one on its own merits.
+    std::chrono::milliseconds quic_tunnel_handshake_timeout{10s};
+
     std::chrono::seconds quic_keep_alive{10s};
     std::optional<size_t> quic_max_udp_payload;
 
@@ -125,6 +138,7 @@ struct Config {
 
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);
+    void handle_config_opt(opt::quic_tunnel_handshake_timeout qtht);
     void handle_config_opt(opt::quic_keep_alive qka);
     void handle_config_opt(opt::quic_max_udp_payload qmup);
 
