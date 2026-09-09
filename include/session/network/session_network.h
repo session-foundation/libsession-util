@@ -92,6 +92,9 @@ typedef struct session_network_config {
 
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
     uint32_t quic_handshake_timeout_seconds;
+    /// Handshake timeout for connections whose packets travel through a Session Router tunnel,
+    /// which have a multi-hop round trip to complete rather than a direct one.
+    uint32_t quic_tunnel_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
     bool quic_disable_mtu_discovery;  // deprecated: use quic_max_udp_payload instead
     /// Maximum QUIC UDP payload size for PMTUD; 0 for default (no cap).

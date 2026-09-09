@@ -249,6 +249,14 @@ void Config::handle_config_opt(opt::quic_handshake_timeout qht) {
     log::debug(cat, "Network config quic handshake timeout set to {}ms", qht.duration.count());
 }
 
+void Config::handle_config_opt(opt::quic_tunnel_handshake_timeout qtht) {
+    quic_tunnel_handshake_timeout = qtht.duration;
+    log::debug(
+            cat,
+            "Network config quic tunnelled handshake timeout set to {}ms",
+            qtht.duration.count());
+}
+
 void Config::handle_config_opt(opt::quic_keep_alive qka) {
     quic_keep_alive = qka.duration;
     log::debug(cat, "Network config quic keep alive set to {}s", qka.duration.count());
