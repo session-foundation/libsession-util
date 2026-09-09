@@ -34,9 +34,10 @@ namespace session::client {
 /// handler that moved from it would empty what the next report needs.
 ///
 /// A handler may declare such a parameter as `T&&`, `const T&` or `T`, whichever suits it: only the
-/// last constructs anything, and a handler that just reads pays nothing.  (`T&` is the one form that
-/// will not bind.)  The `&&` is not perfect forwarding despite the spelling — `std::function` is not
-/// a template on its argument — it is a promise by the caller that the object is spent afterwards.
+/// last constructs anything, and a handler that just reads pays nothing.  (`T&` is the one form
+/// that will not bind.)  The `&&` is not perfect forwarding despite the spelling — `std::function`
+/// is not a template on its argument — it is a promise by the caller that the object is spent
+/// afterwards.
 ///
 /// The conversation list an application maintains from these is expected to be *complete*: ordering
 /// is a comparison against every other conversation, so a partial list cannot be sorted.  Showing

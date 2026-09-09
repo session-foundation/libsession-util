@@ -48,40 +48,40 @@ namespace opt {
         static netid mainnet() {
             auto seed_nodes = {
                     service_node{
-                            ed25519_pubkey::from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58a"
-                                                     "fb0e38111fb6cda1fef"),
+                            ed25519_pubkey::from_hex("1f000f09a7b07828dcb72af7cd168570"
+                                                     "50c10c02bd58afb0e38111fb6cda1fef"),
                             oxen::quic::ipv4{"95.216.33.113"},
                             uint16_t{22100},
                             uint16_t{20200},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef"
-                                                     "7f971e88ab144c1a7ce"),
+                            ed25519_pubkey::from_hex("1f101f0acee4db6f31aaa8b4df134e85"
+                                                     "ca8a4878efaef7f971e88ab144c1a7ce"),
                             oxen::quic::ipv4{"37.27.236.229"},
                             uint16_t{22101},
                             uint16_t{20201},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c3254"
-                                                     "74d159814e06199919f"),
+                            ed25519_pubkey::from_hex("1f202f00f4d2d4acc01e20773999a291"
+                                                     "cf3e3136c325474d159814e06199919f"),
                             oxen::quic::ipv4{"172.96.140.124"},
                             uint16_t{22102},
                             uint16_t{20202},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fba"
-                                                     "e5749442f66afb6d78b"),
+                            ed25519_pubkey::from_hex("1f303f1d7523c46fa5398826740d1328"
+                                                     "2d26b5de90fbae5749442f66afb6d78b"),
                             oxen::quic::ipv4{"208.73.207.54"},
                             uint16_t{22103},
                             uint16_t{20203},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad"
-                                                     "15a35e16b50c28db7b0"),
+                            ed25519_pubkey::from_hex("1f604f1c858a121a681d8f9b470ef72e"
+                                                     "6946ee1b9c5ad15a35e16b50c28db7b0"),
                             oxen::quic::ipv4{"104.194.8.115"},
                             uint16_t{22104},
                             uint16_t{20204},
@@ -94,17 +94,9 @@ namespace opt {
 
         static netid testnet() {
             auto seed_nodes = {
-                    // service_node{
-                    //         ed25519_pubkey::from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"),
-                    //         oxen::quic::ipv4{"144.76.164.202"},
-                    //         uint16_t{35500},
-                    //         uint16_t{35400},
-                    //         {2, 10, 0},
-                    //         swarm::INVALID_SWARM_ID},  // This is the original one
-
                     service_node{
-                            ed25519_pubkey::from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b"
-                                                     "2e9e08c3505a48a811a"),
+                            ed25519_pubkey::from_hex("decaf20025ca6389d8225bda6a32d7fc"
+                                                     "4ee5176d21e3b2e9e08c3505a48a811a"),
                             oxen::quic::ipv4{"23.88.6.250"},
                             uint16_t{35520},
                             uint16_t{35420},
