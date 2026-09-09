@@ -1266,8 +1266,21 @@ class Client {
     // had just been handed a replacement.
     std::vector<ConversationId> _conversation_order();
     std::vector<ConversationId> _message_request_order();
-    // Reports whichever of the two lists is asked for, if its order has changed since it was last
-    // reported, and records what it sent.  Called by `_flush_pending`.
+    // Reports one list whose order may have moved, through whichever of its two handlers the
+    // subscriber registered, and records the order it reported.
+    //
+    // Which query runs is decided by that registration.  A replacement carries the rows and the
+    // order is already in them, so a subscriber wanting one is served by the row query alone;
+    // asking for the ids as well would be a second query for something already held.  A subscriber
+    // wanting only the order gets the id-only query, which is the cheaper of the two and the one
+    // that runs on every message.
+    void _report_list(
+            std::vector<ConversationId>& reported,
+            std::vector<AnyConversation> (Client::*rows)(),
+            std::vector<ConversationId> (Client::*ids)(),
+            std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
+            std::function<void(std::vector<ConversationId>)> callbacks::* reordered);
+    // Reports whichever of the two lists is asked for.  Called by `_flush_pending`.
     void _emit_order_updated(bool conversations, bool requests);
 
   public:

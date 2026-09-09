@@ -104,7 +104,9 @@ TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[cli
 TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     SenderKeys sender;
     Recorder r;
-    TempClient c{r.handlers()};
+    // Order events and no whole lists, which is what makes the assertions below about rows *not*
+    // being re-sent assertions about Client rather than about this subscriber's luck.
+    TempClient c{r.order_only()};
 
     deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
     sync(*c);
@@ -149,7 +151,7 @@ TEST_CASE("Client: the application is told what changed", "[client][signals]") {
 TEST_CASE("Client: a message that moves a conversation reports the new order", "[client][signals]") {
     SenderKeys a, b;
     Recorder r;
-    TempClient c{r.handlers()};
+    TempClient c{r.order_only()};
     approve(*c, a.session_id);
     approve(*c, b.session_id);
     auto ida = ConversationId::dm(a.session_id);
@@ -184,6 +186,87 @@ TEST_CASE("Client: a message that moves a conversation reports the new order", "
     REQUIRE(r.updated.size() == 1);
     CHECK(r.updated[0].id() == ida);
     CHECK(r.updated[0].last_message() == "third");
+}
+
+TEST_CASE("Client: a subscriber that wants lists is sent them", "[client][signals]") {
+    SenderKeys a, b;
+    Recorder r;
+    // No order handlers, so the order events have nowhere to go and a whole list is the only way
+    // this subscriber can learn that one row now sits in front of another.
+    TempClient c{r.lists_only()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+    r.order.clear();
+    r.replaced.clear();
+
+    deliver(*c, a, "third", from_epoch_ms(3000), "h3");
+    sync(*c);
+
+    CHECK(r.order == std::vector<std::string>{"message", "updated", "replaced"});
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.replaced[0].size() == 2);
+    CHECK(r.replaced[0][0].id() == ida);
+    CHECK(r.replaced[0][1].id() == idb);
+    CHECK(r.reordered.empty());
+}
+
+TEST_CASE("Client: a replacement is sent even when nothing moved", "[client][signals]") {
+    SenderKeys sender;
+    Recorder r;
+    TempClient c{r.lists_only()};
+    approve(*c, sender.session_id);
+
+    deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+    sync(*c);
+    r.order.clear();
+    r.replaced.clear();
+
+    // A second message to the only conversation moves nothing, so an order event would be
+    // suppressed -- but the snippet changed, and for this subscriber the list is the only thing
+    // carrying it.  Suppressing the list on an unchanged order would leave it showing "ping".
+    deliver(*c, sender, "pong", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.replaced[0].size() == 1);
+    CHECK(r.replaced[0][0].last_message() == "pong");
+}
+
+TEST_CASE("Client: a subscriber wanting both is sent both", "[client][signals]") {
+    SenderKeys a, b;
+    Recorder r;
+    TempClient c{r.handlers()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+    r.order.clear();
+    r.replaced.clear();
+    r.reordered.clear();
+
+    deliver(*c, a, "third", from_epoch_ms(3000), "h3");
+    sync(*c);
+
+    // Redundant, and the subscriber's own choice to be: registering both says it wants the rows
+    // and the order, and the order it is told is the order of the rows it was just handed.
+    CHECK(r.order == std::vector<std::string>{"message", "updated", "replaced", "reordered"});
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.reordered.size() == 1);
+    CHECK(r.reordered[0] == std::vector{ida, idb});
+    std::vector<ConversationId> from_rows;
+    for (const auto& convo : r.replaced[0])
+        from_rows.push_back(convo.id());
+    CHECK(from_rows == r.reordered[0]);
 }
 
 TEST_CASE(

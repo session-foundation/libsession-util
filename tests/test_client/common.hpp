@@ -226,6 +226,26 @@ struct Recorder {
                         },
         };
     }
+
+    /// Which handlers a subscriber registers decides both what Client sends and which query it
+    /// runs to find out, so a test asserting either has to be able to say what it subscribed to.
+
+    /// Takes its ordering from the order events and never wants a whole list.
+    callbacks order_only() {
+        auto cbs = handlers();
+        cbs.conversation_list_replaced = nullptr;
+        cbs.request_list_replaced = nullptr;
+        return cbs;
+    }
+
+    /// Wants whole lists and does not handle order events -- an older subscriber, or one that would
+    /// rather re-read a list than track its order.
+    callbacks lists_only() {
+        auto cbs = handlers();
+        cbs.conversation_order_updated = nullptr;
+        cbs.request_order_updated = nullptr;
+        return cbs;
+    }
 };
 
 /// Waits for work Client deferred onto the loop -- the coalesced conversation_updated -- to have

@@ -473,6 +473,8 @@ void Client::_dispatch_out(std::function<void()> job) {
 }
 
 void Client::_emit_conversation_added(const ConversationId& id) {
+    if (!_cbs->conversation_added)
+        return;
     auto convo = _conversation(id);
     if (!convo)
         return;
@@ -500,6 +502,8 @@ void Client::_emit_history_replaced(const ConversationId& id) {
 }
 
 void Client::_emit_message_alone(bool added, const ConversationId& id, int64_t message_id) {
+    if (!(added ? _cbs->message_added : _cbs->message_updated))
+        return;
     auto msg = _message(message_id);
     if (!msg)
         return;
@@ -1600,29 +1604,64 @@ std::vector<ConversationId> Client::_message_request_order() {
             c, "{} {}"_format(ORDER_COLUMNS, REQUEST_FILTER_ORDER), _self_or_none());
 }
 
+void Client::_report_list(
+        std::vector<ConversationId>& reported,
+        std::vector<AnyConversation> (Client::*rows)(),
+        std::vector<ConversationId> (Client::*ids)(),
+        std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
+        std::function<void(std::vector<ConversationId>)> callbacks::* reordered) {
+    const bool want_replaced = static_cast<bool>((*_cbs).*replaced);
+    const bool want_order = static_cast<bool>((*_cbs).*reordered);
+    // Before the query, not after: reading a list to hand it to nobody is the whole cost of the
+    // operation.
+    if (!want_replaced && !want_order)
+        return;
+
+    std::vector<AnyConversation> list;
+    std::vector<ConversationId> order;
+    if (want_replaced) {
+        list = (this->*rows)();
+        order.reserve(list.size());
+        for (const auto& convo : list)
+            order.push_back(convo.id());
+    } else {
+        order = (this->*ids)();
+    }
+
+    // Whether the order moved is knowable only by reading it, so the read happens either way and
+    // it is the send that is saved -- which is worth having, because a message landing in the
+    // conversation already at the top of its list moves nothing, and that is what most messages in
+    // an active conversation do.
+    const bool moved = order != reported;
+    reported = order;
+
+    // A replacement is not suppressed on an unchanged order, because the order is not what it
+    // carries: the row whose arrival brought us here has a new snippet, and a subscriber holding
+    // only this handler has no other way to learn it.  Suppressing it here would be comparing one
+    // thing to decide whether to send another.
+    if (want_replaced)
+        _emit([list = std::move(list), replaced](const callbacks& cbs) { (cbs.*replaced)(list); });
+    if (want_order && moved)
+        _emit([order = std::move(order), reordered](const callbacks& cbs) {
+            (cbs.*reordered)(order);
+        });
+}
+
 void Client::_emit_order_updated(bool conversations, bool requests) {
-    // Read, compare, and send only if it differs.  The read is the unavoidable part -- there is no
-    // way to know an order changed without asking -- but the callback, and everything a subscriber
-    // does with it, is saved every time a message lands in the conversation already at the top of
-    // its list, which is what most messages in an active conversation do.
-    if (conversations) {
-        if (auto order = _conversation_order(); order != _reported_order) {
-            _reported_order = order;
-            _emit([order = std::move(order)](const callbacks& cbs) {
-                if (cbs.conversation_order_updated)
-                    cbs.conversation_order_updated(order);
-            });
-        }
-    }
-    if (requests) {
-        if (auto order = _message_request_order(); order != _reported_request_order) {
-            _reported_request_order = order;
-            _emit([order = std::move(order)](const callbacks& cbs) {
-                if (cbs.request_order_updated)
-                    cbs.request_order_updated(order);
-            });
-        }
-    }
+    if (conversations)
+        _report_list(
+                _reported_order,
+                &Client::_conversations,
+                &Client::_conversation_order,
+                &callbacks::conversation_list_replaced,
+                &callbacks::conversation_order_updated);
+    if (requests)
+        _report_list(
+                _reported_request_order,
+                &Client::_message_requests,
+                &Client::_message_request_order,
+                &callbacks::request_list_replaced,
+                &callbacks::request_order_updated);
 }
 
 std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
@@ -2364,14 +2403,25 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
 // which of those it just did would eventually get it wrong.  A replacement is idempotent, so the
 // cost of sending one nobody needed is a query.
 void Client::_emit_lists_replaced() {
-    auto convos = _conversations();
-    auto requests = _message_requests();
+    // Both list queries are the expensive part, so neither runs for a handler that is not there.
+    // Checked per list rather than for the pair, since a subscriber may well want one and not the
+    // other -- a client with no requests screen has no use for the request list.
+    const bool want_convos = static_cast<bool>(_cbs->conversation_list_replaced);
+    const bool want_requests = static_cast<bool>(_cbs->request_list_replaced);
+
+    auto convos = want_convos ? _conversations() : std::vector<AnyConversation>{};
+    auto requests = want_requests ? _message_requests() : std::vector<AnyConversation>{};
 
     // A replacement carries the order as much as an order event does, so record it as reported.
     // Without this the record would describe an older belief than the subscriber actually holds,
     // and an order event that happened to match that older belief would be suppressed -- leaving
     // the subscriber arranged the way this replacement left it, and never corrected.  Taken from
     // the rows already read rather than by querying again.
+    //
+    // Only for a list actually sent: an unsent one told the subscriber nothing, so the record of
+    // what it holds has to stay as it was.  Overwriting it with the empty list read above would
+    // claim the subscriber had been handed an empty order, and the next order event would be
+    // measured against that.
     auto ids = [](const std::vector<AnyConversation>& list) {
         std::vector<ConversationId> out;
         out.reserve(list.size());
@@ -2379,8 +2429,10 @@ void Client::_emit_lists_replaced() {
             out.push_back(c.id());
         return out;
     };
-    _reported_order = ids(convos);
-    _reported_request_order = ids(requests);
+    if (want_convos)
+        _reported_order = ids(convos);
+    if (want_requests)
+        _reported_request_order = ids(requests);
 
     _emit([convos = std::move(convos),
            requests = std::move(requests)](const callbacks& cbs) mutable {
