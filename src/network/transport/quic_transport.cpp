@@ -608,7 +608,7 @@ void QuicTransport::_fail_connection(
         auto to_fail = std::move(it->second);
         _failure_listeners.erase(it);
 
-        for (const auto& listener : it->second)
+        for (const auto& listener : to_fail)
             listener();
     }
 
