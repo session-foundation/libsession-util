@@ -180,14 +180,14 @@ struct Recorder {
     callbacks handlers() {
         return {
                 .conversation_added =
-                        [this](const AnyConversation& c) {
+                        [this](AnyConversation&& c) {
                             order.push_back("added");
-                            added.push_back(c);
+                            added.push_back(std::move(c));
                         },
                 .conversation_updated =
-                        [this](const AnyConversation& c) {
+                        [this](AnyConversation&& c) {
                             order.push_back("updated");
-                            updated.push_back(c);
+                            updated.push_back(std::move(c));
                         },
                 .conversation_removed =
                         [this](const ConversationId& id) {
@@ -195,24 +195,24 @@ struct Recorder {
                             removed.push_back(id);
                         },
                 .conversation_list_replaced =
-                        [this](std::vector<AnyConversation> l) {
+                        [this](std::vector<AnyConversation>&& l) {
                             order.push_back("replaced");
                             replaced.push_back(std::move(l));
                         },
                 .request_list_replaced =
-                        [this](std::vector<AnyConversation> l) {
+                        [this](std::vector<AnyConversation>&& l) {
                             order.push_back("requests");
                             requests_replaced.push_back(std::move(l));
                         },
                 .message_added =
-                        [this](const ConversationId& id, const Message& m) {
+                        [this](const ConversationId& id, Message&& m) {
                             order.push_back("message");
-                            msg_added.emplace_back(id, m);
+                            msg_added.emplace_back(id, std::move(m));
                         },
                 .message_updated =
-                        [this](const ConversationId& id, const Message& m) {
+                        [this](const ConversationId& id, Message&& m) {
                             order.push_back("message_updated");
-                            msg_updated.emplace_back(id, m);
+                            msg_updated.emplace_back(id, std::move(m));
                         },
         };
     }

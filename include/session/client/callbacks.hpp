@@ -28,21 +28,27 @@ namespace session::client {
 /// **Handlers run on Core's event loop**, not the caller's thread.  A handler must not block and
 /// must not throw (an escaping exception is caught and logged, and the change is not redelivered).
 /// The conversation or message a handler receives is its own: it was read for this delivery and
-/// nothing else holds it, so a UI moves it into its own queue and wakes its render thread. The
-/// ids are borrowed.
+/// nothing else holds it, so a UI moves it into its own queue and wakes its render thread.  The
+/// signatures say which is which — what is given is taken by rvalue reference, and the ids are
+/// borrowed.
+///
+/// A handler may declare such a parameter as `T&&`, `const T&` or `T`, whichever suits it: only the
+/// last constructs anything, and a handler that just reads pays nothing.  (`T&` is the one form that
+/// will not bind.)  The `&&` is not perfect forwarding despite the spelling — `std::function` is not
+/// a template on its argument — it is a promise by the caller that the object is spent afterwards.
 ///
 /// The conversation list an application maintains from these is expected to be *complete*: ordering
 /// is a comparison against every other conversation, so a partial list cannot be sorted.  Showing
 /// only part of it is fine, holding only part of it is not.
 struct callbacks {
     /// A conversation now exists that did not before.
-    std::function<void(AnyConversation)> conversation_added;
+    std::function<void(AnyConversation&&)> conversation_added;
 
     /// A conversation's contents changed: a new or edited message, a name, an unread count, its
     /// last activity.  Fired once with the conversation's settled state rather than once per
     /// underlying change, so a poll that delivers fifty messages to one conversation fires this
     /// once.
-    std::function<void(AnyConversation)> conversation_updated;
+    std::function<void(AnyConversation&&)> conversation_updated;
 
     /// A conversation is gone and should be dropped from the list.
     std::function<void(const ConversationId&)> conversation_removed;
@@ -52,7 +58,7 @@ struct callbacks {
     /// from another device can repin, reveal and hide arbitrarily many conversations at once, and
     /// because a replacement cannot leave the application subtly out of step the way a missed
     /// delta would.
-    std::function<void(std::vector<AnyConversation>)> conversation_list_replaced;
+    std::function<void(std::vector<AnyConversation>&&)> conversation_list_replaced;
 
     /// The message requests changed, carrying the whole list of them, for the same reasons and with
     /// the same guarantees as the above.
@@ -61,13 +67,13 @@ struct callbacks {
     /// both: it left the requests and joined the conversations.  `conversation_added` and the rest
     /// are shared between them — a request is a conversation in every respect except which list it
     /// belongs to — and `Conversation::request` is what says which one a given handler is about.
-    std::function<void(std::vector<AnyConversation>)> request_list_replaced;
+    std::function<void(std::vector<AnyConversation>&&)> request_list_replaced;
 
     /// A message was added, whether received or sent from here.
-    std::function<void(const ConversationId&, Message)> message_added;
+    std::function<void(const ConversationId&, Message&&)> message_added;
 
     /// An existing message changed — currently only its send state.
-    std::function<void(const ConversationId&, Message)> message_updated;
+    std::function<void(const ConversationId&, Message&&)> message_updated;
 
     /// Messages were deleted from a conversation, and anything displaying its history should read
     /// it again.

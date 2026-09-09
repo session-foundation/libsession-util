@@ -70,6 +70,12 @@ enum class MessageSendStatus {
 
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the
 /// Core object to fire into the application front-end.
+///
+/// The signatures say what a handler may keep.  A parameter taken by rvalue reference was read for
+/// this delivery and nothing else holds it, so a handler may move from it; one taken by `const&` or
+/// as a span is borrowed and valid only for the duration of the call.  A handler may declare an
+/// rvalue parameter as `T&&`, `const T&` or `T`, whichever suits it: only the last constructs
+/// anything, and a handler that just reads pays nothing.
 struct callbacks {
 
     /// Callback that is invoked when a device linking request is received for entry into the device
@@ -99,7 +105,7 @@ struct callbacks {
     ///   request.  The first 7 are the standard display; all 21 are available for the extended
     ///   view.  Formatting and joining is left to the caller.
     std::function<void(
-            int reqid, const device::Info& new_device, std::span<const std::string_view, 21> sas)>
+            int reqid, device::Info&& new_device, std::span<const std::string_view, 21> sas)>
             device_link_request;
 
     /// Callback that is invoked when a new device has been linked to the account.  If a batch
@@ -119,7 +125,7 @@ struct callbacks {
     ///   acceptance.  If there was no previous link request (such as when catching up on device
     ///   updates performed by other account devices) then the value will be 0.
     /// - new_device -- the metadata about the new device.
-    std::function<void(int reqid, const device::Info& new_device)> device_added;
+    std::function<void(int reqid, device::Info&& new_device)> device_added;
 
     /// Callback invoked when *this* device has been confirmed linked to the account by another
     /// device.
@@ -131,7 +137,7 @@ struct callbacks {
     ///
     /// Parameters:
     /// - removed_device -- the most recent info we have (locally) for the removed device.
-    std::function<void(const device::Info& removed_device)> device_removed;
+    std::function<void(device::Info&& removed_device)> device_removed;
 
     /// Callback invoked when *this* device has been confirmed removed from the account (typically
     /// from another device) from an incoming device group update.

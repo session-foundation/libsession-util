@@ -1455,7 +1455,9 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
         load_device_extras(c, row_id, item.info);
     }
 
-    for (const auto& item : items) {
+    // Non-const so a handler can take the info: each item reaches exactly one branch below, and
+    // nothing after the switch reads `info` again.
+    for (auto& item : items) {
         bool is_self = (item.id == self_id);
         try {
             switch (item.processing) {
@@ -1466,7 +1468,9 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
                                 sqlite::blob_guts<std::array<std::byte, 16>>>(
                                 "SELECT id, sas_seed FROM device_link_requests WHERE device = ?",
                                 item.row_id);
-                        f(static_cast<int>(lr_id), item.info, sas_from_seed(sas_seed));
+                        f(static_cast<int>(lr_id),
+                          std::move(item.info),
+                          sas_from_seed(sas_seed));
                     }
                     break;
                 case Processing::Registered:
@@ -1480,7 +1484,7 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
                                              "SELECT id FROM device_link_requests WHERE device = ?",
                                              item.row_id)
                                             .value_or(0LL);
-                            f(static_cast<int>(reqid), item.info);
+                            f(static_cast<int>(reqid), std::move(item.info));
                         }
                         // Clean up any link request row (whether callback was set or not)
                         c.prepared_exec(
@@ -1493,7 +1497,7 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
                             f();
                     } else {
                         if (auto& f = cb().device_removed)
-                            f(item.info);
+                            f(std::move(item.info));
                     }
                     break;
             }
