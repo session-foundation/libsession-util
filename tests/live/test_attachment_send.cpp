@@ -43,7 +43,7 @@ struct LiveClient {
 bool wait_until_sent(Client& c, int64_t id, std::chrono::seconds limit) {
     auto deadline = std::chrono::steady_clock::now() + limit;
     while (std::chrono::steady_clock::now() < deadline) {
-        auto msg = c.message(id);
+        auto msg = c.message(id, wait);
         REQUIRE(msg);
         if (msg->send_state == SendState::sent)
             return true;
@@ -73,11 +73,13 @@ TEST_CASE(
     std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
     auto id = c->send_message(
             ConversationId::dm(me),
-            "with an attachment",
-            {OutgoingAttachment{.path = file, .content_type = "application/octet-stream"}},
+            {.body = "with an attachment",
+             .attachments = {OutgoingAttachment{
+                     .path = file, .content_type = "application/octet-stream"}}},
             [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
                 reports.emplace_back(idx, sent, total, result);
-            });
+            },
+            wait);
 
     REQUIRE(wait_until_sent(*c.client, id, 120s));
 
