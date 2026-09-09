@@ -105,6 +105,17 @@ class Network {
     uint16_t hardfork() const { return _fork_versions.load().hardfork; };
     uint16_t softfork() const { return _fork_versions.load().softfork; };
 
+    /// Whether a storage server can push to us on this network, i.e. whether `on_server_push` can
+    /// ever fire and a subscription is worth making.
+    ///
+    /// False for onion requests, and not as a matter of it being unimplemented: the storage server
+    /// keys a subscription to the connection the request arrived on, which for an onion request is
+    /// the last relay's rather than ours, so subscribing over one would register a relay as the
+    /// subscriber.  Anything relying on pushed messages has to keep polling in that mode.
+    bool supports_server_push() const {
+        return config.router != opt::router::Type::onion_requests;
+    }
+
     void suspend();
     void resume(bool automatically_reconnect = true);
     void close_connections();
