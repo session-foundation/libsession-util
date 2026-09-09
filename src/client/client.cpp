@@ -2033,7 +2033,7 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
 }
 
 void Client::_delete_contact(const ConversationId& id) {
-    bool removed = false;
+    bool removed = false, was_request = false, was_listed = false;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
@@ -2042,6 +2042,18 @@ void Client::_delete_contact(const ConversationId& id) {
                 "SELECT id FROM accounts WHERE session_id = ?", id.session_id());
         if (!account)
             return;
+
+        // Which list it is in, before either delete below.  Not merely before the conversation
+        // goes: whether it is a request is read from `ct.approved`, which is a column of the
+        // contact row that is about to be deleted, so asking afterwards answers about a
+        // relationship that no longer exists and calls every deleted conversation a request.
+        //
+        // A hidden one is in neither list, so its going changes neither.
+        if (auto convo = c.prepared_maybe_get<int64_t>(
+                    "SELECT id FROM conversations WHERE dm = ? AND priority >= 0", *account)) {
+            was_listed = true;
+            was_request = is_request_row(c, *convo, _self_or_none());
+        }
 
         // The nickname, both approvals and the block are columns of the row being deleted, so
         // there is nothing to reset first: they exist only for as long as the relationship does.
@@ -2060,9 +2072,9 @@ void Client::_delete_contact(const ConversationId& id) {
 
     if (removed) {
         _emit_conversation_removed(id);
-        // Both, unlike hiding: losing the contact row takes the approval with it, so the row does
-        // not merely leave a list, it stops being classifiable into either.
-        _report_lists_replaced(true, true);
+        // The one list it was in.  A conversation is in exactly one of the two, so deleting it
+        // outright leaves the other exactly as it was.
+        _report_lists_replaced(was_listed && !was_request, was_listed && was_request);
     }
 }
 
