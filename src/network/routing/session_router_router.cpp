@@ -1432,6 +1432,7 @@ void SessionRouter::_send_via_tunnel(
             request.category,
             request.time_remaining(),
             remaining_overall_timeout};
+    router_request.tunnelled = true;
 
     transport->send_request(std::move(router_request), std::move(callback));
 }

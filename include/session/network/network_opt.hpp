@@ -379,13 +379,22 @@ namespace opt {
 
     // MARK: Quic Transport Options
 
-    /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
+    /// Can be used to override the default (5s) handshake timeout duration for Quic connections
+    /// made directly to a node's own address.
     struct quic_handshake_timeout {
         std::chrono::milliseconds duration;
         quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
-    /// Can be used to override the default (0ms) keep alive duration for Quic connections.
+    /// Can be used to override the default (10s) handshake timeout duration for Quic connections
+    /// whose packets travel through a Session Router tunnel, which have a multi-hop round trip to
+    /// complete rather than a direct one.
+    struct quic_tunnel_handshake_timeout {
+        std::chrono::milliseconds duration;
+        quic_tunnel_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
+    };
+
+    /// Can be used to override the default (10s) keep alive duration for Quic connections.
     struct quic_keep_alive {
         std::chrono::seconds duration;
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
@@ -490,6 +499,7 @@ namespace opt {
 
             // Quic transport options
             quic_handshake_timeout,
+            quic_tunnel_handshake_timeout,
             quic_keep_alive,
             quic_max_udp_payload,
 
