@@ -69,6 +69,24 @@ class Network {
     std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)>
             on_network_info_changed;
 
+    /// Hook to be notified when a storage server sends us something we did not ask for, on a
+    /// connection we already hold -- which is how a swarm subscription delivers messages.  `node`
+    /// names the swarm member; `endpoint` and `body` are the pushed request's, unparsed.
+    ///
+    /// Only reachable with a routing mode that gives the storage server a connection to us: it has
+    /// nothing to push down when our requests arrive through an onion path, where the connection
+    /// it can see belongs to the last relay rather than to us.
+    std::function<
+            void(const ed25519_pubkey& node,
+                 std::string_view endpoint,
+                 std::span<const std::byte> body)>
+            on_server_push;
+
+    /// Hook to be notified once a connection to `node` is usable, including when it comes back
+    /// after having been lost.  Per-connection state the far end holds for us -- a subscription --
+    /// does not survive that, so this is where it has to be established again.
+    std::function<void(const ed25519_pubkey& node)> on_connection_established;
+
     template <typename... Opt>
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,

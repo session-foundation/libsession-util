@@ -325,6 +325,32 @@ void QuicTransport::_establish_connection(
                     auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
                     auto conn_id = conn.reference_id();
                     auto stream_id = stream->stream_id();
+
+                    // Anything the far end sends us of its own accord arrives here.  Registered
+                    // generically rather than per endpoint name because what those names mean is
+                    // the storage server's business, not the transport's.
+                    //
+                    // Caught rather than left to propagate: this runs inside libquic's stream
+                    // machinery, where an exception would tear down the connection for a fault in
+                    // a consumer's handler.
+                    stream->register_generic_handler(
+                            [this, address_pubkey_hex](oxen::quic::message msg) {
+                                if (!on_server_push)
+                                    return;
+                                try {
+                                    on_server_push(
+                                            ed25519_pubkey::from_hex(address_pubkey_hex),
+                                            msg.endpoint(),
+                                            msg.body<std::byte>());
+                                } catch (const std::exception& e) {
+                                    log::error(
+                                            cat,
+                                            "Handler for pushed '{}' from {} threw: {}",
+                                            msg.endpoint(),
+                                            address_pubkey_hex,
+                                            e.what());
+                                }
+                            });
                     auto it = _pending_verification_callbacks.find(address_pubkey_hex);
                     decltype(it->second) verification_callbacks;
                     if (it != _pending_verification_callbacks.end()) {
@@ -353,6 +379,22 @@ void QuicTransport::_establish_connection(
                         for (auto&& [req, cb] : std::move(requests_to_process))
                             _send_on_connection(
                                     conn_id, address_pubkey_hex, std::move(req), std::move(cb));
+                    }
+
+                    // Last, so that anything already waiting on this connection goes out ahead of
+                    // whatever the listener sends, and so that the connection is in
+                    // `_active_connection_ids` by the time it does.
+                    if (on_connection_established) {
+                        try {
+                            on_connection_established(
+                                    ed25519_pubkey::from_hex(address_pubkey_hex));
+                        } catch (const std::exception& e) {
+                            log::error(
+                                    cat,
+                                    "Connection-established listener for {} threw: {}",
+                                    address_pubkey_hex,
+                                    e.what());
+                        }
                     }
                 },
                 [this, address_pubkey_hex, initiating_req_id](
