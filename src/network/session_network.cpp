@@ -278,6 +278,20 @@ Network::Network(config::Config _conf) :
     _router->on_status_changed = [this] { _recalculate_status(); };
     _transport->on_status_changed = [this] { _recalculate_status(); };
 
+    // Pass the transport's inbound signals through to whoever owns us.  Read each hook once into
+    // a local: our owner may replace it, and these fire on the loop rather than from the thread
+    // that would be doing the replacing.
+    _transport->on_server_push = [this](const ed25519_pubkey& node,
+                                        std::string_view endpoint,
+                                        std::span<const std::byte> body) {
+        if (auto cb = on_server_push)
+            cb(node, endpoint, body);
+    };
+    _transport->on_connection_established = [this](const ed25519_pubkey& node) {
+        if (auto cb = on_connection_established)
+            cb(node);
+    };
+
     // Perform a clock resync
     _jq->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
 }
