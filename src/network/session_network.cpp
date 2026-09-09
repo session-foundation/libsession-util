@@ -192,6 +192,16 @@ Network::Network(config::Config _conf) :
 
     // The SnodePool is needed regardless of the transport layer as it includes swarm information
     // which is needed by the clients in order to send requests
+    //
+    // This fetcher goes straight to the transport, bypassing the router: it is what fills an empty
+    // snode cache, and onion requests cannot be built before there is one.  Hence the seed list --
+    // a bootstrap that has to leak the client's IP is at least aimed at nodes chosen in advance.
+    //
+    // TODO: session-router mode does not need this exemption.  It bootstraps itself onto the
+    // network before it can carry anything of ours, so a tunnel to a seed node is available at the
+    // point this runs, and routing the bootstrap would close the one hole in that mode's IP
+    // guarantee.  Left direct for now because the routed fetcher is installed further down, after
+    // the router exists.
     auto bootstrap_fetcher = [bt = std::weak_ptr{_transport}](
                                      Request req, network_response_callback_t on_complete) {
         if (auto transport = bt.lock())

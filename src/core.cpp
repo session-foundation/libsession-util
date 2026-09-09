@@ -102,6 +102,11 @@ void Core::set_network(std::unique_ptr<network::Network> network) {
     if (network && !globals.have_account())
         throw no_account{};
 
+    // Replacing an attached Network is unsupported, and unsupported here means unsafe rather than
+    // merely unimplemented: see the TODO in core.hpp.  Refuse rather than corrupt.
+    if (_network)
+        throw network_already_attached{};
+
     // Ownership moves in via release() because the two pointer types differ deliberately: the
     // parameter is a plain unique_ptr so callers can hand over a std::make_unique, while the
     // member's deleter (which is just `delete`) is what keeps Network an incomplete type in
