@@ -485,16 +485,18 @@ void Client::_emit_conversation_added(const ConversationId& id) {
 }
 
 void Client::_emit_conversation_removed(const ConversationId& id) {
-    _emit([id](const callbacks& cbs) {
+    // `id = id` rather than `id`: a copy-capture of a const lvalue is itself const, which `mutable`
+    // does not undo, and the handler is given the id outright.
+    _emit([id = id](const callbacks& cbs) mutable {
         if (cbs.conversation_removed)
-            cbs.conversation_removed(id);
+            cbs.conversation_removed(std::move(id));
     });
 }
 
 void Client::_emit_history_replaced(const ConversationId& id) {
-    _emit([id](const callbacks& cbs) {
+    _emit([id = id](const callbacks& cbs) mutable {
         if (cbs.history_replaced)
-            cbs.history_replaced(id);
+            cbs.history_replaced(std::move(id));
     });
 }
 
@@ -502,10 +504,10 @@ void Client::_emit_message_alone(bool added, const ConversationId& id, int64_t m
     auto msg = _message(message_id);
     if (!msg)
         return;
-    _emit([added, id, msg = std::move(*msg)](const callbacks& cbs) mutable {
+    _emit([added, id = id, msg = std::move(*msg)](const callbacks& cbs) mutable {
         const auto& h = added ? cbs.message_added : cbs.message_updated;
         if (h)
-            h(id, std::move(msg));
+            h(std::move(id), std::move(msg));
     });
 }
 

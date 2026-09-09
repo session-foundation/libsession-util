@@ -27,10 +27,11 @@ namespace session::client {
 ///
 /// **Handlers run on Core's event loop**, not the caller's thread.  A handler must not block and
 /// must not throw (an escaping exception is caught and logged, and the change is not redelivered).
-/// The conversation or message a handler receives is its own: it was read for this delivery and
-/// nothing else holds it, so a UI moves it into its own queue and wakes its render thread.  The
-/// signatures say which is which — what is given is taken by rvalue reference, and the ids are
-/// borrowed.
+/// What a handler receives is its own: it was read for this delivery and nothing else holds it, so
+/// a UI moves it into its own queue and wakes its render thread.  The signatures say which is
+/// which — what is given is taken by rvalue reference, what is lent by `const&`.  The two progress
+/// handlers are the ones that lend, because they report repeatedly against one captured id and a
+/// handler that moved from it would empty what the next report needs.
 ///
 /// A handler may declare such a parameter as `T&&`, `const T&` or `T`, whichever suits it: only the
 /// last constructs anything, and a handler that just reads pays nothing.  (`T&` is the one form that
@@ -51,7 +52,7 @@ struct callbacks {
     std::function<void(AnyConversation&&)> conversation_updated;
 
     /// A conversation is gone and should be dropped from the list.
-    std::function<void(const ConversationId&)> conversation_removed;
+    std::function<void(ConversationId&&)> conversation_removed;
 
     /// Priorities changed — a pin, unpin, hide or unhide — carrying the whole list in its new
     /// order.  A replacement rather than a description of what moved, because one config update
@@ -70,10 +71,10 @@ struct callbacks {
     std::function<void(std::vector<AnyConversation>&&)> request_list_replaced;
 
     /// A message was added, whether received or sent from here.
-    std::function<void(const ConversationId&, Message&&)> message_added;
+    std::function<void(ConversationId&&, Message&&)> message_added;
 
     /// An existing message changed — currently only its send state.
-    std::function<void(const ConversationId&, Message&&)> message_updated;
+    std::function<void(ConversationId&&, Message&&)> message_updated;
 
     /// Messages were deleted from a conversation, and anything displaying its history should read
     /// it again.
@@ -82,7 +83,7 @@ struct callbacks {
     /// themselves: a history is unbounded, and an application showing one page of it has no use for
     /// the rest.  What deletes messages is a delete-before instruction, which can take any number
     /// of them at once and is not otherwise describable as a sequence of removals.
-    std::function<void(const ConversationId&)> history_replaced;
+    std::function<void(ConversationId&&)> history_replaced;
 
     /// An attachment is being fetched that nobody asked for — see `Conversation::auto_download`.
     ///
