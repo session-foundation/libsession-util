@@ -565,21 +565,28 @@ void Client::_flush_pending() {
     auto dirty_order = std::move(_dirty_order);
     _dirty_order.clear();
 
-    // Which list a moved row sits in, read off the row this loop already fetches rather than by
-    // asking again: only a DM can be a request, and the two lists are complements, so each moved
-    // row asks for exactly one of them.
-    bool conversations = false, requests = false;
+    // Which list each dirty row sits in, read off the row this loop already fetches rather than by
+    // asking again: only a DM can be a request, and the two lists are complements, so each row
+    // belongs to exactly one of them -- or, hidden, to neither.
+    //
+    // Two questions per list, and they are not the same question.  A row whose *contents* changed
+    // makes the list stale for a subscriber holding whole lists, and most of what dirties a
+    // conversation does that: a read receipt, a nickname, an expiry.  A row that *moved* is the
+    // narrower case, and only that one can change the order.
+    bool convos_changed = false, requests_changed = false;
+    bool convos_moved = false, requests_moved = false;
 
     for (const auto& id : dirty) {
         auto convo = _conversation(id);
         if (!convo)
             continue;
-        if (std::ranges::find(dirty_order, id) != dirty_order.end()) {
+        // A hidden row is in neither list, so nothing about it makes either one stale.
+        if (convo->priority() >= 0) {
             auto* dm = convo->dm();
-            if (dm && dm->request)
-                requests = true;
-            else
-                conversations = true;
+            const bool request = dm && dm->request;
+            (request ? requests_changed : convos_changed) = true;
+            if (std::ranges::find(dirty_order, id) != dirty_order.end())
+                (request ? requests_moved : convos_moved) = true;
         }
         _emit([convo = std::move(*convo)](const callbacks& cbs) mutable {
             if (cbs.conversation_updated)
@@ -587,27 +594,20 @@ void Client::_flush_pending() {
         });
     }
 
-    // And the order, if anything in this batch moved rather than merely changed.  A
-    // `conversation_updated` names the row and says nothing about its position, so a subscriber
+    // And then the lists, each through whichever handler asked for it.
+    //
+    // A `conversation_updated` names the row and says nothing about its position, so a subscriber
     // applying one alone would have to work the order out for itself -- which means reimplementing
     // this sort, and the two lists are not sorted the same way.
-    //
-    // The ids only, and not a replacement of the rows: the loop above has just sent every changed
-    // row in full, so a replacement here would re-send the rest of the list to describe a change to
-    // one of them, and would send the changed row's snippet a second time.
     //
     // Deliberately after that loop rather than before it, which is the guarantee
     // `conversation_order_updated` documents: the ids reported here always name conversations the
     // subscriber has already been told about, so an id it does not recognise means it missed a
     // notification rather than that the two are racing.
     //
-    // Once for the batch, not once per message: a poll delivering fifty messages to one
-    // conversation reaches here a single time, which is the same reason `_dirty` exists.  And only
-    // when an ordering term actually moved, because most of what dirties a conversation does not --
-    // a read receipt, a nickname, an expiry -- and a query per read conversation is a lot to say
-    // nothing.
-    if (conversations || requests)
-        _emit_order_updated(conversations, requests);
+    // Once for the batch, not once per row: a poll delivering fifty messages to one conversation
+    // reaches here a single time, which is the same reason `_dirty` exists.
+    _report_lists(convos_changed, convos_moved, requests_changed, requests_moved);
 }
 
 // -- Asynchronous interface ---------------------------------------------------------------------
@@ -1605,13 +1605,17 @@ std::vector<ConversationId> Client::_message_request_order() {
 }
 
 void Client::_report_list(
+        bool changed,
+        bool moved,
         std::vector<ConversationId>& reported,
         std::vector<AnyConversation> (Client::*rows)(),
         std::vector<ConversationId> (Client::*ids)(),
         std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
         std::function<void(std::vector<ConversationId>)> callbacks::* reordered) {
-    const bool want_replaced = static_cast<bool>((*_cbs).*replaced);
-    const bool want_order = static_cast<bool>((*_cbs).*reordered);
+    // A whole list is stale as soon as any row in it changed; only a row that moved can have
+    // changed the order.  `changed` is therefore the wider of the two, and `moved` implies it.
+    const bool want_replaced = changed && static_cast<bool>((*_cbs).*replaced);
+    const bool want_order = moved && static_cast<bool>((*_cbs).*reordered);
     // Before the query, not after: reading a list to hand it to nobody is the whole cost of the
     // operation.
     if (!want_replaced && !want_order)
@@ -1632,7 +1636,7 @@ void Client::_report_list(
     // it is the send that is saved -- which is worth having, because a message landing in the
     // conversation already at the top of its list moves nothing, and that is what most messages in
     // an active conversation do.
-    const bool moved = order != reported;
+    const bool order_changed = order != reported;
     reported = order;
 
     // A replacement is not suppressed on an unchanged order, because the order is not what it
@@ -1641,27 +1645,30 @@ void Client::_report_list(
     // thing to decide whether to send another.
     if (want_replaced)
         _emit([list = std::move(list), replaced](const callbacks& cbs) { (cbs.*replaced)(list); });
-    if (want_order && moved)
+    if (want_order && order_changed)
         _emit([order = std::move(order), reordered](const callbacks& cbs) {
             (cbs.*reordered)(order);
         });
 }
 
-void Client::_emit_order_updated(bool conversations, bool requests) {
-    if (conversations)
-        _report_list(
-                _reported_order,
-                &Client::_conversations,
-                &Client::_conversation_order,
-                &callbacks::conversation_list_replaced,
-                &callbacks::conversation_order_updated);
-    if (requests)
-        _report_list(
-                _reported_request_order,
-                &Client::_message_requests,
-                &Client::_message_request_order,
-                &callbacks::request_list_replaced,
-                &callbacks::request_order_updated);
+void Client::_report_lists(
+        bool convos_changed, bool convos_moved, bool requests_changed, bool requests_moved) {
+    _report_list(
+            convos_changed,
+            convos_moved,
+            _reported_order,
+            &Client::_conversations,
+            &Client::_conversation_order,
+            &callbacks::conversation_list_replaced,
+            &callbacks::conversation_order_updated);
+    _report_list(
+            requests_changed,
+            requests_moved,
+            _reported_request_order,
+            &Client::_message_requests,
+            &Client::_message_request_order,
+            &callbacks::request_list_replaced,
+            &callbacks::request_order_updated);
 }
 
 std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {

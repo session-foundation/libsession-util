@@ -1275,13 +1275,17 @@ class Client {
     // wanting only the order gets the id-only query, which is the cheaper of the two and the one
     // that runs on every message.
     void _report_list(
+            bool changed,
+            bool moved,
             std::vector<ConversationId>& reported,
             std::vector<AnyConversation> (Client::*rows)(),
             std::vector<ConversationId> (Client::*ids)(),
             std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
             std::function<void(std::vector<ConversationId>)> callbacks::* reordered);
-    // Reports whichever of the two lists is asked for.  Called by `_flush_pending`.
-    void _emit_order_updated(bool conversations, bool requests);
+    // Reports both lists, given for each whether a row in it changed and whether one moved.
+    // Called by `_flush_pending`, once per batch.
+    void _report_lists(
+            bool convos_changed, bool convos_moved, bool requests_changed, bool requests_moved);
 
   public:
     /// The account state this Client is built on: keys, device group, configs, polling.  A

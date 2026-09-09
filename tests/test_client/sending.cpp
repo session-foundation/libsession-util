@@ -238,6 +238,33 @@ TEST_CASE("Client: a replacement is sent even when nothing moved", "[client][sig
     CHECK(r.replaced[0][0].last_message() == "pong");
 }
 
+TEST_CASE("Client: a change that moves nothing still replaces the list", "[client][signals]") {
+    SenderKeys sender;
+    Recorder r;
+    TempClient c{r.lists_only()};
+    approve(*c, sender.session_id);
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+    sync(*c);
+    REQUIRE(r.replaced.size() >= 1);
+    CHECK(r.replaced.back()[0].unread() == 1);
+    r.order.clear();
+    r.replaced.clear();
+
+    // Reading the conversation changes `unread_count` and moves nothing, so it never reaches
+    // `_touch_reordered`.  For this subscriber the list is the only thing carrying the count, so
+    // driving the replacement off what *moved* rather than off what *changed* would leave it
+    // showing an unread conversation the user has just read.
+    c->conversation(id, wait)->mark_read(wait);
+    sync(*c);
+
+    REQUIRE(r.replaced.size() == 1);
+    REQUIRE(r.replaced[0].size() == 1);
+    CHECK(r.replaced[0][0].unread() == 0);
+    CHECK(r.reordered.empty());
+}
+
 TEST_CASE("Client: a subscriber wanting both is sent both", "[client][signals]") {
     SenderKeys a, b;
     Recorder r;
