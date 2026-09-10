@@ -9,6 +9,7 @@
 #include <oxen/log/format.hpp>
 #include <session/router.hpp>
 
+#include "session/format.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/response_parser.hpp"
@@ -33,6 +34,11 @@ struct ActiveTunnel {
 };
 
 static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address);
+
+// The name Session Router knows a storage node by: its ed25519 pubkey in base32z, plus ".snode".
+static std::string srouter_address(std::span<const std::byte, 32> remote_pubkey) {
+    return "{:a}.snode"_format(remote_pubkey);
+}
 
 // The inner QUIC connection's UDP payload size, fixed rather than derived from the tunnel's
 // suggestion.
@@ -233,9 +239,35 @@ void SessionRouter::clear_cache() {
     // TODO: Implement this.
 }
 
-std::vector<PathInfo> SessionRouter::get_active_paths() {
-    // TODO: Implement this.
-    return {};
+std::optional<PathInfo> SessionRouter::get_path_to(const service_node& node) {
+    if (!srouter)
+        return std::nullopt;
+
+    // Deliberately the single-session lookup rather than get_all_session_paths(): we hold a
+    // session to every swarm member we have spoken to, to the file server, and to every group's
+    // swarm, and reporting all of them answers a question nobody asked.
+    auto hops = srouter->get_path_for_session(srouter_address(node.remote_pubkey));
+    if (!hops)
+        return std::nullopt;
+
+    PathInfo info;
+    info.hops.reserve(hops->size());
+
+    for (const auto& [address, ip] : *hops) {
+        auto pubkey = pubkey_from_srouter_address(address);
+        if (!pubkey) {
+            log::warning(cat, "Omitting path hop with an unparseable address: {}", address);
+            continue;
+        }
+
+        try {
+            info.hops.push_back({*pubkey, oxen::quic::ipv4{ip}});
+        } catch (const std::exception& e) {
+            log::warning(cat, "Omitting path hop {} with an unparseable ip {}", address, ip);
+        }
+    }
+
+    return info;
 }
 
 void SessionRouter::send_request(Request request, network_response_callback_t callback) {
@@ -1228,12 +1260,6 @@ void SessionRouter::_establish_tunnel(
     //     return r;
     // }
 
-    std::string srouter_address;
-    srouter_address.reserve(oxenc::to_base32z_size(remote_pubkey.size()) + ".snode"sv.size());
-    oxenc::to_base32z(
-            remote_pubkey.begin(), remote_pubkey.end(), std::back_inserter(srouter_address));
-    srouter_address += ".snode"sv;
-
     // srouter::RouterID router_id{remote_pubkey.first<32>()};
     // auto snode_address = "34d9udo9ethfcrcaxcgdyxsi1w8gr79jzornsytcfgdw5rpmif8y.loki";//
     // address.to_network_address(true);
@@ -1247,7 +1273,7 @@ void SessionRouter::_establish_tunnel(
             initiating_req_id,
             address_pubkey_hex);
     auto tunnel = srouter->establish_udp(
-            srouter_address,
+            srouter_address(remote_pubkey),
             test_port,
             [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
                     router::tunnel_info info) mutable {

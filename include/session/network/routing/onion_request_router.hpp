@@ -161,7 +161,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void clear_cache() override;
 
     ConnectionStatus get_status() const override { return _status.load(); };
-    std::vector<PathInfo> get_active_paths() override;
+    std::optional<PathInfo> get_path_to(const service_node& node) override;
     std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
     void upload(UploadRequest request) override;  // deprecated: use upload_file()

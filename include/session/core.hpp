@@ -19,6 +19,7 @@
 #include "core/schema/schema_registry.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
+#include "session/network/session_network_types.hpp"
 
 /// The "Core" class holds a Session account's own state, in an encrypted sqlite database: its keys,
 /// its device group, its configs, and the bookkeeping needed to talk to the network on its behalf.
@@ -369,6 +370,11 @@ class Core {
     // talking to, held for as long as its connection lasts because there is no reason to move; a
     // fresh one is chosen the ordinary way -- a new `get_swarm`, whatever it hands back first --
     // once this one is gone.
+    // The swarm member currently carrying our messages: the one being polled, or the one a
+    // subscription is held with.  Not a preference -- each poll re-picks at random, and this only
+    // stops moving because a subscription stops the polling.
+    std::optional<network::service_node> _swarm_node;
+
     std::optional<network::service_node> _sub_node;
     bool _subscribed = false;
     std::shared_ptr<oxen::quic::Ticker> _sub_ticker;
@@ -652,6 +658,21 @@ class Core {
     /// Returns the optional network interface, or nullptr if none is set.  Non-owning: a caller
     /// must not keep this beyond the point where the network could be replaced or dropped.
     network::Network* network() const { return _network.get(); }
+
+    /// The swarm member currently carrying our messages -- the one being polled, or the one a
+    /// subscription is held with -- or nullopt before there is one.
+    ///
+    /// Which member that is changes on its own: each poll picks a fresh one at random, and a
+    /// subscription holds one only for as long as its connection lasts.  Read it to show what is
+    /// happening now, not to depend on it.
+    std::optional<network::service_node> swarm_node() const { return _swarm_node; }
+
+    /// The route our traffic to `swarm_node()` is taking right now, for showing a user where it
+    /// goes.  Nullopt when there is no member yet, no network attached, or no route to report.
+    ///
+    /// A snapshot rather than a commitment: paths rotate and subscriptions move, so asking again
+    /// later can legitimately give a different answer.
+    std::optional<network::PathInfo> current_swarm_path() const;
 
     /// The event loop this account's work runs on.
     ///
