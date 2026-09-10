@@ -24,6 +24,10 @@ cmake --build build-claude --target regen-protobuf --parallel
 - `-DENABLE_ONIONREQ=ON/OFF` — include onion request / network functionality (default ON)
 - `-DWARNINGS_AS_ERRORS=ON` — treat warnings as errors
 - `-DSUBMODULE_CHECK=OFF` — skip submodule freshness checks (useful during dev)
+- `-DWITH_IP_GEOLOCATION=ON` — bundle the DB-IP IP-to-country database, +1.79MB (default OFF, in
+  which case `session::ip_country` lookups all report unknown).  Requires running
+  `utils/update-ip-country-db.py` first: the generated table is not committed, and cmake fails with
+  instructions if it is missing.
 
 ## Architecture Overview
 

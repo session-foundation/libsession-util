@@ -20,7 +20,7 @@ if [ $? -ne 0 ]; then
 fi
 
 cd "$(dirname $0)/../"
-readarray -t sources < <(find include proto src tests | grep -E '\.([hc](pp)?)$' | grep -v '\#' | grep -v Catch2 | grep -v -E '\.pb\.(h|cc)$')
+readarray -t sources < <(find include proto src tests | grep -E '\.([hc](pp)?)$' | grep -v '\#' | grep -v Catch2 | grep -v -E '\.pb\.(h|cc)$' | grep -v -E 'ip_country/data\.cpp$')
 if [ "$1" = "verify" ] ; then
     if [ $($binary --output-replacements-xml "${sources[@]}"  | grep '</replacement>' | wc -l) -ne 0 ] ; then
         exit 2
