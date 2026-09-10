@@ -1174,6 +1174,20 @@ std::vector<service_node> SnodePool::get_unused_nodes(
     });
 }
 
+void SnodePool::set_swarm(
+        session::network::x25519_pubkey swarm_pubkey,
+        swarm_id_t swarm_id,
+        std::vector<service_node> nodes) {
+    _jq.call([this, swarm_pubkey, swarm_id, nodes = std::move(nodes)]() mutable {
+        log::info(
+                cat,
+                "Overriding cached swarm for {} with {} authoritative node(s).",
+                swarm_pubkey.hex(),
+                nodes.size());
+        _swarm_cache[swarm_pubkey] = {swarm_id, std::move(nodes)};
+    });
+}
+
 void SnodePool::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         bool ignore_strike_count,
