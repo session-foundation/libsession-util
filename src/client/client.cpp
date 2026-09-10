@@ -552,18 +552,11 @@ void Client::_touch(const ConversationId& id) {
     }
 }
 
-void Client::_touch_reordered(const ConversationId& id) {
-    if (std::ranges::find(_dirty_order, id) == _dirty_order.end())
-        _dirty_order.push_back(id);
-    _touch(id);
-}
 
 void Client::_flush_pending() {
     _flush_scheduled = false;
     auto dirty = std::move(_dirty);
     _dirty.clear();
-    auto dirty_order = std::move(_dirty_order);
-    _dirty_order.clear();
 
     // Which list each dirty row sits in, read off the row this loop already fetches rather than by
     // asking again: only a DM can be a request, and the two lists are complements, so each row
@@ -574,7 +567,6 @@ void Client::_flush_pending() {
     // conversation does that: a read receipt, a nickname, an expiry.  A row that *moved* is the
     // narrower case, and only that one can change the order.
     bool convos_changed = false, requests_changed = false;
-    bool convos_moved = false, requests_moved = false;
 
     for (const auto& id : dirty) {
         auto convo = _conversation(id);
@@ -593,8 +585,6 @@ void Client::_flush_pending() {
             auto* dm = convo->dm();
             const bool request = dm && dm->request;
             (request ? requests_changed : convos_changed) = true;
-            if (std::ranges::find(dirty_order, id) != dirty_order.end())
-                (request ? requests_moved : convos_moved) = true;
         }
         _emit([convo = std::move(*convo)](const callbacks& cbs) mutable {
             if (cbs.conversation_updated)
@@ -615,7 +605,7 @@ void Client::_flush_pending() {
     //
     // Once for the batch, not once per row: a poll delivering fifty messages to one conversation
     // reaches here a single time, which is the same reason `_dirty` exists.
-    _report_lists(convos_changed, convos_moved, requests_changed, requests_moved);
+    _report_lists(convos_changed, requests_changed);
 }
 
 // -- Asynchronous interface ---------------------------------------------------------------------
@@ -1582,112 +1572,7 @@ std::vector<AnyConversation> Client::_message_requests() {
             *this, c, "{} {}"_format(CONVO_COLUMNS, REQUEST_FILTER_ORDER), _self_or_none());
 }
 
-// The ordered ids of a list and nothing else.  `CONVO_COLUMNS` is most of the cost of reading a
-// list -- a display name to coalesce, an unread count, and a correlated subquery for the snippet,
-// per row -- and none of it says anything about where a row sits.  The identity columns are what
-// `subject_to_id` needs, and are already joined for the filter.
-template <typename... Bind>
-static std::vector<ConversationId> query_conversation_ids(
-        sqlite::Connection& c, const std::string& query, const Bind&... bind) {
-    std::vector<ConversationId> out;
-    for (auto [convo, sid, gid, url, room] :
-         c.prepared_results<
-                 int64_t,
-                 std::optional<sqlite::blob_guts<b33>>,
-                 std::optional<sqlite::blob_guts<b33>>,
-                 std::optional<std::string>,
-                 std::optional<std::string>>(query, bind...))
-        out.push_back(subject_to_id(convo, sid, gid, url, room));
-    return out;
-}
 
-// Carries its own join, as `CONVO_COLUMNS` does, so that a list query is a column set and a filter
-// and nothing else has to be remembered at the call site.
-static const auto ORDER_COLUMNS = R"(
-    SELECT c.id, a.session_id, g.group_id, m.base_url, m.room
-    {}
-)"_format(SUBJECT_JOIN);
-
-std::vector<ConversationId> Client::_conversation_order() {
-    auto c = core.database().conn();
-    return query_conversation_ids(
-            c, "{} {}"_format(ORDER_COLUMNS, CONVO_FILTER_ORDER), _self_or_none());
-}
-
-std::vector<ConversationId> Client::_message_request_order() {
-    auto c = core.database().conn();
-    return query_conversation_ids(
-            c, "{} {}"_format(ORDER_COLUMNS, REQUEST_FILTER_ORDER), _self_or_none());
-}
-
-void Client::_report_list(
-        bool changed,
-        bool moved,
-        std::vector<ConversationId>& reported,
-        std::vector<AnyConversation> (Client::*rows)(),
-        std::vector<ConversationId> (Client::*ids)(),
-        std::function<void(std::vector<AnyConversation>&&)> callbacks::* replaced,
-        std::function<void(std::vector<ConversationId>)> callbacks::* reordered) {
-    // A whole list is stale as soon as any row in it changed; only a row that moved can have
-    // changed the order.  `changed` is therefore the wider of the two, and `moved` implies it.
-    const bool want_replaced = changed && static_cast<bool>((*_cbs).*replaced);
-    const bool want_order = moved && static_cast<bool>((*_cbs).*reordered);
-    // Before the query, not after: reading a list to hand it to nobody is the whole cost of the
-    // operation.
-    if (!want_replaced && !want_order)
-        return;
-
-    std::vector<AnyConversation> list;
-    std::vector<ConversationId> order;
-    if (want_replaced) {
-        list = (this->*rows)();
-        order.reserve(list.size());
-        for (const auto& convo : list)
-            order.push_back(convo.id());
-    } else {
-        order = (this->*ids)();
-    }
-
-    // Whether the order moved is knowable only by reading it, so the read happens either way and
-    // it is the send that is saved -- which is worth having, because a message landing in the
-    // conversation already at the top of its list moves nothing, and that is what most messages in
-    // an active conversation do.
-    const bool order_changed = order != reported;
-    reported = order;
-
-    // A replacement is not suppressed on an unchanged order, because the order is not what it
-    // carries: the row whose arrival brought us here has a new snippet, and a subscriber holding
-    // only this handler has no other way to learn it.  Suppressing it here would be comparing one
-    // thing to decide whether to send another.
-    if (want_replaced)
-        _emit([list = std::move(list), replaced](const callbacks& cbs) mutable {
-            (cbs.*replaced)(std::move(list));
-        });
-    if (want_order && order_changed)
-        _emit([order = std::move(order), reordered](const callbacks& cbs) {
-            (cbs.*reordered)(order);
-        });
-}
-
-void Client::_report_lists(
-        bool convos_changed, bool convos_moved, bool requests_changed, bool requests_moved) {
-    _report_list(
-            convos_changed,
-            convos_moved,
-            _reported_order,
-            &Client::_conversations,
-            &Client::_conversation_order,
-            &callbacks::conversation_list_replaced,
-            &callbacks::conversation_order_updated);
-    _report_list(
-            requests_changed,
-            requests_moved,
-            _reported_request_order,
-            &Client::_message_requests,
-            &Client::_message_request_order,
-            &callbacks::request_list_replaced,
-            &callbacks::request_order_updated);
-}
 
 std::optional<AnyConversation> Client::_conversation(const ConversationId& id) {
     auto c = core.database().conn();
@@ -2447,18 +2332,34 @@ void Client::_set_delete_before(const ConversationId& id, sys_ms before) {
     contacts.set(*entry);
 }
 
+void Client::_report_list(
+        bool changed,
+        std::vector<AnyConversation> (Client::*rows)(),
+        std::function<void(std::vector<AnyConversation>&&)> callbacks::* replaced) {
+    // Before the query, not after: reading a list to hand it to nobody is the whole cost of the
+    // operation, and a client with no requests screen has no use for the request list.
+    if (!changed || !((*_cbs).*replaced))
+        return;
+
+    _emit([list = (this->*rows)(), replaced](const callbacks& cbs) mutable {
+        (cbs.*replaced)(std::move(list));
+    });
+}
+
+void Client::_report_lists(bool convos_changed, bool requests_changed) {
+    _report_list(convos_changed, &Client::_conversations, &callbacks::conversation_list_replaced);
+    _report_list(requests_changed, &Client::_message_requests, &callbacks::request_list_replaced);
+}
+
 // Both lists, always, and deliberately not one or the other: what moves a conversation between them
 // is approval, what removes it from either is hiding or deletion, and a caller that had to work out
 // which of those it just did would eventually get it wrong.  A replacement is idempotent, so the
 // cost of sending one nobody needed is a query.
 void Client::_report_lists_replaced(bool convos, bool requests) {
-    // Both lists, wholly: a row appeared, went, or changed where it sorts.  The subscriber is told
-    // through whichever handler it registered, and that is the point of routing this through the
-    // same path as a moved row rather than sending replacements outright -- a replacement carries
-    // the order, so a subscriber holding only `conversation_order_updated` was told nothing at all
-    // by the eight callers of this, and its arrangement stayed as it was until the next message
-    // happened to move something.
-    _report_lists(convos, convos, requests, requests);
+    // A row appeared, went, or moved to a new position.  Named for what the caller knows -- that a
+    // list is wholly different now -- rather than for the query, which is the one a changed row
+    // takes as well.
+    _report_lists(convos, requests);
 }
 
 // -- Config reconciliation ----------------------------------------------------------------------
@@ -3704,7 +3605,7 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
-    _touch_reordered(id);
+    _touch(id);
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
 
@@ -3898,7 +3799,7 @@ int64_t Client::_send_message(
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
     _emit_message(true, id, client_id);
-    _touch_reordered(id);
+    _touch(id);
 
     log::debug(
             cat,
@@ -5298,7 +5199,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _emit_message(true, convo_id, client_id);
     }
     if (inserted || renamed)
-        _touch_reordered(convo_id);
+        _touch(convo_id);
 
     // Approval moves a conversation between the two lists, so both changed and neither changed in a
     // way that naming one row would describe.
