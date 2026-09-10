@@ -50,9 +50,26 @@ class MockNetwork : public network::Network {
     // `current_node` when set.
     std::vector<network::service_node> current_swarm;
 
+    /// Set to answer requests as they are sent rather than leaving them in `sent_requests` for the
+    /// test to fire by hand.  Return nullopt to leave one pending.
+    ///
+    /// Called with the request; the tuple is (success, timeout, status, body).  Requests are still
+    /// recorded either way, so a test can assert on what was sent as well as script the answer.
+    using Reply = std::tuple<bool, bool, int16_t, std::optional<std::string>>;
+    std::function<std::optional<Reply>(const network::Request&)> auto_reply;
+
     void send_request(
             network::Request request, network::network_response_callback_t callback) override {
-        sent_requests.push_back({std::move(request), std::move(callback)});
+        std::optional<Reply> scripted;
+        if (auto_reply)
+            scripted = auto_reply(request);
+
+        sent_requests.push_back({std::move(request), callback});
+
+        if (scripted) {
+            auto [ok, timeout, status, body] = std::move(*scripted);
+            callback(ok, timeout, status, {}, std::move(body));
+        }
     }
 
     void get_swarm(
