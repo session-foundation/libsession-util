@@ -1037,39 +1037,24 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
             {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
-    net->get_swarm(
+    _swarm_request(
             x25519_pub,
-            false,
-            [this, net, sid = std::move(sid), params, x25519_pub](auto, auto swarm) {
-                if (swarm.empty()) {
-                    log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+            "retrieve",
+            [body = params.dump()](const network::service_node&) { return to_vector(body); },
+            [this, sid = std::move(sid)](SwarmResponse res) {
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Failed to fetch PFS keys for {}: {}",
+                            sid,
+                            res.timeout ? "timed out"
+                            : res.body  ? *res.body
+                                        : "request failed");
                     _pfs_fetch_done(sid, PfsKeyFetch::failed);
                     return;
                 }
 
-                auto body_str = params.dump();
-                net->send_request(
-                        swarm_request(swarm.front(), x25519_pub, "retrieve", to_vector(body_str)),
-                        [this, sid = std::move(sid)](
-                                bool success,
-                                bool timeout,
-                                int16_t /*status_code*/,
-                                std::vector<std::pair<std::string, std::string>> /*headers*/,
-                                std::optional<std::string> body) {
-                            if (!success || !body) {
-                                log::warning(
-                                        cat,
-                                        "Failed to fetch PFS keys for {}: {}",
-                                        sid,
-                                        timeout ? "timed out"
-                                        : body  ? *body
-                                                : "request failed");
-                                _pfs_fetch_done(sid, PfsKeyFetch::failed);
-                                return;
-                            }
-
-                            return _handle_pfs_response(sid, std::move(*body));
-                        });
+                return _handle_pfs_response(sid, std::move(*res.body));
             });
     return status;
 }
@@ -1225,52 +1210,34 @@ void Core::delete_from_swarm(
     };
     auto body = to_vector<std::byte>(params.dump());
 
-    net->get_swarm(
+    _swarm_request(
             globals.pubkey_x25519(),
-            false,
-            [this, net, hashes = std::move(hashes), body = std::move(body), on_complete](
-                    auto, auto swarm) mutable {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot delete from swarm: no swarm nodes available");
+            "delete",
+            [body = std::move(body)](const network::service_node&) { return body; },
+            [this, hashes = std::move(hashes), on_complete](SwarmResponse res) {
+                if (!res.ok()) {
+                    log::warning(
+                            cat,
+                            "Swarm delete failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
                     if (on_complete)
                         on_complete(false);
                     return;
                 }
 
-                net->send_request(
-                        swarm_request(
-                                swarm.front(), globals.pubkey_x25519(), "delete", std::move(body)),
-                        [this, hashes = std::move(hashes), on_complete](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) {
-                            if (!success) {
-                                log::warning(
-                                        cat,
-                                        "Swarm delete failed ({}): {}",
-                                        timeout ? "timed out" : "status {}"_format(status),
-                                        resp.value_or("no response body"));
-                                if (on_complete)
-                                    on_complete(false);
-                                return;
-                            }
+                // Forget the cursors naming what we just deleted, so the next retrieve measures
+                // from the newest hash the node still holds.  Done on success only: a failed
+                // delete leaves the messages there, and dropping the cursor would replay the
+                // retention window for nothing.
+                {
+                    auto conn = db.conn();
+                    for (const auto& h : hashes)
+                        conn.prepared_exec("DELETE FROM swarm_hashes WHERE hash = ?", h);
+                }
 
-                            // Forget the cursors naming what we just deleted, so the next retrieve
-                            // measures from the newest hash the node still holds.  Done on success
-                            // only: a failed delete leaves the messages there, and dropping the
-                            // cursor would replay the retention window for nothing.
-                            {
-                                auto conn = db.conn();
-                                for (const auto& h : hashes)
-                                    conn.prepared_exec(
-                                            "DELETE FROM swarm_hashes WHERE hash = ?", h);
-                            }
-
-                            if (on_complete)
-                                on_complete(true);
-                        });
+                if (on_complete)
+                    on_complete(true);
             });
 }
 
@@ -1339,62 +1306,38 @@ void Core::_send_to_swarm(
     network::x25519_pubkey x25519_pub;
     std::memcpy(x25519_pub.data(), dest_pubkey.data() + 1, 32);
 
-    net->get_swarm(
+    _swarm_request(
             x25519_pub,
-            false,
-            [net, body = std::move(body), on_complete = std::move(on_complete), x25519_pub](
-                    auto, auto swarm) mutable {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot store: no swarm nodes available");
-                    if (on_complete)
-                        on_complete(false, std::nullopt);
+            "store",
+            [body = std::move(body), x25519_pub](const network::service_node& node) {
+                // Read this against the "Storing ... of <pubkey>" line above: a store rejected as
+                // misdirected means the pubkey in the body and the swarm we resolved are not the
+                // same account, which no amount of trying other members will fix.
+                log::debug(cat, "Storing to swarm of {} via {}", x25519_pub.hex(), node.to_string());
+                return body;
+            },
+            [on_complete = std::move(on_complete)](SwarmResponse res) {
+                if (!res.ok())
+                    log::warning(
+                            cat,
+                            "Store request failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
+                if (!on_complete)
                     return;
+
+                std::optional<std::string> hash;
+                if (res.ok() && res.body) {
+                    try {
+                        auto json = nlohmann::json::parse(*res.body);
+                        if (auto h = json.find("hash"); h != json.end() && h->is_string())
+                            hash = h->get<std::string>();
+                    } catch (const std::exception& e) {
+                        log::warning(cat, "Could not read stored message hash: {}", e.what());
+                    }
                 }
-                // The two values a 421 turns on: which swarm we resolved, and which of its nodes we
-                // picked.  Read this against the "Storing ... of <pubkey>" line above -- a store
-                // rejected as misdirected means those two pubkeys are not the same account.
-                log::debug(
-                        cat,
-                        "Storing to swarm of {} via {} ({} nodes)",
-                        x25519_pub.hex(),
-                        swarm.front().to_string(),
-                        swarm.size());
-
-                net->send_request(
-                        swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
-                        [on_complete = std::move(on_complete)](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) {
-                            if (!success)
-                                log::warning(
-                                        cat,
-                                        "Store request failed ({}): {}",
-                                        timeout ? "timed out" : "status {}"_format(status),
-                                        resp.value_or("no response body"));
-                            if (!on_complete)
-                                return;
-
-                            std::optional<std::string> hash;
-                            if (success && resp) {
-                                try {
-                                    auto json = nlohmann::json::parse(*resp);
-                                    if (auto h = json.find("hash");
-                                        h != json.end() && h->is_string())
-                                        hash = h->get<std::string>();
-                                } catch (const std::exception& e) {
-                                    log::warning(
-                                            cat,
-                                            "Could not read stored message hash: {}",
-                                            e.what());
-                                }
-                            }
-                            on_complete(
-                                    success,
-                                    hash ? std::optional<std::string_view>{*hash} : std::nullopt);
-                        });
+                on_complete(
+                        res.ok(), hash ? std::optional<std::string_view>{*hash} : std::nullopt);
             });
 }
 

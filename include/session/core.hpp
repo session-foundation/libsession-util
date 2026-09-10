@@ -319,6 +319,10 @@ class Core {
     sqlite::Database db;
     friend class detail::CoreComponent;
 
+    // Friendship does not reach a component through its base, and Configs pushes to the swarm, so
+    // it needs `_swarm_request` by name.
+    friend class Configs;
+
     core::callbacks callbacks;
 
     // Called during the constructor: the database is opened and all members are constructed, but
