@@ -252,6 +252,13 @@ struct Core::SwarmOp {
     // because "once per member" cannot be expressed as a number: choosing the next one has to know
     // which are already spent.
     std::vector<network::service_node> unreachable;
+
+    // A member to go back to rather than choosing afresh, for an operation that has to continue
+    // against the one it started with -- a retrieve continuation resumes from a cursor that is
+    // that member's alone.  Dropped the moment that member turns out to be wrong or unusable,
+    // which puts us back to choosing normally.
+    std::optional<network::service_node> prefer;
+
     int redirects = 0;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
 };
@@ -260,9 +267,12 @@ void Core::_swarm_request(
         network::x25519_pubkey swarm_pubkey,
         std::string endpoint,
         std::function<std::vector<std::byte>(const network::service_node&)> make_body,
-        std::function<void(SwarmResponse)> on_done) {
-    _swarm_attempt(std::make_shared<SwarmOp>(
-            swarm_pubkey, std::move(endpoint), std::move(make_body), std::move(on_done)));
+        std::function<void(SwarmResponse)> on_done,
+        std::optional<network::service_node> prefer) {
+    auto op = std::make_shared<SwarmOp>(
+            swarm_pubkey, std::move(endpoint), std::move(make_body), std::move(on_done));
+    op->prefer = std::move(prefer);
+    _swarm_attempt(std::move(op));
 }
 
 void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
@@ -272,8 +282,13 @@ void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
     if (!net)
         return op->on_done({false, network::ERROR_NO_ROUTING_LAYER, "no network attached", {}});
 
+    // Read out before the call: `op` is moved into the callback below, and the order of those two
+    // against each other is unspecified, so reading through `op` in the argument list can happen
+    // after it has been emptied.
+    auto swarm_pubkey = op->swarm_pubkey;
+
     net->get_swarm(
-            op->swarm_pubkey,
+            swarm_pubkey,
             false,
             [this, op = std::move(op), net](
                     network::swarm::swarm_id_t, std::vector<network::service_node> swarm) mutable {
@@ -292,6 +307,11 @@ void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
         // so this is the least-struck members first in a random order among equals -- the right
         // preference anyway; what matters is only that a member already tried is never chosen
         // again, which is what ends the walk.
+        if (op->prefer) {
+            auto pinned = *op->prefer;
+            return _swarm_send(std::move(op), std::move(pinned));
+        }
+
         auto next = std::ranges::find_if(swarm, [&op](const network::service_node& n) {
             return std::ranges::find(op->unreachable, n) == op->unreachable.end();
         });
@@ -305,96 +325,116 @@ void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
             return fail(network::ERROR_INVALID_DESTINATION, "no reachable swarm member");
         }
 
-        auto node = *next;
-
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - op->started);
-        if (auto left = SWARM_OVERALL_TIMEOUT - elapsed; left < MIN_RETRY_BUDGET) {
-            log::warning(
-                    cat, "Out of time to try another member for '{}'.", op->endpoint);
-            return fail(network::ERROR_REQUEST_TIMEOUT, "swarm request budget exhausted");
-        }
-
-        // Rebuilt per attempt: a retrieve carries the chosen node's cursor, so reusing the body
-        // built for a previous member would resume from a position that member never gave us.
-        auto req = swarm_request(node, op->swarm_pubkey, op->endpoint, op->make_body(node));
-
-        net->send_request(
-                std::move(req),
-                [this, op, node](
-                        bool /*success*/,
-                        bool timeout,
-                        int16_t status,
-                        std::vector<std::pair<std::string, std::string>> /*headers*/,
-                        std::optional<std::string> body) mutable {
-                    // Not this member's swarm.  Network has already taken the corrected
-                    // membership out of the rejection, so resolving again gets the new one.
-                    if (status == network::ERROR_MISDIRECTED_REQUEST) {
-                        if (++op->redirects > SWARM_REDIRECT_LIMIT) {
-                            log::warning(
-                                    cat,
-                                    "Giving up on '{}': redirected {} times.",
-                                    op->endpoint,
-                                    op->redirects - 1);
-                        } else {
-                            log::info(
-                                    cat,
-                                    "{} does not hold {}; re-resolving its swarm.",
-                                    node.remote_pubkey.hex(),
-                                    op->swarm_pubkey.hex());
-                            return _swarm_attempt(std::move(op));
-                        }
-                    }
-
-                    // The member itself could not be reached.  The swarm is not in question, so
-                    // move to another one rather than failing.
-                    else if (status == network::ERROR_INVALID_DESTINATION) {
-                        log::info(
-                                cat,
-                                "{} unreachable for '{}'; trying another member.",
-                                node.remote_pubkey.hex(),
-                                op->endpoint);
-                        op->unreachable.push_back(node);
-                        return _swarm_attempt(std::move(op));
-                    }
-
-                    op->on_done({timeout, status, std::move(body), node});
-                });
+        _swarm_send(std::move(op), *next);
     });
 }
 
-void Core::_poll() {
-    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
-    // could make the loop thread the last owner and run ~Network there.
+void Core::_swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node) {
     auto* net = _network.get();
-    if (!net) {
+    if (!net)
+        return op->on_done({false, network::ERROR_NO_ROUTING_LAYER, "no network attached", node});
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - op->started);
+    if (SWARM_OVERALL_TIMEOUT - elapsed < MIN_RETRY_BUDGET) {
+        log::warning(cat, "Out of time to try another member for '{}'.", op->endpoint);
+        return op->on_done(
+                {false, network::ERROR_REQUEST_TIMEOUT, "swarm request budget exhausted", node});
+    }
+
+    // Rebuilt per attempt: a retrieve carries the chosen node's cursor, so reusing the body built
+    // for a previous member would resume from a position that member never gave us.
+    net->send_request(
+            swarm_request(node, op->swarm_pubkey, op->endpoint, op->make_body(node)),
+            [this, op, node](
+                    bool /*success*/,
+                    bool timeout,
+                    int16_t status,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) mutable {
+                // Not this member's swarm.  Network has already taken the corrected membership
+                // out of the rejection, so resolving again gets the new one -- and whatever we
+                // were sticking to is exactly what was wrong.
+                if (status == network::ERROR_MISDIRECTED_REQUEST) {
+                    op->prefer.reset();
+
+                    if (++op->redirects > SWARM_REDIRECT_LIMIT)
+                        log::warning(
+                                cat,
+                                "Giving up on '{}': redirected {} times.",
+                                op->endpoint,
+                                op->redirects - 1);
+                    else {
+                        log::info(
+                                cat,
+                                "{} does not hold {}; re-resolving its swarm.",
+                                node.remote_pubkey.hex(),
+                                op->swarm_pubkey.hex());
+                        return _swarm_attempt(std::move(op));
+                    }
+                }
+
+                // The member itself could not be reached.  The swarm is not in question, so move
+                // to another one rather than failing.
+                else if (status == network::ERROR_INVALID_DESTINATION) {
+                    log::info(
+                            cat,
+                            "{} unreachable for '{}'; trying another member.",
+                            node.remote_pubkey.hex(),
+                            op->endpoint);
+                    op->prefer.reset();
+                    op->unreachable.push_back(node);
+                    return _swarm_attempt(std::move(op));
+                }
+
+                op->on_done({timeout, status, std::move(body), node});
+            });
+}
+
+void Core::_poll() {
+    if (!_network) {
         log::debug(cat, "Not polling: no network attached");
         return;
     }
 
     log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
-
-    net->get_swarm(globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
-        if (swarm.empty()) {
-            log::warning(cat, "Cannot poll: no swarm nodes available");
-            return;
-        }
-
-        // Recorded so that `current_swarm_path()` can say which member the answer is about.  Each
-        // poll gets a fresh shuffle, so this is genuinely "the one we are using now" rather than a
-        // choice we are keeping; it stops moving once a subscription pins us to one.
-        _swarm_node = swarm.front();
-
-        _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
-    });
+    _send_poll({POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0, std::nullopt);
 }
 
 void Core::_send_poll(
-        network::Network* net,
-        network::service_node node,
         std::vector<config::Namespace> namespaces,
-        int round) {
+        int round,
+        std::optional<network::service_node> node) {
+    _swarm_request(
+            globals.pubkey_x25519(),
+            "batch",
+            [this, namespaces](const network::service_node& n) {
+                return _build_poll_body(n, namespaces);
+            },
+            [this, namespaces, round](SwarmResponse res) mutable {
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Swarm poll request failed: {}",
+                            res.timeout       ? "timed out"
+                            : res.body        ? *res.body
+                                              : "request failed");
+                    return;
+                }
 
+                // The member that actually answered, which is not necessarily the one the attempt
+                // started with.  Everything below records against it -- the retrieve cursors, and
+                // the subscription that a drained poll goes on to make.
+                _swarm_node = res.node;
+
+                _handle_poll_response(
+                        res.node, std::move(namespaces), std::move(*res.body), round);
+            },
+            std::move(node));
+}
+
+std::vector<std::byte> Core::_build_poll_body(
+        const network::service_node& node, const std::vector<config::Namespace>& namespaces) {
     auto now_ms = epoch_ms(clock_now_ms());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
 
@@ -461,33 +501,12 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
 
     log::debug(
             cat,
-            "Retrieving {} namespaces from {} (round {}): {}",
+            "Retrieving {} namespaces from {}: {}",
             namespaces.size(),
             node.remote_pubkey.hex(),
-            round,
             body_str);
 
-    net->send_request(
-            swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
-            [this, node, namespaces = std::move(namespaces), round](
-                    bool success,
-                    bool timeout,
-                    int16_t /*status_code*/,
-                    std::vector<std::pair<std::string, std::string>> /*headers*/,
-                    std::optional<std::string> body) mutable {
-                if (!success || !body) {
-                    log::warning(
-                            cat,
-                            "Swarm poll request failed: {}",
-                            timeout ? "timed out"
-                            : body  ? *body
-                                    : "request failed");
-                    return;
-                }
-
-                _handle_poll_response(
-                        std::move(node), std::move(namespaces), std::move(*body), round);
-            });
+    return to_vector(body_str);
 }
 
 void Core::_handle_poll_response(
@@ -661,10 +680,11 @@ DELETE FROM swarm_hashes
         return;
     }
 
-    // Deliberately not re-fetching the swarm: the cursor these resume from is this node's, so the
-    // continuation has to go back to the same one.
-    if (auto* net = _network.get())
-        _send_poll(net, std::move(node), std::move(unfinished), round + 1);
+    // Named rather than chosen afresh: the cursor these resume from is this node's, so the
+    // continuation has to go back to the same one.  If it has since become unusable the swarm
+    // request falls back to choosing normally, and the round starts over from that member's
+    // cursor rather than resuming from one it never issued.
+    _send_poll(std::move(unfinished), round + 1, std::move(node));
 }
 
 std::optional<network::PathInfo> Core::current_swarm_path() const {

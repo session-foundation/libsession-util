@@ -380,14 +380,19 @@ class Core {
     // `make_body` is given the member the attempt will use, because a body can depend on it: a
     // retrieve carries that node's cursor, and sending one node's cursor to another asks the wrong
     // question.
+    // `prefer` names a member to go back to rather than choosing afresh, for an operation that
+    // has to continue against the one it started with; it is dropped as soon as that member turns
+    // out to be wrong or unreachable.
     void _swarm_request(
             network::x25519_pubkey swarm_pubkey,
             std::string endpoint,
             std::function<std::vector<std::byte>(const network::service_node&)> make_body,
-            std::function<void(SwarmResponse)> on_done);
+            std::function<void(SwarmResponse)> on_done,
+            std::optional<network::service_node> prefer = std::nullopt);
 
     struct SwarmOp;
     void _swarm_attempt(std::shared_ptr<SwarmOp> op);
+    void _swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node);
 
     // Sends one round of retrieves to `node` for `namespaces`.  A retrieve is capped by the storage
     // server, so one round may not exhaust a namespace; `round` counts continuations and bounds
@@ -395,10 +400,14 @@ class Core {
     // node), so continuing against a different swarm member would resume from that member's
     // position.
     void _send_poll(
-            network::Network* net,
-            network::service_node node,
             std::vector<config::Namespace> namespaces,
-            int round);
+            int round,
+            std::optional<network::service_node> node);
+
+    // The batch of retrieves to send `node`, carrying that node's cursor for each namespace.
+    std::vector<std::byte> _build_poll_body(
+            const network::service_node& node,
+            const std::vector<config::Namespace>& namespaces);
     void _handle_poll_response(
             network::service_node node,
             std::vector<config::Namespace> namespaces,
