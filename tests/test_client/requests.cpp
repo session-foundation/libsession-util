@@ -27,7 +27,9 @@ TEST_CASE("Client: a stranger's message is a request, not a conversation", "[cli
 
     // And it is synced, so a request answered on one device is not still waiting on another.  Their
     // writing to us is what says they approved us; nothing yet says we approved them.
-    auto entry = c->core.configs.contacts().get(oxenc::to_hex(sender.session_id));
+    auto entry = in_configs(*c, [&](auto& cfg) {
+        return cfg.contacts().get(oxenc::to_hex(sender.session_id));
+    });
     REQUIRE(entry);
     CHECK(entry->approved_me);
     CHECK_FALSE(entry->approved);
@@ -51,7 +53,9 @@ TEST_CASE("Client: answering a request accepts it", "[client][requests]") {
     CHECK(c->message_requests(await).empty());
     REQUIRE(c->conversations(await).size() == 1);
     CHECK_FALSE(c->conversations(await)[0].dm()->request);
-    CHECK(c->core.configs.contacts().get(oxenc::to_hex(sender.session_id))->approved);
+    CHECK(in_configs(*c, [&](auto& cfg) {
+              return cfg.contacts().get(oxenc::to_hex(sender.session_id));
+          })->approved);
 
     // It left one list and joined the other, which is neither an addition nor a removal to either,
     // so both are replaced.

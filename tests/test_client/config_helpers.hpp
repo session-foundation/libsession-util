@@ -39,7 +39,10 @@ inline void merge_profile(Client& c, const std::vector<std::vector<std::byte>>& 
         m.data = messages[i];
         incoming.push_back(std::move(m));
     }
-    c.core.receive_messages(incoming, config::Namespace::UserProfile, true);
+    // Merging is config work, so it belongs on Core's loop just as a real poll's would.
+    TestHelper::on_loop(c.core, [&] {
+        c.core.receive_messages(incoming, config::Namespace::UserProfile, true);
+    });
 }
 
 inline ConversationId self_convo(Client& c) {
@@ -133,7 +136,9 @@ inline void merge_volatile(Client& c, const std::vector<std::vector<std::byte>>&
         m.data = messages[i];
         incoming.push_back(std::move(m));
     }
-    c.core.receive_messages(incoming, config::Namespace::ConvoInfoVolatile, true);
+    TestHelper::on_loop(c.core, [&] {
+        c.core.receive_messages(incoming, config::Namespace::ConvoInfoVolatile, true);
+    });
 }
 
 inline void merge_contacts(Client& c, const std::vector<std::vector<std::byte>>& messages) {
@@ -144,7 +149,9 @@ inline void merge_contacts(Client& c, const std::vector<std::vector<std::byte>>&
         m.data = messages[i];
         incoming.push_back(std::move(m));
     }
-    c.core.receive_messages(incoming, config::Namespace::Contacts, true);
+    TestHelper::on_loop(c.core, [&] {
+        c.core.receive_messages(incoming, config::Namespace::Contacts, true);
+    });
 }
 
 }  // namespace client_test

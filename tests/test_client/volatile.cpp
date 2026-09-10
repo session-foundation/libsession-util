@@ -21,7 +21,7 @@ TEST_CASE("Client: reading a conversation publishes the watermark", "[client][vo
     c->conversation(id, await)->mark_read(await);
 
     CHECK(c->conversation(id, await)->unread() == 0);
-    auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); });
     REQUIRE(entry);
     CHECK(entry->last_read == newest.time_since_epoch().count());
 }
@@ -77,7 +77,7 @@ TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client]
 
     // ...and we do not publish the stale value back out, either.
     TestHelper::sync_convo_volatile(*c.client, id);
-    auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); });
     REQUIRE(entry);
     CHECK(entry->last_read == newest.time_since_epoch().count());
 }
@@ -98,11 +98,13 @@ TEST_CASE("Client: marking unread syncs, and reading clears it", "[client][volat
     // Survives having read everything, which is the whole point of it.
     CHECK(c->conversation(id, await)->marked_unread());
     CHECK(c->conversation(id, await)->unread() == 0);
-    CHECK(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); })
+                  ->unread);
 
     c->conversation(id, await)->mark_read(await);
     CHECK_FALSE(c->conversation(id, await)->marked_unread());
-    CHECK_FALSE(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); })
+                        ->unread);
 }
 
 TEST_CASE("Client: read state for a conversation we do not have is ignored", "[client][volatile]") {

@@ -329,7 +329,7 @@ TEST_CASE(
     // The account's own answer refuses the notification even when the caller asked for it, so a
     // client that never grew a setting for this still honours one made on another device.
     {
-        c->core.configs.user_profile().set_notify_media_saved(false);
+        in_configs(*c, [](auto& cfg) { cfg.user_profile().set_notify_media_saved(false); });
         auto loud = dir / "still-quiet.bin";
         auto waiter = save(loud, true);
         REQUIRE(serve_downloads(*net, ciphertext) == 1);
@@ -338,7 +338,7 @@ TEST_CASE(
         CHECK(std::filesystem::exists(loud));
         sync(*c);
         CHECK(stores(*net).empty());
-        c->core.configs.user_profile().set_notify_media_saved(true);
+        in_configs(*c, [](auto& cfg) { cfg.user_profile().set_notify_media_saved(true); });
     }
 
     // A file that fails to authenticate is a failure, not a corrupt file on disk: the ciphertext is

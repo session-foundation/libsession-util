@@ -62,11 +62,12 @@ TEST_CASE("Client: re-deriving a contact changes nothing", "[client][configs]") 
     // deriving a config back from those tables is the identity.  Anything lost, rounded or
     // defaulted on the way through shows up here as a config that went dirty -- and a mapping that
     // dirties on every pass would push a pointless update after every merge, forever.
-    auto& contacts = c->core.configs.contacts();
-    REQUIRE_FALSE(contacts.needs_push());
+    REQUIRE_FALSE(in_configs(*c, [](auto& cfg) { return cfg.contacts().needs_push(); }));
     TestHelper::sync_contact(*c.client, id);
-    CHECK_FALSE(contacts.needs_push());
-    CHECK_FALSE(contacts.needs_dump());
+    in_configs(*c, [](auto& cfg) {
+        CHECK_FALSE(cfg.contacts().needs_push());
+        CHECK_FALSE(cfg.contacts().needs_dump());
+    });
 }
 
 TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][configs]") {
@@ -129,13 +130,13 @@ TEST_CASE(
     // Stand in for a crash between committing the row and writing the dump: the tables hold a
     // contact the config has never heard of.  Reconciled inward first, that is indistinguishable
     // from one deleted elsewhere and would be destroyed with its history.
-    REQUIRE(c->core.configs.contacts().erase(them));
+    REQUIRE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().erase(them); }));
 
     c.reopen();
 
     // Startup derives outward before reconciling inward, so it is published rather than deleted.
     CHECK(c->conversation(id, await));
-    CHECK(c->core.configs.contacts().get(them).has_value());
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); }).has_value());
 }
 
 TEST_CASE("Client: a new account starts with note to self hidden", "[client][configs]") {
@@ -145,7 +146,7 @@ TEST_CASE("Client: a new account starts with note to self hidden", "[client][con
     // Seeded at account creation rather than left at the default, because nts_priority is carried
     // in the shared UserProfile config: a default of 0 would not merely show the conversation here,
     // it would make it appear on every other device on the account once they synced.
-    CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
+    CHECK(in_configs(*c, [](auto& cfg) { return cfg.user_profile().get_nts_priority(); }) == -1);
     CHECK_FALSE(listed(*c.client, me));
 }
 
@@ -160,8 +161,10 @@ TEST_CASE("Client: writing a note to self reveals it", "[client][configs]") {
     // Both halves: it is in our own list, and UserProfile says so, which is what stops the other
     // devices on the account from carrying on hiding it.
     CHECK(listed(*c.client, me));
-    CHECK(c->core.configs.user_profile().get_nts_priority() == 0);
-    CHECK(c->core.configs.user_profile().needs_push());
+    in_configs(*c, [](auto& cfg) {
+        CHECK(cfg.user_profile().get_nts_priority() == 0);
+        CHECK(cfg.user_profile().needs_push());
+    });
 }
 
 TEST_CASE("Client: revealing note to self keeps a pin it already had", "[client][configs]") {
@@ -175,7 +178,7 @@ TEST_CASE("Client: revealing note to self keeps a pin it already had", "[client]
     c->send_message(me, {.body = "a reminder"}, await);
 
     // Already visible, so there is nothing to reveal and the pin is left where the user put it.
-    CHECK(c->core.configs.user_profile().get_nts_priority() == 7);
+    CHECK(in_configs(*c, [](auto& cfg) { return cfg.user_profile().get_nts_priority(); }) == 7);
     CHECK(c->conversation(me, await)->priority() == 7);
 }
 
@@ -309,7 +312,7 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
         auto conn = c->core.database().conn();
         conn.prepared_exec("INSERT INTO accounts (session_id) VALUES (?)", id.session_id());
     }
-    REQUIRE_FALSE(c->core.configs.contacts().get(them));
+    REQUIRE_FALSE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); }));
 
     // Through Client, not through a DM: there is no conversation here, which is exactly the case
     // that carve-out exists for.
@@ -317,14 +320,14 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
 
     // The block has to be synced and the entry is the only place it can live, so blocking makes
     // one.  It does not approve them: refusing someone's messages is not accepting them.
-    auto entry = c->core.configs.contacts().get(them);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); });
     REQUIRE(entry);
     CHECK(entry->blocked);
     CHECK_FALSE(entry->approved);
 
     c->set_blocked(id, false, await);
-    REQUIRE(c->core.configs.contacts().get(them));
-    CHECK_FALSE(c->core.configs.contacts().get(them)->blocked);
+    REQUIRE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); }));
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->blocked);
 }
 
 TEST_CASE("Client: clearing a conversation says when it was cleared", "[client][configs]") {
@@ -348,7 +351,7 @@ TEST_CASE("Client: clearing a conversation says when it was cleared", "[client][
 
     // And the moment is recorded rather than the deletion being local, so a device that has been
     // offline through all of this deletes the same messages when it catches up.
-    auto entry = c->core.configs.contacts().get(them);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); });
     REQUIRE(entry);
     CHECK(entry->delete_before >= before);
 }
@@ -367,7 +370,7 @@ TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs
     CHECK_FALSE(listed(*c.client, id));
     CHECK(c->conversation(id, await)->messages(await).empty());
 
-    auto entry = c->core.configs.contacts().get(them);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); });
     REQUIRE(entry);  // Still a contact, so a message from them brings the conversation back.
     CHECK(entry->approved);
     CHECK(entry->priority == -1);  // The pin it had is not among the things kept.
@@ -385,11 +388,12 @@ TEST_CASE("Client: hiding note to self keeps what is in it", "[client][configs]"
 
     CHECK_FALSE(listed(*c.client, me));
     CHECK(c->conversation(me, await)->messages(await).size() == 1);
-    CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
+    CHECK(in_configs(*c, [](auto& cfg) { return cfg.user_profile().get_nts_priority(); }) == -1);
 
     // No instruction to destroy anything, which is the whole difference between hiding a
     // conversation and deleting one.
-    CHECK(c->core.configs.user_profile().get_nts_delete_before() == std::chrono::sys_seconds{});
+    CHECK(in_configs(*c, [](auto& cfg) { return cfg.user_profile().get_nts_delete_before(); }) ==
+          std::chrono::sys_seconds{});
 }
 
 TEST_CASE("Client: deleting a contact takes the entry that held the block", "[client][configs]") {
@@ -412,7 +416,7 @@ TEST_CASE("Client: deleting a contact takes the entry that held the block", "[cl
     // No entry means no delete-before instruction is owed: another device merging this drops the
     // conversation and its history because the contact is gone, not because it was told to.  It
     // also means the block is gone, since the entry was the only thing holding it.
-    CHECK_FALSE(c->core.configs.contacts().get(them));
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); }));
 
     auto conn = c->core.database().conn();
     CHECK(conn.prepared_get<int64_t>("SELECT count(*) FROM messages") == 0);
@@ -453,8 +457,8 @@ TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]")
     auto id = dm_from_hex(them);
 
     c->open_dm(id, await);
-    REQUIRE(c->core.configs.contacts().get(them));
-    REQUIRE(c->core.configs.contacts().get(them)->approved);
+    REQUIRE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); }));
+    REQUIRE(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->approved);
 
     // Another client clearing both flags on its way to deleting the contact, merged without the
     // deletion that was to follow.  Copied verbatim this would file the conversation back under
@@ -480,16 +484,19 @@ TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
 
     // Another device cleared at a moment this one has not reached yet -- clock skew is enough for
     // that.  Publishing our own, smaller value would tell it to un-delete what it destroyed.
-    auto& contacts = c->core.configs.contacts();
     auto later = std::chrono::floor<std::chrono::seconds>(clock_now_ms()) + 1h;
-    auto entry = contacts.get_or_construct(them);
-    entry.delete_before = later;
-    contacts.set(entry);
+    in_configs(*c, [&](auto& cfg) {
+        auto entry = cfg.contacts().get_or_construct(them);
+        entry.delete_before = later;
+        cfg.contacts().set(entry);
+    });
 
     c->conversation(id, await)->clear_messages(await);
 
-    REQUIRE(contacts.get(them));
-    CHECK(contacts.get(them)->delete_before == later);
+    in_configs(*c, [&](auto& cfg) {
+        REQUIRE(cfg.contacts().get(them));
+        CHECK(cfg.contacts().get(them)->delete_before == later);
+    });
 }
 
 TEST_CASE("Client: our own profile is account state, not a conversation", "[client][configs]") {
@@ -502,7 +509,10 @@ TEST_CASE("Client: our own profile is account state, not a conversation", "[clie
 
     c->set_display_name("Leia", await);
     CHECK(c->display_name(await) == "Leia");
-    CHECK(c->core.configs.user_profile().get_name() == "Leia");
+    // Copied to a string inside the excursion: get_name() hands back a view into the config.
+    CHECK(in_configs(*c, [](auto& cfg) {
+              return std::string{cfg.user_profile().get_name().value_or("")};
+          }) == "Leia");
 
     // Still no conversation: setting a name is not writing to yourself.
     CHECK(c->conversations(await).empty());
@@ -516,7 +526,8 @@ TEST_CASE("Client: the save-notification preference follows the account", "[clie
 
     c->set_notify_media_saved(false, await);
     CHECK_FALSE(c->notify_media_saved(await));
-    CHECK_FALSE(c->core.configs.user_profile().get_notify_media_saved());
+    CHECK_FALSE(
+            in_configs(*c, [](auto& cfg) { return cfg.user_profile().get_notify_media_saved(); }));
 
     // What another device set reaches us through a merge, like any other profile field.
     auto pushed = profile_from_another_device(
