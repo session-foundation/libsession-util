@@ -1626,7 +1626,7 @@ void Client::_report_list(
         std::vector<ConversationId>& reported,
         std::vector<AnyConversation> (Client::*rows)(),
         std::vector<ConversationId> (Client::*ids)(),
-        std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
+        std::function<void(std::vector<AnyConversation>&&)> callbacks::* replaced,
         std::function<void(std::vector<ConversationId>)> callbacks::* reordered) {
     // A whole list is stale as soon as any row in it changed; only a row that moved can have
     // changed the order.  `changed` is therefore the wider of the two, and `moved` implies it.
@@ -1660,7 +1660,9 @@ void Client::_report_list(
     // only this handler has no other way to learn it.  Suppressing it here would be comparing one
     // thing to decide whether to send another.
     if (want_replaced)
-        _emit([list = std::move(list), replaced](const callbacks& cbs) { (cbs.*replaced)(list); });
+        _emit([list = std::move(list), replaced](const callbacks& cbs) mutable {
+            (cbs.*replaced)(std::move(list));
+        });
     if (want_order && order_changed)
         _emit([order = std::move(order), reordered](const callbacks& cbs) {
             (cbs.*reordered)(order);

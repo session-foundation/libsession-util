@@ -1284,7 +1284,7 @@ class Client {
             std::vector<ConversationId>& reported,
             std::vector<AnyConversation> (Client::*rows)(),
             std::vector<ConversationId> (Client::*ids)(),
-            std::function<void(std::vector<AnyConversation>)> callbacks::* replaced,
+            std::function<void(std::vector<AnyConversation>&&)> callbacks::* replaced,
             std::function<void(std::vector<ConversationId>)> callbacks::* reordered);
     // Reports both lists, given for each whether a row in it changed and whether one moved.
     // Called by `_flush_pending`, once per batch.
