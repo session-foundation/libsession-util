@@ -248,10 +248,11 @@ struct Core::SwarmOp {
     std::function<std::vector<std::byte>(const network::service_node&)> make_body;
     std::function<void(SwarmResponse)> on_done;
 
-    // Members that could not be reached, in the order they were tried.  A set rather than a count
-    // because "once per member" cannot be expressed as a number: choosing the next one has to know
-    // which are already spent.
-    std::vector<network::service_node> unreachable;
+    // Members already spent on this operation, in the order they were tried: ones that could not
+    // be reached, and ones that said the account is not theirs.  Both are reasons not to ask
+    // again, and a list rather than a count because "once per member" cannot be expressed as a
+    // number -- choosing the next one has to know which are gone.
+    std::vector<network::service_node> spent;
 
     // A member to go back to rather than choosing afresh, for an operation that has to continue
     // against the one it started with -- a retrieve continuation resumes from a cursor that is
@@ -297,32 +298,32 @@ void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
                     {false,
                      status,
                      std::move(why),
-                     op->unreachable.empty() ? network::service_node{} : op->unreachable.back()});
+                     op->spent.empty() ? network::service_node{} : op->spent.back()});
         };
 
         if (swarm.empty())
             return fail(network::ERROR_NO_SNODE_POOL, "no swarm members available");
 
-        // The first member not already spent.  get_swarm shuffles and partitions by strike count,
-        // so this is the least-struck members first in a random order among equals -- the right
-        // preference anyway; what matters is only that a member already tried is never chosen
-        // again, which is what ends the walk.
         if (op->prefer) {
             auto pinned = *op->prefer;
             return _swarm_send(std::move(op), std::move(pinned));
         }
 
+        // The first member not already spent.  get_swarm shuffles and partitions by strike count,
+        // so this is the least-struck members first in a random order among equals -- the right
+        // preference anyway; what matters is only that a member already tried is never chosen
+        // again, which is what ends the walk.
         auto next = std::ranges::find_if(swarm, [&op](const network::service_node& n) {
-            return std::ranges::find(op->unreachable, n) == op->unreachable.end();
+            return std::ranges::find(op->spent, n) == op->spent.end();
         });
 
         if (next == swarm.end()) {
             log::warning(
                     cat,
-                    "No swarm member left for '{}': all {} were unreachable.",
+                    "No swarm member left to try for '{}': all {} are spent.",
                     op->endpoint,
-                    op->unreachable.size());
-            return fail(network::ERROR_INVALID_DESTINATION, "no reachable swarm member");
+                    op->spent.size());
+            return fail(network::ERROR_INVALID_DESTINATION, "no usable swarm member");
         }
 
         _swarm_send(std::move(op), *next);
@@ -358,6 +359,12 @@ void Core::_swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node) 
                 if (status == network::ERROR_MISDIRECTED_REQUEST) {
                     op->prefer.reset();
 
+                    // Spent, not merely wrong to stick to: a member that says the account is not
+                    // its own will say so again, and the corrected swarm may not have arrived --
+                    // an older server sends no swarm with the rejection, and then re-resolving
+                    // returns the very same membership.
+                    op->spent.push_back(node);
+
                     if (++op->redirects > SWARM_REDIRECT_LIMIT)
                         log::warning(
                                 cat,
@@ -383,7 +390,7 @@ void Core::_swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node) 
                             node.remote_pubkey.hex(),
                             op->endpoint);
                     op->prefer.reset();
-                    op->unreachable.push_back(node);
+                    op->spent.push_back(node);
                     return _swarm_attempt(std::move(op));
                 }
 
