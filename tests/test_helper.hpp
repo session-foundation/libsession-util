@@ -321,6 +321,21 @@ class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
 
+    /// Runs `f` on Core's loop and hands back what it returned.
+    ///
+    /// Core's components are the loop's, not the caller's, and a test is on its own thread like
+    /// any other application.  Wrap the body of anything reaching into `configs` -- or any other
+    /// component state -- in one of these; there is no need for one per call, since everything
+    /// inside runs on the loop for as long as `f` does.
+    ///
+    /// This is a test's version of what `Client` does for every one of its own methods.  There is
+    /// deliberately no application-facing equivalent on `Configs`: nothing outside libsession
+    /// reaches its accessors, and `Client` wraps the parts an application actually wants.
+    template <typename F>
+    static auto on_loop(core::Core& core, F&& f) {
+        return core.call_get(std::forward<F>(f));
+    }
+
     /// Runs everything already queued on Core's job queue and waits for it.
     ///
     /// Needed wherever a test drives a network response by hand: in production those arrive on the
@@ -329,7 +344,7 @@ class TestHelper {
     /// to wait for that in the same way, and the queue is FIFO, so a round-trip through it is
     /// enough -- everything posted earlier has run by the time this returns.
     static void drain(core::Core& core) {
-        core._jq.call_get([] {});
+        on_loop(core, [] {});
     }
 
     /// Puts a swarm straight into the pool's cache.  get_swarm consults it first and answers from
