@@ -43,7 +43,7 @@ inline ConversationId self_convo(Client& c) {
 }
 
 inline bool listed(Client& c, const ConversationId& id) {
-    auto all = c.conversations(wait);
+    auto all = c.conversations(block);
     return std::ranges::any_of(all, [&](const auto& x) { return x.id() == id; });
 }
 

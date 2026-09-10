@@ -32,7 +32,7 @@ TEST_CASE("Client: a reply names what it answers", "[client][replies]") {
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2);
     // Newest first.
     const auto& answer = msgs[0];
@@ -65,7 +65,7 @@ TEST_CASE(
             quoting(peer.session_id, missing, 4242));
     sync(*c);
 
-    auto msgs = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait);
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), block)->messages(block);
     REQUIRE(msgs.size() == 1);
     REQUIRE(msgs[0].reply);
     // Unresolved, but the author and timestamp came off the wire, so a client can still say who
@@ -93,7 +93,7 @@ TEST_CASE("Client: a reply resolves once its target arrives", "[client][replies]
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 1);
     REQUIRE(msgs[0].reply);
     REQUIRE_FALSE(msgs[0].reply->message_id.has_value());
@@ -101,7 +101,7 @@ TEST_CASE("Client: a reply resolves once its target arrives", "[client][replies]
     deliver(*c, peer, "the original", first, "h1", "", std::nullopt, nullptr, 7777);
     sync(*c);
 
-    msgs = c->conversation(convo, wait)->messages(wait);
+    msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2);
     REQUIRE(msgs[0].reply);
     REQUIRE(msgs[0].reply->message_id.has_value());
@@ -127,7 +127,7 @@ TEST_CASE("Client: msgid disambiguates a same-millisecond target", "[client][rep
             quoting(peer.session_id, same, 222));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 3);
 
     int64_t second_id = 0;
@@ -161,13 +161,13 @@ TEST_CASE("Client: an ambiguous target resolves stably", "[client][replies]") {
             quoting(peer.session_id, same));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 3);
     REQUIRE(msgs[0].reply);
     REQUIRE(msgs[0].reply->message_id.has_value());
     auto picked = *msgs[0].reply->message_id;
 
-    auto again = c->conversation(convo, wait)->messages(wait);
+    auto again = c->conversation(convo, block)->messages(block);
     REQUIRE(again[0].reply->message_id == picked);
 
     // And it is one of the two candidates, not something else.
@@ -204,7 +204,7 @@ TEST_CASE("Client: a quote with an unusable author is dropped", "[client][replie
             quoting(peer.session_id, target, 999));
     sync(*c);
 
-    auto msgs = c->conversation(ConversationId::dm(peer.session_id), wait)->messages(wait);
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), block)->messages(block);
     REQUIRE(msgs.size() == 3);
 
     auto by_body = [&](std::string_view b) -> const Message& {
@@ -270,13 +270,13 @@ TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][re
             quoting(peer.session_id, target_ts, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2);
     auto reply_id = msgs[0].id;
     auto target_id = msgs[1].id;
     rec.msg_updated.clear();
 
-    c->delete_message(target_id, wait);
+    c->delete_message(target_id, block);
     sync(*c);
 
     // The target itself is reported, and so is the reply that points at it: what it should draw
@@ -304,7 +304,7 @@ TEST_CASE("Client: a reply carries the message it answers", "[client][replies]")
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2);
     REQUIRE(msgs[0].reply);
     REQUIRE(msgs[0].reply->message);
@@ -352,7 +352,7 @@ TEST_CASE("Client: a quoted attachment-only message arrives whole", "[client][re
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2);
     REQUIRE(msgs[0].reply);
     REQUIRE(msgs[0].reply->message);
@@ -385,7 +385,7 @@ TEST_CASE("Client: reply loading stops one level down", "[client][replies]") {
             quoting(peer.session_id, b_ts, 222));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 3);
     const auto& cmsg = msgs[0];
 
@@ -428,7 +428,7 @@ TEST_CASE("Client: several replies to one message share one copy", "[client][rep
             quoting(peer.session_id, first, 7777));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 3);
     REQUIRE(msgs[0].reply);
     REQUIRE(msgs[1].reply);
@@ -471,7 +471,7 @@ TEST_CASE("Client: many distinct reply targets load correctly", "[client][replie
                 quoting(peer.session_id, stamps[i], 100 + i));
     sync(*c);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 2 * n);
 
     // Every answer resolved, and each to its *own* target rather than all to one of them -- which
@@ -495,11 +495,11 @@ TEST_CASE("Client: a sent reply names what it answers", "[client][replies][send]
     TestHelper::seed_pfs_nak(c->core, me);
     auto convo = ConversationId::dm(me);
 
-    auto first = c->send_message(convo, {.body = "the original"}, wait);
-    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, wait);
+    auto first = c->send_message(convo, {.body = "the original"}, block);
+    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, block);
     sync(*c);
 
-    auto msg = c->message(second, wait);
+    auto msg = c->message(second, block);
     REQUIRE(msg);
     REQUIRE(msg->reply);
     CHECK(msg->reply->author == me);
@@ -518,12 +518,12 @@ TEST_CASE("Client: a sent reply puts a quote on the wire", "[client][replies][se
     TestHelper::seed_pfs_nak(c->core, me);
     auto convo = ConversationId::dm(me);
 
-    auto first = c->send_message(convo, {.body = "the original"}, wait);
-    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, wait);
+    auto first = c->send_message(convo, {.body = "the original"}, block);
+    auto second = c->send_message(convo, {.body = "answering", .reply_to = first}, block);
     sync(*c);
 
     // What was stored is what goes out, so the wire form is checkable from the raw content.
-    auto dump = c->message_debug(second, wait);
+    auto dump = c->message_debug(second, block);
     REQUIRE(dump);
     CHECK(dump->find("quote") != std::string::npos);
     CHECK(dump->find("msgTimestamp") != std::string::npos);
@@ -538,18 +538,18 @@ TEST_CASE("Client: reply_to must name a message in this conversation", "[client]
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
 
-    auto mine = c->send_message(ConversationId::dm(me), {.body = "a note"}, wait);
+    auto mine = c->send_message(ConversationId::dm(me), {.body = "a note"}, block);
 
     // Nonexistent, and in another conversation: both are caller error, and both are refused on the
     // calling thread rather than accepted and then silently dropped.
     CHECK_THROWS_AS(
-            c->send_message(ConversationId::dm(me), {.body = "x", .reply_to = 999999}, wait),
+            c->send_message(ConversationId::dm(me), {.body = "x", .reply_to = 999999}, block),
             std::invalid_argument);
 
-    c->open_dm(ConversationId::dm(peer.session_id), wait);
+    c->open_dm(ConversationId::dm(peer.session_id), block);
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
     CHECK_THROWS_AS(
             c->send_message(
-                    ConversationId::dm(peer.session_id), {.body = "x", .reply_to = mine}, wait),
+                    ConversationId::dm(peer.session_id), {.body = "x", .reply_to = mine}, block),
             std::invalid_argument);
 }
