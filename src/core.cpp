@@ -357,6 +357,11 @@ void Core::_poll() {
             return;
         }
 
+        // Recorded so that `current_swarm_path()` can say which member the answer is about.  Each
+        // poll gets a fresh shuffle, so this is genuinely "the one we are using now" rather than a
+        // choice we are keeping; it stops moving once a subscription pins us to one.
+        _swarm_node = swarm.front();
+
         _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
     });
 }
@@ -774,6 +779,13 @@ void Core::_handle_poll_response(
     // continuation has to go back to the same one.
     if (auto* net = _network.get())
         _send_poll(net, std::move(node), std::move(unfinished), round + 1);
+}
+
+std::optional<network::PathInfo> Core::current_swarm_path() const {
+    if (!_swarm_node || !_network)
+        return std::nullopt;
+
+    return _network->get_path_to(*_swarm_node);
 }
 
 void Core::_maybe_subscribe(const network::service_node& node) {

@@ -58,6 +58,11 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
     void upload_file(FileUploadRequest request, std::span<const std::byte> seed) override;
     void download(DownloadRequest request) override;
 
+    /// Sending direct, the route to a node is the node: one hop, no relays, nothing hidden.
+    std::optional<PathInfo> get_path_to(const service_node& node) override {
+        return PathInfo{{{node.remote_pubkey, node.ip}}};
+    }
+
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
     void _close_connections();
