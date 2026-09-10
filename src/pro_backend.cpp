@@ -182,7 +182,12 @@ namespace {
     // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
     // proof) from the already-extracted `result` object.
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
-        result.proof.version = json::require<uint8_t>(result_obj, "version");
+        // Not on the wire (pro-wire-protocol.md §2): the proof's format version is bound into the
+        // signature by the domain prefix, and the endpoint we called picks the format -- a future
+        // proof version is served from a new endpoint, so a `version` we parsed back could only
+        // ever repeat what the request already decided. The offline peer that genuinely has to
+        // discover a version reads it from the protobuf envelope, not from here.
+        result.proof.version = ProProofVersion_v0;
         result.proof.expiry_at = json::require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
         json::require_binary(result_obj, "revocation_tag", result.proof.revocation_tag);
         json::require_binary(result_obj, "rotating_pkey", result.proof.rotating_pubkey);

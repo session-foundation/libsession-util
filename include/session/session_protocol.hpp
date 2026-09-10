@@ -103,7 +103,10 @@ enum class ProStatus {
 
 class ProProof {
   public:
-    /// Version of the proof set by the Session Pro Backend
+    /// Format version of the proof.  It does not travel with the proof over the backend wire (the
+    /// endpoint that issued it fixes the format, and the domain prefix binds it into `sig`); it is
+    /// carried by the protobuf envelope a client attaches the proof to, which is where an offline
+    /// peer -- the only party that has to discover it -- can read it.
     std::uint8_t version;
 
     /// Opaque revocation tag identifying this proof (from the Session Pro backend)

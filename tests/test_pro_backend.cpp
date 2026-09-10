@@ -144,7 +144,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             nlohmann::json j;
             j["status"] = "ok";
             j["result"] = {
-                    {"version", 0},
                     {"expiry_ts", unix_ts},
                     {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
                     {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
