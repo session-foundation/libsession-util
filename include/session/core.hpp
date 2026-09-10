@@ -342,6 +342,53 @@ class Core {
     void _update_polling();
     void _poll();
 
+    /// The outcome of a swarm request.
+    struct SwarmResponse {
+        bool timeout;
+
+        /// The storage server's status, or one of the negative ERROR_ values when the request did
+        /// not get far enough to have one.  A batch whose subrequests all failed identically
+        /// reports that failure rather than the 200 the batch itself returned.
+        int16_t status_code;
+        std::optional<std::string> body;
+
+        /// Which member this came from: the one that answered, or the last one tried.  Not
+        /// necessarily the one the operation started with -- a request can be re-aimed at another
+        /// member several times before it succeeds, and anything recorded per-node has to be
+        /// recorded against *this* one.
+        network::service_node node;
+
+        /// Whether the storage server answered, and answered with a 2xx.
+        bool ok() const { return !timeout && status_code >= 200 && status_code <= 299; }
+        explicit operator bool() const { return ok(); }
+    };
+
+    // Sends `endpoint` to a member of `swarm_pubkey`'s swarm, re-aiming it as needed, and reports
+    // which member finally answered.
+    //
+    // Re-aiming is here rather than in Network because it is a decision, not a mechanism: only the
+    // caller knows whether a substitution matters to it, and a substitution made below Core is
+    // invisible to the bookkeeping that depends on it.  Two things move a request:
+    //
+    // - a 421, meaning this member does not hold the account.  Network will have taken the
+    //   corrected swarm out of the rejection by the time we see it, so re-resolving gets the new
+    //   membership rather than the stale one that misdirected us.  Bounded by
+    //   SWARM_REDIRECT_LIMIT, since a server that keeps saying no is not going to stop.
+    // - an unreachable member, which says nothing about the swarm.  Keep the swarm and walk to a
+    //   member not already spent, until they are exhausted.
+    //
+    // `make_body` is given the member the attempt will use, because a body can depend on it: a
+    // retrieve carries that node's cursor, and sending one node's cursor to another asks the wrong
+    // question.
+    void _swarm_request(
+            network::x25519_pubkey swarm_pubkey,
+            std::string endpoint,
+            std::function<std::vector<std::byte>(const network::service_node&)> make_body,
+            std::function<void(SwarmResponse)> on_done);
+
+    struct SwarmOp;
+    void _swarm_attempt(std::shared_ptr<SwarmOp> op);
+
     // Sends one round of retrieves to `node` for `namespaces`.  A retrieve is capped by the storage
     // server, so one round may not exhaust a namespace; `round` counts continuations and bounds
     // them.  Every round goes to the same node: the retrieve cursor is stored per (namespace,

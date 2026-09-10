@@ -182,32 +182,15 @@ struct Request {
     /// account, and leave it unset for a request merely aimed at a node (a snode cache refresh, a
     /// clock resync), which no swarm membership applies to.
     ///
-    /// Required to recover from a 421: the storage server rejects a request whose pubkey is not in
-    /// its swarm, and recovering means re-resolving the swarm of *this account*, which cannot be
-    /// derived from the node we happened to ask.
+    /// Set it to have a 421's correction applied: the swarm the storage server reports in the
+    /// rejection is written into the cache for *this account*, which cannot be derived from the
+    /// node we happened to ask.  Recovering from the 421 is still the caller's -- see
+    /// `Network::send_request`.
     std::optional<session::network::x25519_pubkey> swarm_pubkey;
 
     /// The time the request was created, this is used primarily for determining whether the
     /// `overall_timeout` has been exceeded.
     std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
-
-    /// How many times this request has been redirected after a 421, bounded by
-    /// `config.redirect_retry_count`.  Counts redirects only -- a 421 means our swarm information
-    /// was wrong, so recovery is to re-resolve the swarm from scratch.  It has nothing to do with
-    /// `failed_nodes` below, which is the opposite situation.
-    int retry_421_count = 0;
-
-    /// Swarm members that could not be reached for this request, in the order they were tried.
-    ///
-    /// A node that cannot be reached says nothing about the swarm -- unlike a 421, which says the
-    /// swarm itself is wrong -- so recovery is to keep the swarm and move to the next-best member,
-    /// excluding these.  Running out of members is what ends it, so this is a set rather than a
-    /// count: "once per node" cannot be expressed as a number, since choosing the next one has to
-    /// know which have already been spent.
-    ///
-    /// Empty for anything not addressed to a swarm; a request with no `swarm_pubkey` has no other
-    /// member to move to.
-    std::vector<service_node> failed_nodes;
 
     Request(std::string request_id,
             network_destination destination,

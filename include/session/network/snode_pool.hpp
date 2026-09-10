@@ -87,6 +87,17 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             bool ignore_strike_count,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
 
+    /// Replaces the cached swarm for an account with one a storage server told us authoritatively,
+    /// as a 421 body does.
+    ///
+    /// Overrides the locally computed membership, which is only as fresh as the snode cache
+    /// (`cache_expiration`, hours) and is exactly what a 421 says was wrong.  The override lives
+    /// until the next snode cache refresh recomputes everything.
+    virtual void set_swarm(
+            session::network::x25519_pubkey swarm_pubkey,
+            swarm::swarm_id_t swarm_id,
+            std::vector<service_node> nodes);
+
     virtual std::vector<service_node> get_unused_nodes(
             size_t count, const std::vector<service_node>& exclude = {});
 
