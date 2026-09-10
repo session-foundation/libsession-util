@@ -43,7 +43,7 @@ struct LiveClient {
 bool wait_until_sent(Client& c, int64_t id, std::chrono::seconds limit) {
     auto deadline = std::chrono::steady_clock::now() + limit;
     while (std::chrono::steady_clock::now() < deadline) {
-        auto msg = c.message(id, block);
+        auto msg = c.message(id, await);
         REQUIRE(msg);
         if (msg->send_state == SendState::sent)
             return true;
@@ -79,7 +79,7 @@ TEST_CASE(
             [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
                 reports.emplace_back(idx, sent, total, result);
             },
-            block);
+            await);
 
     REQUIRE(wait_until_sent(*c.client, id, 120s));
 

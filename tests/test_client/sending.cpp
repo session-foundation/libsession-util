@@ -15,7 +15,7 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(convo, {.body = "general kenobi"}, block);
+    auto id = c->send_message(convo, {.body = "general kenobi"}, await);
 
     // A store to the recipient's swarm and one to our own, both into the default namespace, with
     // something in them.
@@ -28,7 +28,7 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     }
     CHECK(accept_stores(*net) == 2);
 
-    auto msg = c->message(id, block);
+    auto msg = c->message(id, await);
     REQUIRE(msg.has_value());
     CHECK(msg->body == "general kenobi");
     CHECK(msg->outgoing);
@@ -40,7 +40,7 @@ TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][
     CHECK(msg->hash == store_hash_for(oxenc::to_hex(own_sid(*c))));
 
     // The conversation was created by the send and shows the outgoing message as its preview.
-    auto convos = c->conversations(block);
+    auto convos = c->conversations(await);
     REQUIRE(convos.size() == 1);
     CHECK(preview_body(convos[0]) == "general kenobi");
     // Ours, which is what lets a row prefix "You: ".
@@ -59,7 +59,7 @@ TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), {.body = "into the void"}, block);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "into the void"}, await);
 
     // The swarm refusing the store is what a failure is, rather than us declining to attempt one.
     auto sent = stores(*net);
@@ -67,14 +67,14 @@ TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
     for (auto* r : sent)
         r->callback(false, false, 500, {}, "nope");
 
-    CHECK(c->message(id, block)->send_state == SendState::failed);
+    CHECK(c->message(id, await)->send_state == SendState::failed);
 }
 
 TEST_CASE("Client: sending to a non-DM conversation is rejected", "[client][send]") {
     TempClient c;
     constexpr auto gid = "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     CHECK_THROWS_AS(
-            c->send_message(ConversationId::group(gid), {.body = "hi"}, block),
+            c->send_message(ConversationId::group(gid), {.body = "hi"}, await),
             std::invalid_argument);
 }
 
@@ -89,14 +89,14 @@ TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[cli
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), {.body = "did this land?"}, block);
-    CHECK(c->message(id, block)->send_state == SendState::sending);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "did this land?"}, await);
+    CHECK(c->message(id, await)->send_state == SendState::sending);
 
     c.reopen();
 
     // Not "failed": we genuinely do not know whether the swarm stored it.
-    CHECK(c->message(id, block)->send_state == SendState::interrupted);
-    CHECK(c->message(id, block)->body == "did this land?");
+    CHECK(c->message(id, await)->send_state == SendState::interrupted);
+    CHECK(c->message(id, await)->body == "did this land?");
 }
 
 // ── Signals ─────────────────────────────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ TEST_CASE("Client: state is committed before the handler fires", "[client][signa
 
     TempClient c{callbacks{.message_added = [&](const ConversationId&, const Message& m) {
         // Waiting from inside a handler: the loop runs it inline, since it is already this thread.
-        body_seen_from_handler = self->message(m.id, block)->body;
+        body_seen_from_handler = self->message(m.id, await)->body;
     }}};
     self = &*c;
 
@@ -199,7 +199,7 @@ TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
     // The exception is caught and logged rather than escaping into Core's event loop, and the
     // message is stored regardless: a broken listener must not cost us data.
     CHECK_NOTHROW(deliver(*c, sender, "still fine", from_epoch_ms(1000), "h1"));
-    CHECK(c->conversation(ConversationId::dm(sender.session_id), block)->messages(block).size() ==
+    CHECK(c->conversation(ConversationId::dm(sender.session_id), await)->messages(await).size() ==
           1);
 }
 
@@ -216,7 +216,7 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
     // for `send_state` rather than for the sync copy's.
     TestHelper::seed_pfs_nak(c->core, peer);
 
-    auto id = c->send_message(ConversationId::dm(peer), {.body = "hello"}, block);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "hello"}, await);
     sync(*c);
     r.order.clear();
     r.msg_updated.clear();
@@ -251,37 +251,37 @@ TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {
 
     auto ids = [&] {
         std::vector<ConversationId> out;
-        for (const auto& convo : c->conversations(block))
+        for (const auto& convo : c->conversations(await))
             out.push_back(convo.id());
         return out;
     };
     CHECK(ids() == std::vector{idd, idb, ida});
 
     // Higher priority sorts first, regardless of recency.
-    c->conversation(ida, block)->set_priority(1, block);
+    c->conversation(ida, await)->set_priority(1, await);
     CHECK(ids() == std::vector{ida, idd, idb});
-    CHECK(c->conversation(ida, block)->priority() == 1);
+    CHECK(c->conversation(ida, await)->priority() == 1);
 
     // A bigger number outranks a smaller one.
-    c->conversation(idb, block)->set_priority(5, block);
+    c->conversation(idb, await)->set_priority(5, await);
     CHECK(ids() == std::vector{idb, ida, idd});
 
     // Equal priorities form a block that sorts among itself by recency: b is pinned alongside a but
     // is the more recently active of the two, so it leads.  d stays below both, unpinned.
-    c->conversation(ida, block)->set_priority(5, block);
+    c->conversation(ida, await)->set_priority(5, await);
     CHECK(ids() == std::vector{idb, ida, idd});
 
     // Negative is hidden: gone from the list entirely rather than sorted last.
-    c->conversation(idb, block)->set_priority(-1, block);
+    c->conversation(idb, await)->set_priority(-1, await);
     CHECK(ids() == std::vector{ida, idd});
 
     // Still reachable by name, though: hidden is a statement about the list, and this is the only
     // way back to one.
-    REQUIRE(c->conversation(idb, block).has_value());
-    CHECK(c->conversation(idb, block)->priority() == -1);
+    REQUIRE(c->conversation(idb, await).has_value());
+    CHECK(c->conversation(idb, await)->priority() == -1);
 
     // ...and unhiding brings it back where its priority says.
-    c->conversation(idb, block)->set_priority(0, block);
+    c->conversation(idb, await)->set_priority(0, await);
     CHECK(ids() == std::vector{ida, idd, idb});
 }
 
@@ -297,7 +297,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     sync(*c);
     r.order.clear();
 
-    c->conversation(ConversationId::dm(a.session_id), block)->set_priority(3, block);
+    c->conversation(ConversationId::dm(a.session_id), await)->set_priority(3, await);
 
     // Reported as a replacement, not as an update to the one conversation whose priority changed:
     // what moved is the list.  Both lists are replaced together, because hiding takes a
@@ -311,7 +311,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     // Hiding removes it from the replacement list, which is how a subscriber learns it is gone.
     r.order.clear();
     r.replaced.clear();
-    c->conversation(ConversationId::dm(a.session_id), block)->set_priority(-1, block);
+    c->conversation(ConversationId::dm(a.session_id), await)->set_priority(-1, await);
     CHECK(r.order == std::vector<std::string>{"replaced", "requests"});
     REQUIRE(r.replaced.size() == 1);
     REQUIRE(r.replaced[0].size() == 1);
@@ -319,7 +319,7 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
 
     // Setting the same value again changes nothing, so it says nothing.
     r.order.clear();
-    c->conversation(ConversationId::dm(a.session_id), block)->set_priority(-1, block);
+    c->conversation(ConversationId::dm(a.session_id), await)->set_priority(-1, await);
     CHECK(r.order.empty());
 }
 
@@ -332,7 +332,7 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
     TestHelper::seed_pfs_nak(c->core, peer);
     TestHelper::seed_pfs_nak(c->core, own_sid(*c));
 
-    auto id = c->send_message(ConversationId::dm(peer), {.body = "two ways"}, block);
+    auto id = c->send_message(ConversationId::dm(peer), {.body = "two ways"}, await);
 
     // Which swarm a store is bound for is the pubkey it names, so the two copies can be answered
     // independently and in either order.
@@ -350,13 +350,13 @@ TEST_CASE("Client: the two copies of a send report separately", "[client][send]"
 
     // The recipient's copy lands; our own swarm has not answered yet.
     (*to_peer)->callback(true, false, 200, {}, "{}");
-    CHECK(c->message(id, block)->send_state == SendState::sent);
-    CHECK(c->message(id, block)->sync_send_state == SendState::sending);
+    CHECK(c->message(id, await)->send_state == SendState::sent);
+    CHECK(c->message(id, await)->sync_send_state == SendState::sending);
 
     // The sync copy fails, which says nothing about whether the message arrived.
     (*to_self)->callback(false, false, 500, {}, "nope");
-    CHECK(c->message(id, block)->send_state == SendState::sent);
-    CHECK(c->message(id, block)->sync_send_state == SendState::failed);
+    CHECK(c->message(id, await)->send_state == SendState::sent);
+    CHECK(c->message(id, await)->sync_send_state == SendState::failed);
 }
 
 TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
@@ -367,30 +367,30 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
     TestHelper::seed_pfs_nak(c->core, me);
 
     // Mirrors opening the conversation first, as a UI does, before sending into it.
-    auto convo = c->open_dm(ConversationId::dm(me), block);
+    auto convo = c->open_dm(ConversationId::dm(me), await);
     CHECK(convo.id == ConversationId::dm(me));
 
-    auto id = c->send_message(ConversationId::dm(me), {.body = "note to self"}, block);
-    CHECK(c->message(id, block)->body == "note to self");
-    CHECK(preview_body(*c->conversation(ConversationId::dm(me), block)) == "note to self");
+    auto id = c->send_message(ConversationId::dm(me), {.body = "note to self"}, await);
+    CHECK(c->message(id, await)->body == "note to self");
+    CHECK(preview_body(*c->conversation(ConversationId::dm(me), await)) == "note to self");
 
     // One store reaching the swarm, not two: our own swarm is the recipient's, so the sync copy
     // would be the same store twice.
     CHECK(accept_stores(*net) == 1);
 
     // One swarm, so one send: there is no separate sync copy to have a state for.
-    CHECK(c->message(id, block)->send_state.has_value());
-    CHECK_FALSE(c->message(id, block)->sync_send_state.has_value());
+    CHECK(c->message(id, await)->send_state.has_value());
+    CHECK_FALSE(c->message(id, await)->sync_send_state.has_value());
 
     // That single store went to our own swarm, so its hash is one worth keeping.
-    CHECK(c->message(id, block)->hash == store_hash_for(oxenc::to_hex(me)));
-    CHECK(c->conversation(ConversationId::dm(me), block)->messages(block).size() == 1);
+    CHECK(c->message(id, await)->hash == store_hash_for(oxenc::to_hex(me)));
+    CHECK(c->conversation(ConversationId::dm(me), await)->messages(await).size() == 1);
 
     // ...and when our own swarm hands it straight back on the next poll, which is what note to self
     // does, it must recognise its own message rather than storing a second copy.  What makes that
     // work is the msgid: the copy coming back carries the one we generated when sending, which is
     // exactly what a hash of the two copies could not do.
-    auto ts = c->message(id, block)->timestamp;
+    auto ts = c->message(id, await)->timestamp;
     auto msgid = c->core.loop().call_get([&] {
         return c->core.database().conn().prepared_get<int64_t>(
                 "SELECT msgid FROM messages WHERE id = ?", id);
@@ -410,5 +410,5 @@ TEST_CASE("Client: sending to ourselves stores once", "[client][send]") {
         return 0;
     });
 
-    CHECK(c->conversation(ConversationId::dm(me), block)->messages(block).size() == 1);
+    CHECK(c->conversation(ConversationId::dm(me), await)->messages(await).size() == 1);
 }

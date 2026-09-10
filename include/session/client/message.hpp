@@ -69,9 +69,9 @@ enum class Deletion : int {
 /// field rather than doubling the overload set — which it had already done once.  Designated
 /// initialisers make a call say which parts it is using:
 ///
-///     convo->send_message({.body = "hi"}, block);
-///     convo->send_message({.body = "look", .attachments = {...}}, on_upload, block);
-///     convo->send_message({.body = "agreed", .reply_to = other_id}, block);
+///     convo->send_message({.body = "hi"}, await);
+///     convo->send_message({.body = "look", .attachments = {...}}, on_upload, await);
+///     convo->send_message({.body = "agreed", .reply_to = other_id}, await);
 struct OutgoingMessage {
     std::string body;
 

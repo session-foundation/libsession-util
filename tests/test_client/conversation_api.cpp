@@ -4,9 +4,9 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     TempClient c;
     auto them = "05" + std::string(64, 'a');
     auto id = dm_from_hex(them);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
 
-    auto convo = [&] { return *c->conversation(id, block); };
+    auto convo = [&] { return *c->conversation(id, await); };
 
     // Defaults, and the ones a screen needs in order to draw a toggle rather than a button.
     CHECK(convo().notifications() == config::notify_mode::defaulted);
@@ -14,11 +14,11 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     CHECK(convo().exp_mode() == config::expiration_mode::none);
     CHECK_FALSE(convo().dm()->blocked);
 
-    c->conversation(id, block)->set_notifications(config::notify_mode::disabled, block);
-    c->conversation(id, block)->set_mute_until(std::chrono::sys_seconds{1700000000s}, block);
-    c->conversation(id, block)->set_expiry(config::expiration_mode::after_read, 86400s, block);
-    c->set_blocked(id, true, block);
-    c->dm(id, block)->set_nickname("Bilbo", block);
+    c->conversation(id, await)->set_notifications(config::notify_mode::disabled, await);
+    c->conversation(id, await)->set_mute_until(std::chrono::sys_seconds{1700000000s}, await);
+    c->conversation(id, await)->set_expiry(config::expiration_mode::after_read, 86400s, await);
+    c->set_blocked(id, true, await);
+    c->dm(id, await)->set_nickname("Bilbo", await);
 
     CHECK(convo().notifications() == config::notify_mode::disabled);
     CHECK(convo().mute_until() == std::chrono::sys_seconds{1700000000s});
@@ -44,12 +44,12 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     CHECK(entry->nickname == "Bilbo");
 
     // Clearing the nickname falls back to what they call themselves.
-    c->dm(id, block)->set_nickname("", block);
+    c->dm(id, await)->set_nickname("", await);
     CHECK(convo().dm()->nickname.empty());
     CHECK_FALSE(c->core.configs.contacts().get(them)->nickname == "Bilbo");
 
     // A timer without a mode expires nothing, so it is not stored as though it were a setting.
-    c->conversation(id, block)->set_expiry(config::expiration_mode::none, 3600s, block);
+    c->conversation(id, await)->set_expiry(config::expiration_mode::none, 3600s, await);
     CHECK(convo().exp_mode() == config::expiration_mode::none);
     CHECK(convo().exp_timer() == 0s);
 }
@@ -71,7 +71,7 @@ TEST_CASE("Client: settings from another device reach the conversation", "[clien
     });
     merge_contacts(*c.client, pushed);
 
-    auto convo = c->conversation(id, block);
+    auto convo = c->conversation(id, await);
     REQUIRE(convo);
     CHECK(convo->notifications() == config::notify_mode::disabled);
     CHECK(convo->mute_until() == std::chrono::sys_seconds{1700000000s});
@@ -88,9 +88,9 @@ TEST_CASE("Client: a conversation knows which kind it is", "[client][convos]") {
     TempClient c;
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
 
-    auto convo = c->conversation(id, block);
+    auto convo = c->conversation(id, await);
     REQUIRE(convo);
 
     // The kind is what makes a question askable: `request` is a thing only a DM can be, and asking
@@ -113,7 +113,7 @@ TEST_CASE(
     auto id = ConversationId::dm(them.session_id);
     approve(*c, them.session_id);
     deliver(*c, them, "hi", from_epoch_ms(5000), "h1");
-    REQUIRE(c->conversation(id, block)->unread() == 1);
+    REQUIRE(c->conversation(id, await)->unread() == 1);
 
     // The natural way to write any of these is on something that has already gone by the time the
     // work runs: a temporary, a handler's parameter, or a list element whose list got replaced.  So
@@ -121,19 +121,19 @@ TEST_CASE(
     // wrong, since the waiting form runs before it returns.
     std::optional<std::string> error = "not called";
     {
-        auto convo = c->conversation(id, block);
+        auto convo = c->conversation(id, await);
         REQUIRE(convo);
         convo->mark_read([&](auto err) { error = std::move(err); });
     }  // convo destroyed here, before the loop has run the work
     sync(*c);
 
     CHECK_FALSE(error.has_value());
-    CHECK(c->conversation(id, block)->unread() == 0);
+    CHECK(c->conversation(id, await)->unread() == 0);
 
     // And on an outright temporary, which is how it reads at a call site.
     std::optional<std::string> paged = "not called";
     size_t got = 0;
-    c->conversation(id, block)->messages(50, [&](auto err, auto msgs) {
+    c->conversation(id, await)->messages(50, [&](auto err, auto msgs) {
         paged = std::move(err);
         got = msgs.size();
     });
@@ -162,18 +162,18 @@ TEST_CASE("Client: auto-download is per conversation and stays here", "[client][
     TempClient c;
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
 
     // Unset means nobody has been asked, which is what a client prompts on.  It is not `none`.
-    CHECK_FALSE(c->conversation(id, block)->auto_download().has_value());
+    CHECK_FALSE(c->conversation(id, await)->auto_download().has_value());
 
-    c->conversation(id, block)->set_auto_download(AutoDownload::image_attachments, block);
-    CHECK(c->conversation(id, block)->auto_download() == AutoDownload::image_attachments);
+    c->conversation(id, await)->set_auto_download(AutoDownload::image_attachments, await);
+    CHECK(c->conversation(id, await)->auto_download() == AutoDownload::image_attachments);
 
     // Answering "none" is an answer: it records that the question was asked, so a client that
     // prompts when unset does not prompt again.
-    c->conversation(id, block)->set_auto_download(AutoDownload::none, block);
-    auto after = c->conversation(id, block)->auto_download();
+    c->conversation(id, await)->set_auto_download(AutoDownload::none, await);
+    auto after = c->conversation(id, await)->auto_download();
     REQUIRE(after.has_value());
     CHECK(*after == AutoDownload::none);
 
@@ -183,11 +183,11 @@ TEST_CASE("Client: auto-download is per conversation and stays here", "[client][
     auto& contacts = c->core.configs.contacts();
     TestHelper::sync_contact(*c.client, id);
     auto before_push = contacts.needs_push();
-    c->conversation(id, block)->set_auto_download(AutoDownload::all, block);
+    c->conversation(id, await)->set_auto_download(AutoDownload::all, await);
     TestHelper::sync_contact(*c.client, id);
     CHECK(contacts.needs_push() == before_push);
 
     // And it survives a restart, being a stored property rather than a session's opinion.
     c.reopen();
-    CHECK(c->conversation(id, block)->auto_download() == AutoDownload::all);
+    CHECK(c->conversation(id, await)->auto_download() == AutoDownload::all);
 }

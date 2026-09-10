@@ -18,7 +18,7 @@ TEST_CASE("Client: a merged contact reaches all three tables", "[client][configs
 
     // The conversation exists because the config says the contact does, not because anything has
     // been said in it.
-    auto convo = c->conversation(id, block);
+    auto convo = c->conversation(id, await);
     REQUIRE(convo);
     CHECK(convo->priority() == 3);
 
@@ -83,7 +83,7 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
         e.approved = true;
     });
     merge_contacts(*c.client, pushed);
-    REQUIRE(c->conversation(id, block));
+    REQUIRE(c->conversation(id, await));
 
     auto conn = c->core.database().conn();
     auto account = conn.prepared_get<int64_t>(
@@ -92,7 +92,7 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
             R"(INSERT INTO messages (conversation, sender, outgoing, timestamp, body)
                VALUES ((SELECT id FROM conversations WHERE dm = ?1), ?1, 0, 1000, 'hi'))",
             account);
-    REQUIRE(c->conversation(id, block)->messages(block).size() == 1);
+    REQUIRE(c->conversation(id, await)->messages(await).size() == 1);
 
     // Now the other device removes them entirely.  An absent entry can only mean the stronger
     // thing, since hiding arrives as a negative priority instead.
@@ -101,7 +101,7 @@ TEST_CASE("Client: a contact removed elsewhere takes its history", "[client][con
     merge_contacts(*c.client, emptied);
 
     // Conversation and history both gone, and reported.
-    CHECK_FALSE(c->conversation(id, block));
+    CHECK_FALSE(c->conversation(id, await));
     CHECK(conn.prepared_get<int64_t>("SELECT count(*) FROM messages WHERE sender = ?", account) ==
           0);
     CHECK(std::ranges::find(gone, id) != gone.end());
@@ -124,7 +124,7 @@ TEST_CASE(
         e.approved = true;
     });
     merge_contacts(*c.client, pushed);
-    REQUIRE(c->conversation(id, block));
+    REQUIRE(c->conversation(id, await));
 
     // Stand in for a crash between committing the row and writing the dump: the tables hold a
     // contact the config has never heard of.  Reconciled inward first, that is indistinguishable
@@ -134,7 +134,7 @@ TEST_CASE(
     c.reopen();
 
     // Startup derives outward before reconciling inward, so it is published rather than deleted.
-    CHECK(c->conversation(id, block));
+    CHECK(c->conversation(id, await));
     CHECK(c->core.configs.contacts().get(them).has_value());
 }
 
@@ -155,7 +155,7 @@ TEST_CASE("Client: writing a note to self reveals it", "[client][configs]") {
 
     REQUIRE_FALSE(listed(*c.client, me));
 
-    c->send_message(me, {.body = "a reminder"}, block);
+    c->send_message(me, {.body = "a reminder"}, await);
 
     // Both halves: it is in our own list, and UserProfile says so, which is what stops the other
     // devices on the account from carrying on hiding it.
@@ -170,13 +170,13 @@ TEST_CASE("Client: revealing note to self keeps a pin it already had", "[client]
 
     auto pinned = profile_from_another_device(*c.client, [](auto& p) { p.set_nts_priority(7); });
     merge_profile(*c.client, pinned);
-    REQUIRE(c->conversation(me, block)->priority() == 7);
+    REQUIRE(c->conversation(me, await)->priority() == 7);
 
-    c->send_message(me, {.body = "a reminder"}, block);
+    c->send_message(me, {.body = "a reminder"}, await);
 
     // Already visible, so there is nothing to reveal and the pin is left where the user put it.
     CHECK(c->core.configs.user_profile().get_nts_priority() == 7);
-    CHECK(c->conversation(me, block)->priority() == 7);
+    CHECK(c->conversation(me, await)->priority() == 7);
 }
 
 TEST_CASE("Client: our own profile reaches the conversation", "[client][configs]") {
@@ -189,7 +189,7 @@ TEST_CASE("Client: our own profile reaches the conversation", "[client][configs]
     });
     merge_profile(*c.client, pushed);
 
-    auto convo = c->conversation(me, block);
+    auto convo = c->conversation(me, await);
     REQUIRE(convo);
     CHECK(convo->display_name() == "Leia");
     CHECK(convo->dm()->note_to_self);
@@ -216,7 +216,7 @@ TEST_CASE("Client: hiding note to self elsewhere keeps it out of the list", "[cl
 
     // Still reachable by name -- hiding is a statement about the list, not about existence -- but
     // gone from it.
-    auto convo = c->conversation(me, block);
+    auto convo = c->conversation(me, await);
     REQUIRE(convo);
     CHECK(convo->priority() == -1);
     CHECK_FALSE(listed(*c.client, me));
@@ -231,12 +231,12 @@ TEST_CASE("Client: a note-to-self timer waits for the conversation", "[client][c
     auto pushed = profile_from_another_device(
             *c.client, [](auto& p) { p.set_nts_expiry(std::chrono::seconds{600}); });
     merge_profile(*c.client, pushed);
-    REQUIRE_FALSE(c->conversation(me, block));
+    REQUIRE_FALSE(c->conversation(me, await));
 
     // Writing a note brings the conversation into being, and everything the config was holding for
     // it lands at that moment rather than being lost.
-    c->send_message(me, {.body = "a reminder"}, block);
-    REQUIRE(c->conversation(me, block));
+    c->send_message(me, {.body = "a reminder"}, await);
+    REQUIRE(c->conversation(me, await));
 
     auto [mode, timer] = c->core.database().conn().prepared_get<int, int64_t>(
             "SELECT exp_mode, exp_timer FROM conversations"
@@ -258,19 +258,19 @@ TEST_CASE("Client: a restart reconciles what nothing announced", "[client][confi
         p.set_nts_priority(0);
     });
     merge_profile(*c.client, pushed);
-    REQUIRE(c->conversation(me, block)->display_name() == "Leia");
+    REQUIRE(c->conversation(me, await)->display_name() == "Leia");
 
     // Put the database behind the config behind its back, which is what a crash between merging and
     // reconciling leaves -- or a config merged by a version that could not yet reconcile it.  In
     // neither case is a further notification owed, so nothing would ever come back for it.
     c->core.database().conn().prepared_exec(
             "UPDATE accounts SET name = NULL WHERE session_id = ?", c->core.globals.session_id());
-    REQUIRE(c->conversation(me, block)->display_name().empty());
+    REQUIRE(c->conversation(me, await)->display_name().empty());
 
     c.reopen();
 
     // Starting up reconciles regardless of whether anything changed, so it is repaired.
-    CHECK(c->conversation(me, block)->display_name() == "Leia");
+    CHECK(c->conversation(me, await)->display_name() == "Leia");
 }
 
 TEST_CASE("Client: reconciling twice does not disturb the list", "[client][configs]") {
@@ -283,7 +283,7 @@ TEST_CASE("Client: reconciling twice does not disturb the list", "[client][confi
     });
     merge_profile(*c.client, pushed);
 
-    auto before = c->conversation(me, block);
+    auto before = c->conversation(me, await);
     REQUIRE(before);
 
     // The same profile again reconciles again, since the seqno detector overfires on an identical
@@ -292,7 +292,7 @@ TEST_CASE("Client: reconciling twice does not disturb the list", "[client][confi
     // note to self to the top of the list on every single config merge.
     merge_profile(*c.client, pushed);
 
-    auto after = c->conversation(me, block);
+    auto after = c->conversation(me, await);
     REQUIRE(after);
     CHECK(after->last_activity() == before->last_activity());
     CHECK(after->display_name() == before->display_name());
@@ -313,7 +313,7 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
 
     // Through Client, not through a DM: there is no conversation here, which is exactly the case
     // that carve-out exists for.
-    c->set_blocked(id, true, block);
+    c->set_blocked(id, true, await);
 
     // The block has to be synced and the entry is the only place it can live, so blocking makes
     // one.  It does not approve them: refusing someone's messages is not accepting them.
@@ -322,7 +322,7 @@ TEST_CASE("Client: blocking someone makes them a contact", "[client][configs]") 
     CHECK(entry->blocked);
     CHECK_FALSE(entry->approved);
 
-    c->set_blocked(id, false, block);
+    c->set_blocked(id, false, await);
     REQUIRE(c->core.configs.contacts().get(them));
     CHECK_FALSE(c->core.configs.contacts().get(them)->blocked);
 }
@@ -335,15 +335,15 @@ TEST_CASE("Client: clearing a conversation says when it was cleared", "[client][
 
     auto them = "05" + std::string(64, '2');
     auto id = dm_from_hex(them);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
     insert_message(*c.client, id, 1000, "hi");
-    REQUIRE(c->conversation(id, block)->messages(block).size() == 1);
+    REQUIRE(c->conversation(id, await)->messages(await).size() == 1);
 
     auto before = std::chrono::floor<std::chrono::seconds>(clock_now_ms());
-    c->conversation(id, block)->clear_messages(block);
+    c->conversation(id, await)->clear_messages(await);
 
-    CHECK(c->conversation(id, block)->messages(block).empty());
-    CHECK(c->conversation(id, block));  // The conversation stays; only its history went.
+    CHECK(c->conversation(id, await)->messages(await).empty());
+    CHECK(c->conversation(id, await));  // The conversation stays; only its history went.
     CHECK(std::ranges::find(reloaded, id) != reloaded.end());
 
     // And the moment is recorded rather than the deletion being local, so a device that has been
@@ -357,15 +357,15 @@ TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs
     TempClient c;
     auto them = "05" + std::string(64, '3');
     auto id = dm_from_hex(them);
-    c->open_dm(id, block);
-    c->conversation(id, block)->set_priority(5, block);
+    c->open_dm(id, await);
+    c->conversation(id, await)->set_priority(5, await);
     insert_message(*c.client, id, 1000, "hi");
     REQUIRE(listed(*c.client, id));
 
-    c->conversation(id, block)->delete_conversation(block);
+    c->conversation(id, await)->delete_conversation(await);
 
     CHECK_FALSE(listed(*c.client, id));
-    CHECK(c->conversation(id, block)->messages(block).empty());
+    CHECK(c->conversation(id, await)->messages(await).empty());
 
     auto entry = c->core.configs.contacts().get(them);
     REQUIRE(entry);  // Still a contact, so a message from them brings the conversation back.
@@ -377,14 +377,14 @@ TEST_CASE("Client: deleting a conversation keeps the contact", "[client][configs
 TEST_CASE("Client: hiding note to self keeps what is in it", "[client][configs]") {
     TempClient c;
     auto me = self_convo(*c.client);
-    c->open_dm(me, block);
+    c->open_dm(me, await);
     insert_message(*c.client, me, 1000, "note");
     REQUIRE(listed(*c.client, me));
 
-    c->conversation(me, block)->delete_conversation(/*keep_messages=*/true, block);
+    c->conversation(me, await)->delete_conversation(/*keep_messages=*/true, await);
 
     CHECK_FALSE(listed(*c.client, me));
-    CHECK(c->conversation(me, block)->messages(block).size() == 1);
+    CHECK(c->conversation(me, await)->messages(await).size() == 1);
     CHECK(c->core.configs.user_profile().get_nts_priority() == -1);
 
     // No instruction to destroy anything, which is the whole difference between hiding a
@@ -400,13 +400,13 @@ TEST_CASE("Client: deleting a contact takes the entry that held the block", "[cl
 
     auto them = "05" + std::string(64, '4');
     auto id = dm_from_hex(them);
-    c->open_dm(id, block);
-    c->dm(id, block)->set_blocked(true, block);
+    c->open_dm(id, await);
+    c->dm(id, await)->set_blocked(true, await);
     insert_message(*c.client, id, 1000, "hi");
 
-    c->dm(id, block)->delete_contact(block);
+    c->dm(id, await)->delete_contact(await);
 
-    CHECK_FALSE(c->conversation(id, block));
+    CHECK_FALSE(c->conversation(id, await));
     CHECK(std::ranges::find(gone, id) != gone.end());
 
     // No entry means no delete-before instruction is owed: another device merging this drops the
@@ -427,11 +427,11 @@ TEST_CASE("Client: a delete-before from another device destroys history", "[clie
 
     auto pushed = contacts_from_another_device(*c.client, them, [](auto& e) { e.approved = true; });
     merge_contacts(*c.client, pushed);
-    REQUIRE(c->conversation(id, block));
+    REQUIRE(c->conversation(id, await));
 
     insert_message(*c.client, id, 1'000'000, "old");
     insert_message(*c.client, id, 3'000'000, "new");
-    REQUIRE(c->conversation(id, block)->messages(block).size() == 2);
+    REQUIRE(c->conversation(id, await)->messages(await).size() == 2);
 
     // Retroactive: what the instruction is about is the history that was there when someone chose
     // to destroy it, not merely what arrives after it.
@@ -442,7 +442,7 @@ TEST_CASE("Client: a delete-before from another device destroys history", "[clie
     });
     merge_contacts(*c.client, cleared);
 
-    auto left = c->conversation(id, block)->messages(block);
+    auto left = c->conversation(id, await)->messages(await);
     REQUIRE(left.size() == 1);
     CHECK(left[0].body == "new");
 }
@@ -452,7 +452,7 @@ TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]")
     auto them = "05" + std::string(64, '7');
     auto id = dm_from_hex(them);
 
-    c->open_dm(id, block);
+    c->open_dm(id, await);
     REQUIRE(c->core.configs.contacts().get(them));
     REQUIRE(c->core.configs.contacts().get(them)->approved);
 
@@ -467,16 +467,16 @@ TEST_CASE("Client: approval is not walked back by a merge", "[client][configs]")
     });
     merge_contacts(*c.client, unapproved);
 
-    CHECK(c->message_requests(block).empty());
-    REQUIRE(c->conversation(id, block));
-    CHECK_FALSE(c->conversation(id, block)->dm()->request);
+    CHECK(c->message_requests(await).empty());
+    REQUIRE(c->conversation(id, await));
+    CHECK_FALSE(c->conversation(id, await)->dm()->request);
 }
 
 TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
     TempClient c;
     auto them = "05" + std::string(64, '6');
     auto id = dm_from_hex(them);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
 
     // Another device cleared at a moment this one has not reached yet -- clock skew is enough for
     // that.  Publishing our own, smaller value would tell it to un-delete what it destroyed.
@@ -486,7 +486,7 @@ TEST_CASE("Client: a delete-before is not walked back", "[client][configs]") {
     entry.delete_before = later;
     contacts.set(entry);
 
-    c->conversation(id, block)->clear_messages(block);
+    c->conversation(id, await)->clear_messages(await);
 
     REQUIRE(contacts.get(them));
     CHECK(contacts.get(them)->delete_before == later);
@@ -497,32 +497,32 @@ TEST_CASE("Client: our own profile is account state, not a conversation", "[clie
 
     // Nothing set yet, and -- the point of this being on Client -- no note-to-self conversation
     // needed for the question to have an answer.
-    CHECK(c->conversations(block).empty());
-    CHECK(c->display_name(block).empty());
+    CHECK(c->conversations(await).empty());
+    CHECK(c->display_name(await).empty());
 
-    c->set_display_name("Leia", block);
-    CHECK(c->display_name(block) == "Leia");
+    c->set_display_name("Leia", await);
+    CHECK(c->display_name(await) == "Leia");
     CHECK(c->core.configs.user_profile().get_name() == "Leia");
 
     // Still no conversation: setting a name is not writing to yourself.
-    CHECK(c->conversations(block).empty());
+    CHECK(c->conversations(await).empty());
 }
 
 TEST_CASE("Client: the save-notification preference follows the account", "[client][configs]") {
     TempClient c;
 
     // Session's default is to tell people when you save their files.
-    CHECK(c->notify_media_saved(block));
+    CHECK(c->notify_media_saved(await));
 
-    c->set_notify_media_saved(false, block);
-    CHECK_FALSE(c->notify_media_saved(block));
+    c->set_notify_media_saved(false, await);
+    CHECK_FALSE(c->notify_media_saved(await));
     CHECK_FALSE(c->core.configs.user_profile().get_notify_media_saved());
 
     // What another device set reaches us through a merge, like any other profile field.
     auto pushed = profile_from_another_device(
             *c.client, [](config::UserProfile& p) { p.set_notify_media_saved(true); });
     merge_profile(*c.client, pushed);
-    CHECK(c->notify_media_saved(block));
+    CHECK(c->notify_media_saved(await));
 }
 
 TEST_CASE(
@@ -538,22 +538,22 @@ TEST_CASE(
     });
     merge_contacts(*c.client, pushed);
 
-    auto convo = c->conversation(id, block);
+    auto convo = c->conversation(id, await);
     REQUIRE(convo);
     CHECK(convo->picture().url == "http://fs.example/file/99#pubkey=aa");
     CHECK(convo->picture().key == key);
 
     // Somebody we know nothing about has none, which is not the same as an error.
     auto stranger = dm_from_hex("05" + std::string(64, 'c'));
-    c->open_dm(stranger, block);
-    CHECK(c->conversation(stranger, block)->picture().url.empty());
+    c->open_dm(stranger, await);
+    CHECK(c->conversation(stranger, await)->picture().url.empty());
 }
 
 TEST_CASE("Client: no picture is nullopt rather than a failure", "[client][configs]") {
     TempClient c;
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
-    c->open_dm(id, block);
+    c->open_dm(id, await);
 
     std::optional<std::vector<std::byte>> got;
     std::optional<std::string> err;
