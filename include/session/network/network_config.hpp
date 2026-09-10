@@ -38,7 +38,6 @@ struct Config {
     bool increase_no_file_limit = false;
     uint8_t path_length = 3;
     bool enforce_subnet_diversity = true;
-    uint8_t redirect_retry_count = 1;
     opt::retry_delay retry_delay = opt::retry_delay(200ms, 5s);
     uint8_t num_nodes_to_check_for_network_offset = 3;
     std::chrono::minutes min_resume_clock_resync_interval = 10min;
@@ -115,7 +114,6 @@ struct Config {
     void handle_config_opt(opt::increase_no_file_limit infl);
     void handle_config_opt(opt::path_length pl);
     void handle_config_opt(opt::disable_subnet_diversity dsd);
-    void handle_config_opt(opt::redirect_retry_count rrc);
     void handle_config_opt(opt::retry_delay rd);
     void handle_config_opt(opt::num_nodes_to_check_for_network_offset nncno);
     void handle_config_opt(opt::min_resume_clock_resync_interval mrcri);

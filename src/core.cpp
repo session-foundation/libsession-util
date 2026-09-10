@@ -230,6 +230,139 @@ static constexpr auto PROBE_TIMEOUT = 10s;
 // What the storage server pushes a subscribed client, as the endpoint of a request of its own.
 static constexpr auto NOTIFY_ENDPOINT = "notify"sv;
 
+// How many times a swarm request is re-aimed after a 421 before it is given up on.
+//
+// One redirect is the ordinary case: our membership was stale, the rejection corrected it, the
+// next member answers.  More than that means the corrected swarm is also being rejected, and
+// asking a fourth time will not change that.
+static constexpr int SWARM_REDIRECT_LIMIT = 3;
+
+// The least time worth starting another attempt with.  A request given a second or two cannot
+// resolve a node, connect and get an answer, so spending the remainder of the budget on it only
+// delays telling the caller what we already know.
+static constexpr auto MIN_RETRY_BUDGET = 2s;
+
+struct Core::SwarmOp {
+    network::x25519_pubkey swarm_pubkey;
+    std::string endpoint;
+    std::function<std::vector<std::byte>(const network::service_node&)> make_body;
+    std::function<void(SwarmResponse)> on_done;
+
+    // Members that could not be reached, in the order they were tried.  A set rather than a count
+    // because "once per member" cannot be expressed as a number: choosing the next one has to know
+    // which are already spent.
+    std::vector<network::service_node> unreachable;
+    int redirects = 0;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+};
+
+void Core::_swarm_request(
+        network::x25519_pubkey swarm_pubkey,
+        std::string endpoint,
+        std::function<std::vector<std::byte>(const network::service_node&)> make_body,
+        std::function<void(SwarmResponse)> on_done) {
+    _swarm_attempt(std::make_shared<SwarmOp>(
+            swarm_pubkey, std::move(endpoint), std::move(make_body), std::move(on_done)));
+}
+
+void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
+    // Non-owning, as everywhere else here: keeping the Network alive from a callback could make
+    // the loop thread its last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net)
+        return op->on_done({false, network::ERROR_NO_ROUTING_LAYER, "no network attached", {}});
+
+    net->get_swarm(
+            op->swarm_pubkey,
+            false,
+            [this, op = std::move(op), net](
+                    network::swarm::swarm_id_t, std::vector<network::service_node> swarm) mutable {
+        auto fail = [&op](int16_t status, std::string why) {
+            op->on_done(
+                    {false,
+                     status,
+                     std::move(why),
+                     op->unreachable.empty() ? network::service_node{} : op->unreachable.back()});
+        };
+
+        if (swarm.empty())
+            return fail(network::ERROR_NO_SNODE_POOL, "no swarm members available");
+
+        // The first member not already spent.  get_swarm shuffles and partitions by strike count,
+        // so this is the least-struck members first in a random order among equals -- the right
+        // preference anyway; what matters is only that a member already tried is never chosen
+        // again, which is what ends the walk.
+        auto next = std::ranges::find_if(swarm, [&op](const network::service_node& n) {
+            return std::ranges::find(op->unreachable, n) == op->unreachable.end();
+        });
+
+        if (next == swarm.end()) {
+            log::warning(
+                    cat,
+                    "No swarm member left for '{}': all {} were unreachable.",
+                    op->endpoint,
+                    op->unreachable.size());
+            return fail(network::ERROR_INVALID_DESTINATION, "no reachable swarm member");
+        }
+
+        auto node = *next;
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - op->started);
+        if (auto left = SWARM_OVERALL_TIMEOUT - elapsed; left < MIN_RETRY_BUDGET) {
+            log::warning(
+                    cat, "Out of time to try another member for '{}'.", op->endpoint);
+            return fail(network::ERROR_REQUEST_TIMEOUT, "swarm request budget exhausted");
+        }
+
+        // Rebuilt per attempt: a retrieve carries the chosen node's cursor, so reusing the body
+        // built for a previous member would resume from a position that member never gave us.
+        auto req = swarm_request(node, op->swarm_pubkey, op->endpoint, op->make_body(node));
+
+        net->send_request(
+                std::move(req),
+                [this, op, node](
+                        bool /*success*/,
+                        bool timeout,
+                        int16_t status,
+                        std::vector<std::pair<std::string, std::string>> /*headers*/,
+                        std::optional<std::string> body) mutable {
+                    // Not this member's swarm.  Network has already taken the corrected
+                    // membership out of the rejection, so resolving again gets the new one.
+                    if (status == network::ERROR_MISDIRECTED_REQUEST) {
+                        if (++op->redirects > SWARM_REDIRECT_LIMIT) {
+                            log::warning(
+                                    cat,
+                                    "Giving up on '{}': redirected {} times.",
+                                    op->endpoint,
+                                    op->redirects - 1);
+                        } else {
+                            log::info(
+                                    cat,
+                                    "{} does not hold {}; re-resolving its swarm.",
+                                    node.remote_pubkey.hex(),
+                                    op->swarm_pubkey.hex());
+                            return _swarm_attempt(std::move(op));
+                        }
+                    }
+
+                    // The member itself could not be reached.  The swarm is not in question, so
+                    // move to another one rather than failing.
+                    else if (status == network::ERROR_INVALID_DESTINATION) {
+                        log::info(
+                                cat,
+                                "{} unreachable for '{}'; trying another member.",
+                                node.remote_pubkey.hex(),
+                                op->endpoint);
+                        op->unreachable.push_back(node);
+                        return _swarm_attempt(std::move(op));
+                    }
+
+                    op->on_done({timeout, status, std::move(body), node});
+                });
+    });
+}
+
 void Core::_poll() {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
     // could make the loop thread the last owner and run ~Network there.

@@ -230,14 +230,6 @@ namespace opt {
     /// included in the same path when building onion request or session router paths.
     struct disable_subnet_diversity {};
 
-    /// Can be used to override the default (1) number of request retries that will occur when
-    /// receiving a 421 error.
-    struct redirect_retry_count {
-        uint8_t count;
-
-        redirect_retry_count(uint8_t count) : count{count} {}
-    };
-
     struct retry_delay {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
@@ -476,7 +468,6 @@ namespace opt {
             increase_no_file_limit,
             path_length,
             disable_subnet_diversity,
-            redirect_retry_count,
             retry_delay,
             num_nodes_to_check_for_network_offset,
             min_resume_clock_resync_interval,

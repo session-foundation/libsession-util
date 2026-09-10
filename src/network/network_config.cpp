@@ -141,11 +141,6 @@ void Config::handle_config_opt(opt::disable_subnet_diversity) {
     log::debug(cat, "Network config disabled subnet diversity");
 }
 
-void Config::handle_config_opt(opt::redirect_retry_count rrc) {
-    redirect_retry_count = rrc.count;
-    log::debug(cat, "Network config redirect retry count set to {}", rrc.count);
-}
-
 void Config::handle_config_opt(opt::retry_delay rd) {
     retry_delay = std::move(rd);
     log::debug(

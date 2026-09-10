@@ -179,20 +179,9 @@ class Network {
     void _recalculate_status();
     void _update_status(ConnectionStatus new_status);
     void _update_network_state(const std::string& body);
-    void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
-
-    // Re-sends a request to the next member of the same swarm, after the one it was sent to could
-    // not be reached.  Distinct from the 421 path: there the swarm information was wrong and is
-    // thrown away, here it is right and only one member of it is unusable.  Gives up when
-    // selection has no member left that has not already failed, reporting the original failure
-    // rather than one of its own invention.
-    void _retry_next_swarm_node(
-            Request original_request,
-            bool timeout,
-            int16_t status_code,
-            std::vector<std::pair<std::string, std::string>> headers,
-            std::optional<std::string> body,
-            network_response_callback_t final_callback);
+    // Writes the swarm a 421 reported into the cache.  Does not retry: choosing another member is
+    // the caller's, since only the caller can know which node it ended up talking to.
+    void _adopt_swarm_from_421(const x25519_pubkey& swarm_pubkey, std::string_view body);
 
     void _resync_clock(
             std::optional<Request> original_request, network_response_callback_t request_callback);
