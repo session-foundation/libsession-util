@@ -1184,7 +1184,7 @@ class Client {
         // throw it away.  On the loop's own queue it would instead run during Core's destruction
         // -- the loop thread keeps draining until ~Loop, which is the *last* thing ~Core does --
         // reaching a Client whose components have already gone.
-        _jq.call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
+        call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
             using Result = decltype(produce());
             try {
                 if constexpr (std::is_void_v<Result>) {
@@ -1250,10 +1250,33 @@ class Client {
     /// Put anything a Core callback touches *above* this, never below.
     core::Core core;
 
-    /// Helper reference to Core's event loop, which is where this class does its work.
-    oxen::quic::Loop& loop{core.loop()};
-
   private:
+    /// Schedules work on this Client's job queue, which is where everything this class defers
+    /// belongs -- see `_jq`.  Same shapes as `Core`'s: `call` runs inline when already on the loop
+    /// thread, `call_soon` always queues, `call_later` queues after a delay, and `call_get` blocks
+    /// until the answer is ready.
+    ///
+    /// There is deliberately no `loop` member any more.  It read as the obvious way to defer work
+    /// and was the wrong one, since the loop's own queue outlives every Core member that these
+    /// jobs reach through `this`.  Anything genuinely wanting the loop says `core.loop()`.
+    template <typename F>
+    void call(F&& f) {
+        _jq.call(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_soon(F&& f) {
+        _jq.call_soon(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_later(std::chrono::microseconds delay, F&& f) {
+        _jq.call_later(delay, std::forward<F>(f));
+    }
+    /// By value, for the same reason as Core's: a reference returned here has escaped the loop.
+    template <typename F>
+    auto call_get(F&& f) {
+        return _jq.call_get(std::forward<F>(f));
+    }
+
     // Client's own queue on Core's loop, rather than the loop's shared one, so that work deferred
     // here is *cancelled* if the Client is destroyed with it still outstanding.  Running it instead
     // would mean reporting a change to the subscribers of a Client that is going away, against a
@@ -1270,7 +1293,7 @@ class Client {
     //
     // Declared after `core` -- the one thing that belongs below it -- because a JobQueue needs its
     // loop alive in order to stop, so it has to be destroyed while Core still exists.
-    oxen::quic::JobQueue _jq{loop};
+    oxen::quic::JobQueue _jq{core.loop()};
 };
 
 }  // namespace session::client

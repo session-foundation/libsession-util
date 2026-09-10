@@ -606,7 +606,41 @@ class Core {
     ///
     /// `call()` runs the job inline when the caller is already on this thread, so a single-threaded
     /// application pays nothing for the indirection.
+    ///
+    /// Prefer the `call*` methods below to scheduling on this directly: a job left on the loop's
+    /// own queue is not discarded until `~Loop`, which is the last thing `~Core` does, so it can
+    /// still be run against components that have already been destroyed.  This is the escape hatch
+    /// for the cases that genuinely want the loop itself.
     quic::Loop& loop();
+
+    /// Schedules work on Core's job queue, which is where anything reaching into Core from another
+    /// thread belongs.
+    ///
+    /// `call` runs `f` inline when the caller is already the loop thread and queues it otherwise;
+    /// `call_soon` queues it either way; `call_later` queues it after a delay; and `call_get`
+    /// blocks the calling thread until `f` has run, handing back whatever it returned.
+    ///
+    /// Unlike `loop()`, work put here is *cancelled* when Core goes away, so a job still
+    /// outstanding is dropped rather than run against half-destroyed components.  Queueing onto a
+    /// stopped queue throws rather than doing so silently.
+    template <typename F>
+    void call(F&& f) {
+        _jq.call(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_soon(F&& f) {
+        _jq.call_soon(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_later(std::chrono::microseconds delay, F&& f) {
+        _jq.call_later(delay, std::forward<F>(f));
+    }
+    /// Returns by value, deliberately: a reference handed back here would have outlived the job
+    /// that produced it, which is the whole hazard this queue exists to close.
+    template <typename F>
+    auto call_get(F&& f) {
+        return _jq.call_get(std::forward<F>(f));
+    }
 
     /// The account database, for a layer built on top of Core that keeps its own tables alongside
     /// Core's — the same layer that supplies a schema_extension to create them.
