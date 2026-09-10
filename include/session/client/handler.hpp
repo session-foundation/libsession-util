@@ -6,7 +6,7 @@
 
 namespace session::client {
 
-/// Passed where a handler would go, to say "block until this is done and give me the answer"
+/// Passed where a handler would go, to say "wait until this is done and give me the answer"
 /// instead.
 ///
 /// Every asynchronous method has a blocking twin taking one of these.  The work is the same and
@@ -22,13 +22,8 @@ namespace session::client {
 /// Calling one from a Client handler is safe rather than a deadlock -- the loop runs the work
 /// inline when it is already the current thread -- but it is still waiting, and anything else the
 /// loop owes is waiting behind it.
-///
-/// Named `block` rather than the more obvious `wait` because POSIX declares `::wait` in
-/// <sys/wait.h>: a client that does `using namespace session::client;` would then find both names
-/// and be able to use neither, and there is no using-declaration that resolves that at namespace
-/// scope.
-struct block_t {};
-inline constexpr block_t block{};
+struct await_t {};
+inline constexpr await_t await{};
 
 /// Runs a job on the application's own thread.
 ///

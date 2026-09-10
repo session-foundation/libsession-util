@@ -112,8 +112,8 @@ TEST_CASE("Client: reads are safe while messages arrive on another thread", "[cl
     std::thread reader{[&] {
         try {
             while (writing) {
-                for (const auto& convo_row : c->conversations(block))
-                    convo_row.messages(50, block);
+                for (const auto& convo_row : c->conversations(await))
+                    convo_row.messages(50, await);
                 reads++;
             }
         } catch (...) {
@@ -131,5 +131,5 @@ TEST_CASE("Client: reads are safe while messages arrive on another thread", "[cl
         std::rethrow_exception(reader_err);
 
     CHECK(reads > 0);  // the reader really did run alongside, rather than after
-    CHECK(c->conversation(convo, block)->messages(N + 10, block).size() == N);
+    CHECK(c->conversation(convo, await)->messages(N + 10, await).size() == N);
 }

@@ -57,7 +57,7 @@ TEST_CASE("Client: an arriving message records the files it names", "[client][at
             });
     sync(*c);
 
-    auto msgs = c->conversation(ConversationId::dm(peer.session_id), block)->messages(block);
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await);
     REQUIRE(msgs.size() == 1);
     const auto& m = msgs[0];
     CHECK(m.body.empty());
@@ -111,9 +111,9 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
                       OutgoingAttachment{
                               .path = doc, .content_type = "application/x-my-own", .width = 4},
                       OutgoingAttachment{.path = mystery, .voice_message = true}}},
-            block);
+            await);
 
-    auto msg = c->message(id, block);
+    auto msg = c->message(id, await);
     REQUIRE(msg.has_value());
 
     // An attachments-only message: nothing to show but the files, which is exactly the case that
@@ -146,7 +146,7 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     // Each file reached the server, and the size recorded is the file's own -- read at upload time,
     // not the padded ciphertext's length that the server reports back.
     sync(*c);
-    msg = c->message(id, block);
+    msg = c->message(id, await);
     REQUIRE(msg.has_value());
     for (const auto& a : msg->attachments) {
         CHECK(a.uploaded);
@@ -154,7 +154,7 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     }
 
     // The same list reaches a paged read, not only the single-message one.
-    auto page = c->conversation(ConversationId::dm(me), block)->messages(block);
+    auto page = c->conversation(ConversationId::dm(me), await)->messages(await);
     REQUIRE(page.size() == 1);
     CHECK(page[0].attachments.size() == 3);
     CHECK(page[0].attachments[0].content_type == "image/png");
@@ -197,7 +197,7 @@ TEST_CASE(
             42);
     sync(*c);
 
-    auto msgs = c->conversation(ConversationId::dm(peer.session_id), block)->messages(block);
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await);
     REQUIRE(msgs.size() == 1);
     auto msg_id = msgs[0].id;
 
@@ -257,7 +257,7 @@ TEST_CASE(
 
     // We also remember that we saved it, which is what stops a client offering "save" forever and
     // writing a second copy.  Recorded whether or not the sender was told.
-    auto saved = c->message(msg_id, block);
+    auto saved = c->message(msg_id, await);
     REQUIRE(saved.has_value());
     REQUIRE(saved->attachments.size() == 1);
     REQUIRE(saved->attachments[0].saved_at.has_value());
@@ -288,7 +288,7 @@ TEST_CASE(
     deliver(*c, peer, "", from_epoch_ms(2000), "h2", "", std::nullopt, add, 43);
     sync(*c);
     auto msg_id =
-            c->conversation(ConversationId::dm(peer.session_id), block)->messages(block)[0].id;
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
 
     auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_save", 7);
     std::filesystem::create_directories(dir);
@@ -323,7 +323,7 @@ TEST_CASE(
         CHECK(stores(*net).empty());
 
         // Telling them and remembering it ourselves are separate: a private save is still a save.
-        CHECK(c->message(msg_id, block)->attachments[0].saved_at.has_value());
+        CHECK(c->message(msg_id, await)->attachments[0].saved_at.has_value());
     }
 
     // The account's own answer refuses the notification even when the caller asked for it, so a
@@ -389,11 +389,11 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here it is", .attachments = {OutgoingAttachment{.path = source}}},
-            block);
+            await);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
-    auto msg = c->message(id, block);
+    auto msg = c->message(id, await);
     REQUIRE(msg.has_value());
     REQUIRE(msg->attachments.size() == 1);
     CHECK(msg->attachments[0].uploaded);
@@ -427,7 +427,7 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
 
     // Stamped, even though the message is outgoing: this conversation is with ourselves, so the
     // recipient saving it and us saving it are the same event.
-    CHECK(c->message(id, block)->attachments[0].saved_at.has_value());
+    CHECK(c->message(id, await)->attachments[0].saved_at.has_value());
 
     std::filesystem::remove_all(dir);
 }
@@ -452,7 +452,7 @@ TEST_CASE(
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here", .attachments = {OutgoingAttachment{.path = source}}},
-            block);
+            await);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
@@ -515,7 +515,7 @@ TEST_CASE(
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here", .attachments = {OutgoingAttachment{.path = source}}},
-            block);
+            await);
     sync(*c);
     REQUIRE(accept_stores(*net) == 1);
 
@@ -571,7 +571,7 @@ TEST_CASE(
     auto id = c->send_message(
             ConversationId::dm(peer.session_id),
             {.body = "for you", .attachments = {OutgoingAttachment{.path = source}}},
-            block);
+            await);
     sync(*c);
     REQUIRE(accept_stores(*net) >= 1);
 
@@ -592,7 +592,7 @@ TEST_CASE(
     // it as "the file reached a person rather than a file server".  Our own copy says nothing about
     // that, so it must leave the field alone -- otherwise a UI reports "they have it" about someone
     // who may never have opened the conversation.
-    auto msg = c->message(id, block);
+    auto msg = c->message(id, await);
     REQUIRE(msg);
     REQUIRE(msg->attachments.size() == 1);
     CHECK_FALSE(msg->attachments[0].saved_at.has_value());
@@ -619,11 +619,11 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
             ConversationId::dm(peer.session_id),
             {.body = "two of them",
              .attachments = {OutgoingAttachment{.path = one}, OutgoingAttachment{.path = two}}},
-            block);
+            await);
     sync(*c);
     REQUIRE(accept_stores(*net) == 2);
 
-    auto sent = c->message(id, block);
+    auto sent = c->message(id, await);
     REQUIRE(sent.has_value());
     REQUIRE(sent->attachments.size() == 2);
     // Nobody has said anything yet, and an upload reaching the file server is not someone saving
@@ -664,7 +664,7 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
             },
             saved_at);
 
-    auto after = c->message(id, block);
+    auto after = c->message(id, await);
     REQUIRE(after.has_value());
     // Only the one they named, and stamped with when *they* saved it -- not the message's own
     // timestamp, which is what identifies it and is generally older.
@@ -682,7 +682,7 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
             },
             all_at);
 
-    auto all = c->message(id, block);
+    auto all = c->message(id, await);
     REQUIRE(all->attachments[0].saved_at == all_at);
     // The later save overwrites the earlier one: what this answers is "is there any point offering
     // save again", not a history of every time they did.
@@ -700,7 +700,7 @@ TEST_CASE("Client: a peer can tell us they saved what we sent", "[client][attach
             from_epoch_ms(9'900'000));
     notify([&](auto* note) { note->set_timestamp(12345); }, from_epoch_ms(9'900'000));
 
-    auto unchanged = c->message(id, block);
+    auto unchanged = c->message(id, await);
     CHECK(unchanged->attachments[0].saved_at == all_at);
     CHECK(unchanged->attachments[1].saved_at == all_at);
 
@@ -759,7 +759,7 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
             44);
     sync(*c);
 
-    auto msgs = c->conversation(ConversationId::dm(peer.session_id), block)->messages(block);
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await);
     REQUIRE(msgs.size() == 1);
     REQUIRE(msgs[0].attachments.size() == 1);
 
@@ -803,13 +803,13 @@ TEST_CASE(
                     ConversationId::dm(me),
                     {.body = "here you go",
                      .attachments = {OutgoingAttachment{.path = "/nonexistent/nope.png"}}},
-                    block),
+                    await),
             std::invalid_argument);
 
     // Rejected before anything was stored, rather than leaving a message that can never be sent --
     // and not even a conversation, which is a stronger thing to be able to say than that it has no
     // messages in it.
-    CHECK_FALSE(c->conversation(ConversationId::dm(me), block).has_value());
+    CHECK_FALSE(c->conversation(ConversationId::dm(me), await).has_value());
 }
 
 TEST_CASE(
@@ -837,10 +837,10 @@ TEST_CASE(
             [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
                 reports.emplace_back(idx, sent, total, result);
             },
-            block);
+            await);
     sync(*c);
 
-    auto msg = c->message(id, block);
+    auto msg = c->message(id, await);
     REQUIRE(msg);
     CHECK(msg->body == "here you go");
     CHECK(msg->send_state == SendState::failed);
@@ -876,12 +876,12 @@ TEST_CASE(
             ConversationId::dm(me),
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
             [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
-            block);
+            await);
     sync(*c);
 
     // With no network the upload cannot start, so the one report is its failure -- which is the
     // point: an outcome is never a thing the throttle may drop.
-    CHECK(c->message(id, block)->send_state == SendState::failed);
+    CHECK(c->message(id, await)->send_state == SendState::failed);
     REQUIRE(results.size() == 1);
     REQUIRE(results.front().has_value());
     CHECK(*results.front() != 0);
@@ -904,9 +904,9 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
-            block);
+            await);
     sync(*c);
-    REQUIRE(c->message(id, block)->send_state == SendState::failed);
+    REQUIRE(c->message(id, await)->send_state == SendState::failed);
 
     // Retrying is allowed while the failure is one that might not recur, and reports itself as
     // started rather than as succeeded -- the outcome arrives through the message's state.
@@ -914,10 +914,10 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     CHECK(c->retry_send(
             id,
             [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
-            block));
+            await));
     sync(*c);
     REQUIRE(results.size() == 1);
-    CHECK(c->message(id, block)->send_state == SendState::failed);
+    CHECK(c->message(id, await)->send_state == SendState::failed);
 
     // With the file gone the retry can only ever fail the same way, so the message becomes
     // terminal rather than staying something an application would offer to try again.
@@ -927,14 +927,14 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     CHECK(c->retry_send(
             id,
             [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
-            block));
+            await));
     sync(*c);
     REQUIRE(results.size() == 1);
     CHECK(results.front() == ATTACHMENT_FILE_MISSING);
-    CHECK(c->message(id, block)->send_state == SendState::unsendable);
+    CHECK(c->message(id, await)->send_state == SendState::unsendable);
 
     // ... and being terminal, it is refused rather than attempted again.
-    CHECK_FALSE(c->retry_send(id, block));
+    CHECK_FALSE(c->retry_send(id, await));
 }
 
 TEST_CASE(
@@ -977,7 +977,7 @@ TEST_CASE(
     sync(*c);
 
     auto msg_id =
-            c->conversation(ConversationId::dm(peer.session_id), block)->messages(block)[0].id;
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
 
     auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_size", 7);
     std::filesystem::create_directories(dir);
@@ -1042,7 +1042,7 @@ TEST_CASE(
             42);
     sync(*c);
     auto msg_id =
-            c->conversation(ConversationId::dm(peer.session_id), block)->messages(block)[0].id;
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
 
     std::vector<std::optional<std::vector<std::byte>>> got(2);
     std::vector<std::vector<AttachmentProgress>> seen(2);
@@ -1131,7 +1131,7 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
             42);
     sync(*c);
     auto msg_id =
-            c->conversation(ConversationId::dm(peer.session_id), block)->messages(block)[0].id;
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
 
     // A display asks first, so the file is being accumulated.
     std::optional<std::vector<std::byte>> shown;
@@ -1196,7 +1196,7 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
     c->set_cache_dir(dir.path);
 
     auto convo = ConversationId::dm(peer.session_id);
-    c->open_dm(convo, block);
+    c->open_dm(convo, await);
 
     std::vector<std::byte> image(4000), doc(4000);
     random::fill(image);
@@ -1238,56 +1238,56 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
 
     SECTION("unasked means nothing is fetched") {
         // Never having been asked is not consent, and is what a client prompts on.
-        REQUIRE_FALSE(c->conversation(convo, block)->auto_download().has_value());
+        REQUIRE_FALSE(c->conversation(convo, await)->auto_download().has_value());
         arrive("h1", false);
         CHECK(net->downloads.empty());
         CHECK(progress.empty());
-        CHECK_FALSE(c->conversation(convo, block)->messages(block)[0].gallery);
+        CHECK_FALSE(c->conversation(convo, await)->messages(await)[0].gallery);
     }
 
     SECTION("images only fetches the image and leaves the document") {
-        c->conversation(convo, block)->set_auto_download(AutoDownload::image_attachments, block);
+        c->conversation(convo, await)->set_auto_download(AutoDownload::image_attachments, await);
         arrive("h2", true);
         REQUIRE(net->downloads.size() == 1);
         CHECK(net->downloads[0].download_url.find("img") != std::string::npos);
 
         // Not a gallery: one of its attachments is not an image, so it cannot be shown as one.
-        auto m = c->conversation(convo, block)->messages(block)[0];
+        auto m = c->conversation(convo, await)->messages(await)[0];
         CHECK_FALSE(m.gallery_viewable);
         CHECK_FALSE(m.gallery);
     }
 
     SECTION("all fetches both, and an all-image message opens as a gallery") {
-        c->conversation(convo, block)->set_auto_download(AutoDownload::all, block);
+        c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
         arrive("h3", true);
         CHECK(net->downloads.size() == 2);
 
         // Two attachments, one of them a pdf: still not gallery viewable even though both were
         // fetched.  What is downloaded and what can be displayed as a gallery are different
         // questions.
-        CHECK_FALSE(c->conversation(convo, block)->messages(block)[0].gallery);
+        CHECK_FALSE(c->conversation(convo, await)->messages(await)[0].gallery);
 
         arrive("h4", false);
-        auto m = c->conversation(convo, block)->messages(block)[0];
+        auto m = c->conversation(convo, await)->messages(await)[0];
         CHECK(m.gallery_viewable);
         CHECK(m.gallery);
     }
 
     SECTION("a size limit refuses what is too big, before fetching it") {
-        c->conversation(convo, block)->set_auto_download(AutoDownload::all, block);
-        c->set_auto_download_max_size(1000, block);
+        c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+        c->set_auto_download_max_size(1000, await);
         arrive("h5", false);
         CHECK(net->downloads.empty());
 
         // Raising it lets the next one through, so the limit is read per message rather than
         // remembered from startup.
-        c->set_auto_download_max_size(std::nullopt, block);
+        c->set_auto_download_max_size(std::nullopt, await);
         arrive("h6", false);
         CHECK(net->downloads.size() == 1);
     }
 
     SECTION("the fetch is reported, cached, and never told to the sender") {
-        c->conversation(convo, block)->set_auto_download(AutoDownload::all, block);
+        c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
         arrive("h7", false);
         REQUIRE(net->downloads.size() == 1);
         REQUIRE(serve_downloads(*net, image_ct) == 1);
@@ -1318,8 +1318,8 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     c->set_cache_dir(dir.path);
 
     auto convo = ConversationId::dm(peer.session_id);
-    c->open_dm(convo, block);
-    c->conversation(convo, block)->set_auto_download(AutoDownload::all, block);
+    c->open_dm(convo, await);
+    c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
 
     // `last_used` is a millisecond timestamp, and the whole of this test would otherwise run inside
     // one of them, leaving every row tied and the eviction order arbitrary.  Real uses are spread
@@ -1359,7 +1359,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
         sync(*c);
         REQUIRE(serve_downloads(*net, ct) == 1);
         sync(*c);
-        ids.push_back(c->conversation(convo, block)->messages(block)[0].id);
+        ids.push_back(c->conversation(convo, await)->messages(await)[0].id);
     }
 
     auto cached = [&](const std::string& url) {
@@ -1377,7 +1377,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     // Now a limit that only two of the three fit under.
     auto one =
             std::filesystem::file_size(cache::path_for(dir.path, cache::ATTACHMENT_DIR, urls[0]));
-    c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), block);
+    c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), await);
 
     // Nothing happens until something is added, which is the only moment the total can grow.
     CHECK(cached(urls[1]));
@@ -1437,8 +1437,8 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     auto* net = attach_mock_network(c->core);
     c->set_cache_dir(dir.path);
 
-    c->open_dm(convo, block);
-    c->conversation(convo, block)->set_auto_download(AutoDownload::all, block);
+    c->open_dm(convo, await);
+    c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
 
     std::vector<std::byte> data(2000);
     random::fill(data);
@@ -1575,7 +1575,7 @@ TEST_CASE("Client: the list preview describes a message's attachments", "[client
             [&](auto& data) { add(data, "image/png", "photo.png"); });
     sync(*c);
 
-    auto convos = c->conversations(block);
+    auto convos = c->conversations(await);
     REQUIRE(convos.size() == 4);
 
     auto preview_of = [&](const SenderKeys& who) {
@@ -1619,7 +1619,7 @@ TEST_CASE("Client: a text-only message previews no attachments", "[client][attac
     deliver(*c, peer, "just words", from_epoch_ms(1000), "h1");
     sync(*c);
 
-    auto convos = c->conversations(block);
+    auto convos = c->conversations(await);
     REQUIRE(convos.size() == 1);
     REQUIRE(convos[0].last_preview());
     // A message with no attachments does not come back from the aggregate query at all, so this is

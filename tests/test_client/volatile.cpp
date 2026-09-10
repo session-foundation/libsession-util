@@ -16,11 +16,11 @@ TEST_CASE("Client: reading a conversation publishes the watermark", "[client][vo
     auto newest = recently(2s);
     deliver(*c, them, "one", recently(3s), "h1");
     deliver(*c, them, "two", newest, "h2");
-    REQUIRE(c->conversation(id, block)->unread() == 2);
+    REQUIRE(c->conversation(id, await)->unread() == 2);
 
-    c->conversation(id, block)->mark_read(block);
+    c->conversation(id, await)->mark_read(await);
 
-    CHECK(c->conversation(id, block)->unread() == 0);
+    CHECK(c->conversation(id, await)->unread() == 0);
     auto entry = c->core.configs.convo_info_volatile().get_1to1(hex);
     REQUIRE(entry);
     CHECK(entry->last_read == newest.time_since_epoch().count());
@@ -36,7 +36,7 @@ TEST_CASE("Client: a watermark from another device applies", "[client][volatile]
     auto older = recently(30s);
     deliver(*c, them, "one", older, "h1");
     deliver(*c, them, "two", recently(10s), "h2");
-    REQUIRE(c->conversation(id, block)->unread() == 2);
+    REQUIRE(c->conversation(id, await)->unread() == 2);
 
     // Read up to the first message on another device.
     auto read = volatile_from_another_device(*c.client, [&](config::ConvoInfoVolatile& theirs) {
@@ -46,7 +46,7 @@ TEST_CASE("Client: a watermark from another device applies", "[client][volatile]
     });
     merge_volatile(*c.client, read);
 
-    CHECK(c->conversation(id, block)->unread() == 1);
+    CHECK(c->conversation(id, await)->unread() == 1);
 }
 
 TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client][volatile]") {
@@ -60,8 +60,8 @@ TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client]
     auto newest = recently(10s);
     deliver(*c, them, "one", older, "h1");
     deliver(*c, them, "two", newest, "h2");
-    c->conversation(id, block)->mark_read(block);
-    REQUIRE(c->conversation(id, block)->unread() == 0);
+    c->conversation(id, await)->mark_read(await);
+    REQUIRE(c->conversation(id, await)->unread() == 0);
 
     // The config permits a value to be written backwards on purpose, and a same-seqno conflict
     // resolves by a tie-break that knows nothing about which value is newer -- so an older one
@@ -73,7 +73,7 @@ TEST_CASE("Client: a stale watermark cannot unread what we have read", "[client]
     });
     merge_volatile(*c.client, stale);
 
-    CHECK(c->conversation(id, block)->unread() == 0);
+    CHECK(c->conversation(id, await)->unread() == 0);
 
     // ...and we do not publish the stale value back out, either.
     TestHelper::sync_convo_volatile(*c.client, id);
@@ -90,18 +90,18 @@ TEST_CASE("Client: marking unread syncs, and reading clears it", "[client][volat
     approve(*c, them.session_id);
 
     deliver(*c, them, "one", recently(5s), "h1");
-    c->conversation(id, block)->mark_read(block);
-    REQUIRE(c->conversation(id, block)->unread() == 0);
+    c->conversation(id, await)->mark_read(await);
+    REQUIRE(c->conversation(id, await)->unread() == 0);
 
-    c->conversation(id, block)->set_marked_unread(true, block);
+    c->conversation(id, await)->set_marked_unread(true, await);
 
     // Survives having read everything, which is the whole point of it.
-    CHECK(c->conversation(id, block)->marked_unread());
-    CHECK(c->conversation(id, block)->unread() == 0);
+    CHECK(c->conversation(id, await)->marked_unread());
+    CHECK(c->conversation(id, await)->unread() == 0);
     CHECK(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
 
-    c->conversation(id, block)->mark_read(block);
-    CHECK_FALSE(c->conversation(id, block)->marked_unread());
+    c->conversation(id, await)->mark_read(await);
+    CHECK_FALSE(c->conversation(id, await)->marked_unread());
     CHECK_FALSE(c->core.configs.convo_info_volatile().get_1to1(hex)->unread);
 }
 
@@ -120,6 +120,6 @@ TEST_CASE("Client: read state for a conversation we do not have is ignored", "[c
     });
     merge_volatile(*c.client, orphan);
 
-    CHECK_FALSE(c->conversation(id, block));
-    CHECK(c->conversations(block).empty());
+    CHECK_FALSE(c->conversation(id, await));
+    CHECK(c->conversations(await).empty());
 }

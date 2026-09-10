@@ -84,8 +84,8 @@ struct MessagePreview {
 /// that this object has not looked yet.
 ///
 /// Every operation comes in two forms: one taking a handler, which returns immediately and reports
-/// later, and one taking `block`, which blocks the calling thread and throws instead of reporting.
-/// See `block_t` for which to use where.
+/// later, and one taking `await`, which blocks the calling thread and throws instead of reporting.
+/// See `await_t` for which to use where.
 ///
 /// Cheap to copy and safe to hold, including on another thread — but it names a Client and must not
 /// outlive it.
@@ -208,11 +208,11 @@ class Conversation {
             std::optional<MessageCursor> before,
             bool include_deleted,
             failable_function<void(std::vector<Message>)> cb) const;
-    std::vector<Message> messages(block_t) const;
-    std::vector<Message> messages(int limit, block_t) const;
-    std::vector<Message> messages(int limit, std::optional<MessageCursor> before, block_t) const;
+    std::vector<Message> messages(await_t) const;
+    std::vector<Message> messages(int limit, await_t) const;
+    std::vector<Message> messages(int limit, std::optional<MessageCursor> before, await_t) const;
     std::vector<Message> messages(
-            int limit, std::optional<MessageCursor> before, bool include_deleted, block_t) const;
+            int limit, std::optional<MessageCursor> before, bool include_deleted, await_t) const;
 
     /// Removes every deleted message's leftover row from this conversation, and says how many went.
     ///
@@ -233,7 +233,7 @@ class Conversation {
     /// Messages we sent and deleted everywhere are not exposed to this: their swarm copy is already
     /// gone, so there is nothing left to return.
     void purge_deleted(failable_function<void(size_t removed)> cb);
-    size_t purge_deleted(block_t);
+    size_t purge_deleted(await_t);
 
     // -- Read state ---------------------------------------------------------------------------
 
@@ -246,13 +246,13 @@ class Conversation {
     /// is the thing that was being asked for.
     void mark_read(failable_function<void()> cb);
     void mark_read(std::optional<sys_ms> up_to, failable_function<void()> cb);
-    void mark_read(block_t);
-    void mark_read(std::optional<sys_ms> up_to, block_t);
+    void mark_read(await_t);
+    void mark_read(std::optional<sys_ms> up_to, await_t);
 
     /// Marks the conversation unread, or clears that — the deliberate "I want to come back to this"
     /// rather than a count of messages.  Synced, so it follows you between devices.
     void set_marked_unread(bool unread, failable_function<void()> cb);
-    void set_marked_unread(bool unread, block_t);
+    void set_marked_unread(bool unread, await_t);
 
     // -- Settings -----------------------------------------------------------------------------
 
@@ -262,7 +262,7 @@ class Conversation {
     /// conversation, because hiding removes a conversation from the list and unhiding returns it —
     /// so what changed is the list, not a row in it.
     void set_priority(int priority, failable_function<void()> cb);
-    void set_priority(int priority, block_t);
+    void set_priority(int priority, await_t);
 
     /// Sets when to notify, and until when to stay quiet.  Separate calls because they are separate
     /// decisions: muting until Monday does not change what you want notified after Monday, and a UI
@@ -270,16 +270,16 @@ class Conversation {
     ///
     /// A `mute_until` in the past, or the epoch, is not muted.
     void set_notifications(config::notify_mode mode, failable_function<void()> cb);
-    void set_notifications(config::notify_mode mode, block_t);
+    void set_notifications(config::notify_mode mode, await_t);
     void set_mute_until(std::chrono::sys_seconds until, failable_function<void()> cb);
-    void set_mute_until(std::chrono::sys_seconds until, block_t);
+    void set_mute_until(std::chrono::sys_seconds until, await_t);
 
     /// Sets the disappearing-message mode and timer together, because neither means anything
     /// alone: a timer with no mode does not expire, and a mode with no timer has nothing to count.
     /// `expiration_mode::none` clears the timer whatever is passed with it.
     void set_expiry(
             config::expiration_mode mode, std::chrono::seconds timer, failable_function<void()> cb);
-    void set_expiry(config::expiration_mode mode, std::chrono::seconds timer, block_t);
+    void set_expiry(config::expiration_mode mode, std::chrono::seconds timer, await_t);
 
     /// Sets what this conversation fetches without being asked.
     ///
@@ -291,7 +291,7 @@ class Conversation {
     /// prompts on first use should call it with whatever answer it was given — `none` included,
     /// since that is not the same as never having asked, and only the latter should prompt again.
     void set_auto_download(AutoDownload mode, failable_function<void()> cb);
-    void set_auto_download(AutoDownload mode, block_t);
+    void set_auto_download(AutoDownload mode, await_t);
 
     // -- Sending ------------------------------------------------------------------------------
 
@@ -355,8 +355,8 @@ class Conversation {
             upload_progress on_upload,
             failable_function<void(int64_t message_id)> cb);
     void send_message(OutgoingMessage msg, failable_function<void(int64_t message_id)> cb);
-    int64_t send_message(OutgoingMessage msg, upload_progress on_upload, block_t);
-    int64_t send_message(OutgoingMessage msg, block_t);
+    int64_t send_message(OutgoingMessage msg, upload_progress on_upload, await_t);
+    int64_t send_message(OutgoingMessage msg, await_t);
 
     // -- Destroying ---------------------------------------------------------------------------
     //
@@ -376,7 +376,7 @@ class Conversation {
     /// Deletes the messages, keeping the conversation itself and everything that describes it — the
     /// contact, the nickname, the pin.
     void clear_messages(failable_function<void()> cb);
-    void clear_messages(block_t);
+    void clear_messages(await_t);
 
     /// Removes the conversation from the list without forgetting who it is with: the contact entry
     /// stays, so a nickname and an approval survive, and a new message brings the conversation
@@ -387,8 +387,8 @@ class Conversation {
     /// history to come back with it.
     void delete_conversation(failable_function<void()> cb);
     void delete_conversation(bool keep_messages, failable_function<void()> cb);
-    void delete_conversation(block_t);
-    void delete_conversation(bool keep_messages, block_t);
+    void delete_conversation(await_t);
+    void delete_conversation(bool keep_messages, await_t);
 
   protected:
     /// Never null, and not owned: the Client this came from, which must outlive it.
@@ -456,7 +456,7 @@ class DM : public Conversation {
     /// Sets or clears the name we have given them, which is ours rather than theirs and follows us
     /// between devices.  An empty nickname removes it, so `display_name` falls back to `name`.
     void set_nickname(std::string_view nickname, failable_function<void()> cb);
-    void set_nickname(std::string_view nickname, block_t);
+    void set_nickname(std::string_view nickname, await_t);
 
     /// Blocks or unblocks the account.  Blocking is synced, so it takes effect on every device, and
     /// what they send is refused on arrival rather than hidden when drawing.
@@ -465,7 +465,7 @@ class DM : public Conversation {
     /// about a relationship and there is nowhere else to record it.  It does not approve them, and
     /// unblocking does not undo anything else the block implied.
     void set_blocked(bool blocked, failable_function<void()> cb);
-    void set_blocked(bool blocked, block_t);
+    void set_blocked(bool blocked, await_t);
 
     /// Deletes the contact along with the conversation and its history, everywhere.
     ///
@@ -482,7 +482,7 @@ class DM : public Conversation {
     ///
     /// @throws std::invalid_argument for our own account, which is not a contact of ours.
     void delete_contact(failable_function<void()> cb);
-    void delete_contact(block_t);
+    void delete_contact(await_t);
 };
 
 /// A closed group.  Nothing of its own yet: what distinguishes a group — its membership, who
