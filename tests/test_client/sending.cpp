@@ -261,6 +261,109 @@ TEST_CASE(
     CHECK(preview_body(r.updated[0]) == "m4");
 }
 
+TEST_CASE("Client: an update says where its row was and now belongs", "[client][signals]") {
+    SenderKeys a, b;
+    Recorder r;
+    TempClient c{r.handlers()};
+    approve(*c, a.session_id);
+    approve(*c, b.session_id);
+    auto ida = ConversationId::dm(a.session_id);
+    auto idb = ConversationId::dm(b.session_id);
+
+    deliver(*c, a, "first", from_epoch_ms(1000), "h1");
+    sync(*c);
+
+    // The add already says where it goes: nothing to remove, into the conversation list, and
+    // nothing above it -- which an unset anchor is what says.
+    REQUIRE(r.add_placements.size() == 1);
+    CHECK(r.add_placements[0].from == ConversationList::none);
+    CHECK(r.add_placements[0].to == ConversationList::conversations);
+    CHECK_FALSE(r.add_placements[0].after.has_value());
+
+    // The update that follows it agrees, and now knows where the add put it.
+    REQUIRE(r.placements.size() == 1);
+    CHECK(r.placements[0].from == ConversationList::conversations);
+    CHECK(r.placements[0].to == ConversationList::conversations);
+
+    // Pinning a puts it above everything unpinned, so the next row to move sits after it rather
+    // than at the top -- which is the case an anchor exists to express and a bare "moved to front"
+    // could not.
+    c->conversation(ida, wait)->set_priority(3, wait);
+    r.placements.clear();
+
+    deliver(*c, b, "second", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    REQUIRE(r.placements.size() == 1);
+    CHECK(r.placements[0].from == ConversationList::conversations);
+    CHECK(r.placements[0].to == ConversationList::conversations);
+    REQUIRE(r.placements[0].after.has_value());
+    CHECK(*r.placements[0].after == ida);
+    CHECK(r.updated.back().id() == idb);
+}
+
+TEST_CASE("Client: a hidden row is given no position", "[client][signals]") {
+    SenderKeys sender;
+    Recorder r;
+    TempClient c{r.handlers()};
+    approve(*c, sender.session_id);
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+    sync(*c);
+    c->conversation(id, wait)->set_priority(-1, wait);
+    r.placements.clear();
+
+    // Hidden is in neither list, so there is no gap to name.  Unset here means "do not place
+    // this", not "place it first" -- which is why the two are different states.
+    deliver(*c, sender, "pong", from_epoch_ms(2000), "h2");
+    sync(*c);
+
+    // Taken out of where it was and not put back: `to == none` is what hiding looks like, and
+    // `from` still names the list it has to come out of.
+    REQUIRE(r.placements.size() == 1);
+    CHECK(r.placements[0].from == ConversationList::conversations);
+    CHECK(r.placements[0].to == ConversationList::none);
+}
+
+TEST_CASE("Client: a request is placed in the request list", "[client][signals]") {
+    SenderKeys stranger;
+    Recorder r;
+    TempClient c{r.handlers()};
+
+    // Nobody approved: a stranger's first message is a request, so the position names that list.
+    deliver(*c, stranger, "hello", from_epoch_ms(1000), "h1");
+    sync(*c);
+
+    // The add places it in the request list; nothing held it before.
+    REQUIRE(r.add_placements.size() == 1);
+    CHECK(r.add_placements[0].from == ConversationList::none);
+    CHECK(r.add_placements[0].to == ConversationList::requests);
+    CHECK_FALSE(r.add_placements[0].after.has_value());
+}
+
+TEST_CASE("Client: a removal says which list to take it out of", "[client][signals]") {
+    SenderKeys sender;
+    Recorder r;
+    TempClient c{r.handlers()};
+    approve(*c, sender.session_id);
+    auto id = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+    sync(*c);
+    r.order.clear();
+
+    // Deleting the contact removes the conversation row outright.  The list it was in has to come
+    // from what the subscriber was last told, not from the database -- by the time this is
+    // reported the row is already gone, so there is nothing left to look it up from.
+    c->dm(id, wait)->delete_contact(wait);
+
+    REQUIRE(r.removed.size() == 1);
+    CHECK(r.removed[0] == id);
+    REQUIRE(r.removed_from.size() == 1);
+    CHECK(r.removed_from[0] == ConversationList::conversations);
+}
+
 TEST_CASE("Client: state is committed before the handler fires", "[client][signals]") {
     SenderKeys sender;
     std::optional<std::string> body_seen_from_handler;
