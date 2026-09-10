@@ -76,6 +76,14 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             const std::vector<service_node>& in_use_nodes,
             std::function<void()> on_refresh_complete = nullptr);
 
+    // Re-resolves `swarm_pubkey` after a node we believed was in its swarm has told us the account
+    // isn't there.  Where `refresh_if_needed` decides on the cache's age, this decides on that
+    // rejection, so a mapping we have direct proof is wrong can be replaced long before
+    // `cache_expiration`.  `on_complete` runs once the swarm can be resolved again.
+    virtual void invalidate_swarm(
+            session::network::x25519_pubkey swarm_pubkey,
+            std::function<void()> on_complete = nullptr);
+
     virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
@@ -109,6 +117,8 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     // Refresh logic
     std::chrono::system_clock::time_point _last_snode_cache_update;
+    std::chrono::system_clock::time_point _last_evidence_refresh;
+    std::chrono::seconds _evidence_refresh_backoff{0};
     std::optional<std::string> _current_snode_cache_refresh_id;
     int _snode_cache_refresh_failure_count = 0;
     std::vector<service_node> _refresh_candidate_nodes;
