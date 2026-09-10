@@ -73,9 +73,11 @@ class Network {
     /// connection we already hold -- which is how a swarm subscription delivers messages.  `node`
     /// names the swarm member; `endpoint` and `body` are the pushed request's, unparsed.
     ///
-    /// Only reachable with a routing mode that gives the storage server a connection to us: it has
-    /// nothing to push down when our requests arrive through an onion path, where the connection
-    /// it can see belongs to the last relay rather than to us.
+    /// Only reachable with a routing mode that gives the storage server a connection to us, which
+    /// means `session_router` or `direct`.  Under `onion_requests` the server has nothing to push
+    /// down: the connection it can see belongs to the last relay rather than to us, so it would
+    /// key the subscription to that relay.  This is not a property of onion routing in general --
+    /// `session_router` is onion-routed too, and is the mode this exists for.
     std::function<
             void(const ed25519_pubkey& node,
                  std::string_view endpoint,
