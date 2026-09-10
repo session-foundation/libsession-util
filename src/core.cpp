@@ -96,6 +96,34 @@ quic::Loop& Core::loop() {
     return _loop;
 }
 
+Core::~Core() {
+    // Tearing a Network down fails every request its transport is still holding, and failing them
+    // fires the hooks installed in set_network -- which marshal onto our loop and reach members
+    // that are already gone.  Members are destroyed in reverse declaration order and every ticker
+    // is declared after `_network`, so by the time ~Network runs they have been released while
+    // `_loop`, declared first, is still alive to run the job: `stop()` on a freed Ticker, at every
+    // exit that had a subscription.
+    //
+    // So detach before anything is torn down.  ~Network pays its own router and transport the
+    // same courtesy for the same reason, and doing it here rather than by shuffling the member
+    // declarations leaves the requirement stated instead of resting on where a field sits.
+    if (_network) {
+        _network->on_server_push = nullptr;
+        _network->on_connection_established = nullptr;
+        _network->on_connection_lost = nullptr;
+    }
+
+    // Stopped while they are certainly still alive.  Releasing them is left to the members
+    // themselves, which happens before `_loop` goes and so can still reach it.
+    for (auto* ticker : {&_poll_ticker, &_sub_ticker, &_probe_ticker})
+        if (*ticker)
+            (*ticker)->stop();
+
+    // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
+    // destroyed by whoever owns it.
+    _network.reset();
+}
+
 void Core::set_network(std::unique_ptr<network::Network> network) {
     // Polling signs its retrieve requests with the account key, so attaching a network before the
     // account has an identity would fail inside a background poll rather than here.  Refuse at the

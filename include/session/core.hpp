@@ -579,6 +579,9 @@ class Core {
         init();
     }
 
+    /// Detaches from the Network before letting anything be destroyed; see the definition.
+    ~Core();
+
     /// Set an optional network interface that can be used to make network requests to swarm
     /// members.  Ownership is taken: nothing else may hold on to the Network.
     ///
