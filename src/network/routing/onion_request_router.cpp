@@ -534,21 +534,22 @@ void OnionRequestRouter::clear_cache() {
     });
 }
 
-std::optional<PathInfo> OnionRequestRouter::get_path_to(const service_node& /*node*/) {
-    return _jq.call_get([this]() -> std::optional<PathInfo> {
-        // The destination is not part of the answer here, and is ignored: an onion path is built
-        // before any destination is chosen and carries requests to all of them, so what a caller
-        // can be told is which path a swarm request would go down were one sent now.  Which pool
-        // that comes from is ours to know, not theirs to be handed and asked to filter.
-        auto it = _paths.find(PathCategory::standard);
-        if (it == _paths.end() || it->second.empty())
+std::optional<PathInfo> OnionRequestRouter::get_path_to(const service_node& node) {
+    return _jq.call_get([this, &node]() -> std::optional<PathInfo> {
+        // An onion path is built before any destination is chosen and carries requests to all of
+        // them, so the answerable question is which path a swarm request to this node would go
+        // down were one sent now.  Asked of the selection the sending path itself uses, rather
+        // than reimplemented: the choice turns on strike counts, how busy each path is, and
+        // skipping any path that contains the destination, and a second copy of that would drift
+        // into reporting a path requests do not take.
+        auto* path = _find_valid_path(
+                &node, RequestCategory::standard_small, std::nullopt, "path query");
+        if (!path)
             return std::nullopt;
 
-        const auto& path = it->second.front();
-
         PathInfo info;
-        info.hops.reserve(path.nodes.size());
-        for (const auto& n : path.nodes)
+        info.hops.reserve(path->nodes.size());
+        for (const auto& n : path->nodes)
             info.hops.push_back({n.remote_pubkey, n.ip});
 
         return info;
@@ -1495,6 +1496,18 @@ void OnionRequestRouter::_on_edge_connectivity_response(
 }
 
 OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
+    return _find_valid_path(
+            std::get_if<service_node>(&request.destination),
+            request.category,
+            request.desired_path_index,
+            request.request_id);
+}
+
+OnionPath* OnionRequestRouter::_find_valid_path(
+        const service_node* target_node,
+        RequestCategory category,
+        std::optional<uint8_t> desired_path_index,
+        std::string_view request_id) {
     // If we are in `single_path_mode` then just return the first path we have (don't care about
     // category as there should only be one path)
     if (_config.single_path_mode) {
@@ -1504,7 +1517,7 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
         return nullptr;
     }
 
-    auto it = _paths.find(to_path_category(request.category));
+    auto it = _paths.find(to_path_category(category));
     if (it == _paths.end() || it->second.empty())
         return nullptr;
 
@@ -1512,15 +1525,13 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
     std::vector<OnionPath*> suitable_paths;
     suitable_paths.reserve(candidate_paths.size());
 
-    auto target_node = std::get_if<service_node>(&request.destination);
-
     // We want to allow explicit path selection for client-side automated tests so if a
     // `desired_path_index` has been specified then use it
-    if (request.desired_path_index) {
-        if (candidate_paths.size() < *request.desired_path_index)
+    if (desired_path_index) {
+        if (candidate_paths.size() < *desired_path_index)
             return nullptr;
 
-        return &candidate_paths[*request.desired_path_index];
+        return &candidate_paths[*desired_path_index];
     }
 
     for (OnionPath& path : candidate_paths) {
@@ -1544,7 +1555,7 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
                         cat,
                         "[Request {}]: Path destination conflicts with the only available path, "
                         "but single_path_mode is enabled, proceeding.",
-                        request.request_id);
+                        request_id);
             else if (conflict)
                 continue;
         }
@@ -1566,7 +1577,7 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
             });
 
     OnionPath* best_path = suitable_paths.front();
-    const auto min_paths_for_type = _config.min_path_counts[to_path_category(request.category)];
+    const auto min_paths_for_type = _config.min_path_counts[to_path_category(category)];
 
     // Return the path with the fewest active requests if we had one with no requests, or
     // already have the minimum number of paths for this type
