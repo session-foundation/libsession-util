@@ -357,6 +357,42 @@ class Core {
             std::string body,
             int round);
 
+    // Swarm push subscription.  All of this is touched only on the loop.
+    //
+    // Having subscribed with a swarm member, that member pushes each new message to us instead of
+    // our asking for them, and the poll ticker stops.  The subscription belongs to the connection,
+    // so it does not survive one being rebuilt and there is no notice from the far end when it
+    // lapses -- it simply stops pushing.  Hence: renew on a timer well inside the server's expiry,
+    // and treat losing the connection as having lost the subscription.
+    //
+    // `_sub_node` is not a preference to be restored.  It is only the member we happen to be
+    // talking to, held for as long as its connection lasts because there is no reason to move; a
+    // fresh one is chosen the ordinary way -- a new `get_swarm`, whatever it hands back first --
+    // once this one is gone.
+    std::optional<network::service_node> _sub_node;
+    bool _subscribed = false;
+    std::shared_ptr<oxen::quic::Ticker> _sub_ticker;
+
+    // Subscribes to `node` if a subscription is possible and we do not already have one.  Called
+    // when a poll of `node` drains, which is what makes it the node we subscribe with: it has an
+    // established connection and its cursors are current.
+    void _maybe_subscribe(const network::service_node& node);
+    void _send_subscribe(network::Network* net, network::service_node node);
+
+    // Renews the subscription and re-polls the subscribed node.  The poll is not for delivery --
+    // pushes do that -- but for the swarm correction a retrieve gets and pushes do not.
+    void _subscription_tick();
+
+    // Called when a poll of `node` fails, which for the subscribed node is the signal that it has
+    // stopped being usable.
+    void _note_poll_failed(const network::service_node& node);
+
+    // Gives up the subscription and returns to polling.
+    void _drop_subscription(std::string_view why);
+
+    // Feeds one pushed message in as though it had been retrieved.
+    void _handle_server_push(std::string_view endpoint, std::span<const std::byte> body);
+
     // Decrypts and dispatches one-to-one messages from Namespace::Default.
     void _handle_direct_messages(std::span<const SwarmMessage> messages);
 

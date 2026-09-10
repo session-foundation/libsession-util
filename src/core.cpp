@@ -4,6 +4,7 @@
 #include <fmt/ranges.h>
 #include <mlkem_native.h>
 #include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
@@ -112,6 +113,45 @@ void Core::set_network(std::unique_ptr<network::Network> network) {
     // member's deleter (which is just `delete`) is what keeps Network an incomplete type in
     // core.hpp -- including session_network.hpp there costs ~6x the compile time per file.
     _network.reset(network.release());
+
+    if (_network) {
+        // These fire on the network's loop; each hops onto ours before touching subscription
+        // state.  Safe to capture `this` bare: the Network is declared after `_loop` so it is
+        // destroyed first, and ~Network does not return until no callback of its is still in
+        // flight.
+        // Deliberately handled where it arrives rather than hopped onto our loop, unlike the two
+        // below.  Poll responses call receive_messages() from the network's loop, so staying on it
+        // keeps every delivery serialised on one thread; marshalling only pushes would let one run
+        // against a poll.  It also avoids copying the body, which is only valid for this call.
+        //
+        // Which node sent it therefore cannot be checked -- `_sub_node` is our loop's -- and does
+        // not need to be: everything here is authenticated downstream, replays dedup on the swarm
+        // hash, and configs merge by seqno, so the worst a connected node achieves by pushing us
+        // something is making us do work we would have done anyway.
+        _network->on_server_push = [this](const network::ed25519_pubkey& /*node*/,
+                                          std::string_view endpoint,
+                                          std::span<const std::byte> body) {
+            _handle_server_push(endpoint, body);
+        };
+
+        _network->on_connection_lost = [this](const network::ed25519_pubkey& node) {
+            _loop.call([this, node] {
+                if (_sub_node && _sub_node->remote_pubkey == node)
+                    _drop_subscription("connection lost");
+            });
+        };
+
+        _network->on_connection_established = [this](const network::ed25519_pubkey& node) {
+            _loop.call([this, node] {
+                // A rebuilt connection carries no subscription: the far end keyed the old one to
+                // the connection that just went away.  Losing it should already have dropped us,
+                // so this is the case where it somehow did not.
+                if (_subscribed && _sub_node && _sub_node->remote_pubkey == node)
+                    _drop_subscription("connection was re-established");
+            });
+        };
+    }
+
     _update_polling();
 }
 
@@ -156,6 +196,31 @@ static constexpr std::array POLL_NAMESPACES = {
 // Ceiling on continuation rounds within one poll.  A well-behaved node exhausts a namespace in far
 // fewer; this exists so that a node whose `more` never goes false cannot poll indefinitely.
 static constexpr int POLL_MAX_ROUNDS = 20;
+
+// The namespaces we ask a storage server to push to us: the ones we poll, in ascending order,
+// which is what the server requires (it rejects an unordered `n=` list).  Derived from
+// POLL_NAMESPACES rather than written out so that adding a namespace to the poll cannot leave the
+// subscription silently not covering it.
+static constexpr auto SUBSCRIBE_NAMESPACES = [] {
+    std::array<int16_t, POLL_NAMESPACES.size()> ns{};
+    for (size_t i = 0; i < POLL_NAMESPACES.size(); i++)
+        ns[i] = static_cast<int16_t>(POLL_NAMESPACES[i]);
+    std::ranges::sort(ns);
+    return ns;
+}();
+
+// How often a live subscription is renewed, and its node re-polled.
+//
+// Far shorter than keeping the subscription alive needs: the storage server expires one 65 minutes
+// after the last renewal, so any interval under an hour would do for that alone.  It is this short
+// because renewal is not the only thing the timer is for.  A subscribed client sends nothing else,
+// so this is also the only thing that can notice the node has stopped holding our swarm, or that
+// the connection is unusable in a way QUIC has not reported yet.  Both requests are a few hundred
+// bytes.
+static constexpr auto SUBSCRIPTION_RENEW_INTERVAL = 30s;
+
+// What the storage server pushes a subscribed client, as the endpoint of a request of its own.
+static constexpr auto NOTIFY_ENDPOINT = "notify"sv;
 
 void Core::_poll() {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
@@ -271,6 +336,11 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
                             timeout ? "timed out"
                             : body  ? *body
                                     : "request failed");
+
+                    // A subscribed client polls only this node, only on the renew tick, so a
+                    // failure here is the one signal that it has stopped being usable -- including
+                    // a 421 whose retry also failed, which is how a swarm change reaches us.
+                    _note_poll_failed(node);
                     return;
                 }
 
@@ -432,8 +502,13 @@ DELETE FROM swarm_hashes
         return;
     }
 
-    if (unfinished.empty())
+    // Nothing reports more, so this node's namespaces are drained and its cursors are current --
+    // which is exactly the state a subscription has to start from, or the gap between the last
+    // retrieve and the subscription taking effect would be lost.
+    if (unfinished.empty()) {
+        _maybe_subscribe(node);
         return;
+    }
 
     if (round + 1 >= POLL_MAX_ROUNDS) {
         log::warning(
@@ -449,6 +524,212 @@ DELETE FROM swarm_hashes
     // continuation has to go back to the same one.
     if (auto* net = _network.get())
         _send_poll(net, std::move(node), std::move(unfinished), round + 1);
+}
+
+void Core::_maybe_subscribe(const network::service_node& node) {
+    // Hopped onto the loop because the poll response that calls this runs on the *network's*
+    // loop, and everything below -- the tickers especially -- is Core's loop state.
+    _loop.call([this, node] {
+        // Already have one, or are waiting on one: a subscription is with a single node, and
+        // there is no reason to move while it works.
+        if (_sub_node)
+            return;
+
+        auto* net = _network.get();
+        if (!net)
+            return;
+
+        if (!net->supports_server_push()) {
+            log::debug(cat, "Not subscribing: this routing mode cannot receive pushes");
+            return;
+        }
+
+        _sub_node = node;
+        _send_subscribe(net, node);
+    });
+}
+
+void Core::_send_subscribe(network::Network* net, network::service_node node) {
+    auto now_s = epoch_ms(clock_now_ms()) / 1000;
+
+    // Mirrors the storage server's sig_msg in handle_monitor_message_single: the literal
+    // "MONITOR", the 33-byte account pubkey in hex, the timestamp in *seconds*, the want-data
+    // flag as 0/1, and the namespaces comma-joined in the same order they are sent.
+    auto to_sign = "MONITOR{}{}{}{}"_format(
+            globals.session_id_hex(), now_s, 1, fmt::join(SUBSCRIBE_NAMESPACES, ","));
+
+    b64 sig;
+    {
+        auto seed = globals.account_seed();
+        ed25519::sign(sig, seed.ed25519_secret(), to_span(to_sign));
+    }
+
+    // bt dict keys have to be appended in sorted order: P < d < n < s < t.
+    oxenc::bt_dict_producer d;
+    d.append("P", to_string_view(globals.pubkey_ed25519().view()));
+    // Ask for the message body, not just its metadata.  These are the same bytes a retrieve would
+    // have returned, so carrying them costs nothing over fetching them and saves the round trip:
+    // a notification is then self-sufficient.
+    d.append("d", 1);
+    {
+        auto ns_list = d.append_list("n");
+        for (auto ns : SUBSCRIBE_NAMESPACES)
+            ns_list.append(ns);
+    }
+    d.append("s", to_string_view(sig));
+    d.append("t", now_s);
+
+    log::debug(cat, "Subscribing to {} for {}", node.remote_pubkey.hex(), globals.session_id_hex());
+
+    net->send_request(
+            swarm_request(node, globals.pubkey_x25519(), "monitor", to_vector(std::move(d).str())),
+            [this, node](
+                    bool success,
+                    bool timeout,
+                    int16_t /*status_code*/,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) {
+                _loop.call([this,
+                            node,
+                            success,
+                            timeout,
+                            body = std::move(body)] {
+                    // We gave this subscription up while the request was in flight.
+                    if (!_sub_node || _sub_node->remote_pubkey != node.remote_pubkey)
+                        return;
+
+                    if (!success || !body)
+                        return _drop_subscription(
+                                timeout ? "subscribe timed out" : "subscribe request failed");
+
+                    // The reply is bt, not the JSON every other storage server endpoint answers
+                    // with: `monitor` is handled outside the RPC dispatch and replies with what
+                    // handle_monitor built.
+                    try {
+                        oxenc::bt_dict_consumer d{*body};
+
+                        if (d.skip_until("errcode")) {
+                            auto code = d.consume_integer<int>();
+                            std::string err;
+                            if (d.skip_until("error"))
+                                err = d.consume_string();
+                            return _drop_subscription(
+                                    "subscribe rejected (code {}): {}"_format(code, err));
+                        }
+
+                        if (!d.skip_until("success") || d.consume_integer<int>() != 1)
+                            return _drop_subscription("subscribe reply did not report success");
+                    } catch (const std::exception& e) {
+                        return _drop_subscription(
+                                "could not parse subscribe reply: {}"_format(e.what()));
+                    }
+
+                    if (!_subscribed) {
+                        _subscribed = true;
+
+                        // Stop polling: from here the node pushes what arrives, and the only
+                        // requests we make are the renew tick's.
+                        if (_poll_ticker) {
+                            _poll_ticker->stop();
+                            _poll_ticker.reset();
+                        }
+                        _sub_ticker = _loop.call_every(
+                                SUBSCRIPTION_RENEW_INTERVAL, [this] { _subscription_tick(); });
+
+                        log::info(
+                                cat,
+                                "Subscribed to {}; polling stopped",
+                                node.remote_pubkey.hex());
+                    }
+                });
+            });
+}
+
+void Core::_subscription_tick() {
+    if (!_sub_node)
+        return;
+
+    auto* net = _network.get();
+    if (!net)
+        return _drop_subscription("network detached");
+
+    // The poll is not how messages arrive any more -- pushes are -- but a retrieve is the only
+    // request that learns this node has stopped holding our swarm, since a subscribe succeeds
+    // whatever swarm the node is in.
+    _send_poll(net, *_sub_node, {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
+    _send_subscribe(net, *_sub_node);
+}
+
+void Core::_note_poll_failed(const network::service_node& node) {
+    _loop.call([this, node] {
+        if (_sub_node && _sub_node->remote_pubkey == node.remote_pubkey)
+            _drop_subscription("poll of the subscribed node failed");
+    });
+}
+
+void Core::_drop_subscription(std::string_view why) {
+    if (!_sub_node)
+        return;
+
+    log::info(cat, "Dropping subscription with {}: {}", _sub_node->remote_pubkey.hex(), why);
+
+    _sub_node.reset();
+    _subscribed = false;
+
+    if (_sub_ticker) {
+        _sub_ticker->stop();
+        _sub_ticker.reset();
+    }
+
+    // Back to polling, which is also what picks the next node: the swarm member a fresh
+    // `get_swarm` happens to hand back first.
+    _update_polling();
+}
+
+void Core::_handle_server_push(std::string_view endpoint, std::span<const std::byte> body) {
+    if (endpoint != NOTIFY_ENDPOINT) {
+        log::debug(cat, "Ignoring pushed '{}': not a notification", endpoint);
+        return;
+    }
+
+    std::string hash;
+    int16_t ns_val;
+    int64_t timestamp, expiry;
+    std::string_view data;
+
+    // Keys in the order the server writes them, which is also sorted: @ h n t z ~.  `@` (the
+    // account the message is for) is skipped: we subscribed for one account only.
+    try {
+        oxenc::bt_dict_consumer d{to_string_view(body)};
+
+        hash = d.require<std::string>("h");
+        ns_val = d.require<int16_t>("n");
+        timestamp = d.require<int64_t>("t");
+        expiry = d.require<int64_t>("z");
+
+        if (!d.skip_until("~")) {
+            // We subscribe with d=1, so a notification without a body is the server disagreeing
+            // with us about what we asked for rather than something to go and fetch.
+            log::warning(cat, "Pushed notification for {} carried no message data", hash);
+            return;
+        }
+        data = d.consume_string_view();
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not parse pushed notification: {}", e.what());
+        return;
+    }
+
+    log::debug(cat, "Pushed message {} in namespace {}", hash, ns_val);
+
+    // No cursor is written for a pushed message.  The retrieve cursor is per (namespace, node) and
+    // means "the newest hash that node handed us"; a push did not come from a retrieve, and
+    // recording it would move the cursor past messages an interrupted retrieve had not yet
+    // reached.  Re-fetching a pushed message after a reconnect is harmless -- delivery is
+    // at-least-once and Client dedups on the hash -- whereas skipping one is not.
+    SwarmMessage msg{
+            to_span(data), std::move(hash), from_epoch_ms(timestamp), from_epoch_ms(expiry)};
+
+    receive_messages({&msg, 1}, static_cast<config::Namespace>(ns_val), true);
 }
 
 PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) {
