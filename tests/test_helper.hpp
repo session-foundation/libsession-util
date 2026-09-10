@@ -373,14 +373,18 @@ class TestHelper {
     ///
     /// A template so that this header need not know the client types; it is only ever instantiated
     /// where they are complete.
+    ///
+    /// Both hop onto the loop themselves rather than leaving it to the caller: what they reach is
+    /// a `_`-form on Client, which is what Client's own methods call from inside `_async`, and it
+    /// touches the configs.
     template <typename Client, typename Id>
     static void sync_contact(Client& c, const Id& id) {
-        c._sync_contact(id);
+        on_loop(c.core, [&] { c._sync_contact(id); });
     }
 
     template <typename Client, typename Id>
     static void sync_convo_volatile(Client& c, const Id& id) {
-        c._sync_convo_volatile(id);
+        on_loop(c.core, [&] { c._sync_convo_volatile(id); });
     }
 
     /// The push debounce, driven by hand.  A test that waited out real intervals would be both slow
