@@ -782,6 +782,13 @@ Request Network::_preprocess_request(Request request) {
 }
 
 void Network::_update_network_state(const std::string& body) {
+    // Not every storage server endpoint answers in JSON: `monitor` is handled outside the RPC
+    // dispatch and replies with bt, which carries no clock or fork versions to read anyway.
+    // Recognised rather than parsed and complained about, since a subscription renews on a timer
+    // and would otherwise log a warning every time.
+    if (!body.empty() && (body.front() == 'd' || body.front() == 'l'))
+        return;
+
     try {
         auto json = nlohmann::json::parse(body);
         const nlohmann::json* target_json = &json;
