@@ -213,6 +213,15 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
 
     OnionPath* _find_valid_path(const Request& request);
 
+    // The path a request with these properties would go down, without needing a request to ask.
+    // `target_node` is not merely informational: a path containing the destination is skipped, so
+    // the answer genuinely depends on where the request is going.
+    OnionPath* _find_valid_path(
+            const service_node* target_node,
+            RequestCategory category,
+            std::optional<uint8_t> desired_path_index,
+            std::string_view request_id);
+
     void _send_on_path(OnionPath& path, Request request, network_response_callback_t callback);
     void _handle_transport_response(
             std::string path_id,
