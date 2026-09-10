@@ -326,9 +326,9 @@ class Core {
     // migrations, and then calls init() on each sub-component.
     void init();
 
-    // Polling-related members and methods
+    // Polling-related members and methods.  The ticker itself is declared at the bottom of the
+    // class, with the rest of what has to be torn down before the components it reaches.
     std::chrono::milliseconds _poll_interval = 20s;
-    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
     void _update_polling();
     void _poll();
 
@@ -694,10 +694,19 @@ class Core {
     // whatever is still outstanding is *cancelled* when Core goes away instead of running against
     // components that are already destroyed -- the same reason Client keeps its own.
     //
-    // Declared last so it is destroyed first, before the components its jobs reach.  It has to be
-    // destroyed while `_loop` is still alive, which it is: `_loop` is declared first and so is
-    // destroyed last.
+    // Declared near the bottom so it is destroyed early, before the components its jobs reach.  It
+    // has to be destroyed while `_loop` is still alive, which it is: `_loop` is declared first and
+    // so is destroyed last.
     quic::JobQueue _jq{_loop};
+
+    // Last of all, so it is the *first* thing destroyed: a ticker still running is a poll still
+    // arriving, and a poll reaches every component.  Stopping it before `_jq` rather than after
+    // also means no poll can try to queue its response onto a queue that has already stopped,
+    // which throws.
+    //
+    // (It lives here rather than beside `_poll_interval` for that reason alone; everything that
+    // uses it is up there with the rest of the polling machinery.)
+    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
 };
 
 }  // namespace session::core
