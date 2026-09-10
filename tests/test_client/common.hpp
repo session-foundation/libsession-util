@@ -173,25 +173,32 @@ struct Recorder {
     std::vector<std::string> order;
     std::vector<AnyConversation> added, updated;
     std::vector<ConversationId> removed;
+    std::vector<ConversationList> removed_from;
     std::vector<std::vector<AnyConversation>> replaced, requests_replaced;
     std::vector<std::pair<ConversationId, Message>> msg_added, msg_updated;
+    /// Where each event said its row was and now belongs, kept apart so a test can say which
+    /// callback it means.
+    std::vector<ListPlacement> add_placements, placements;
 
     callbacks handlers() {
         return {
                 .conversation_added =
-                        [this](AnyConversation&& c) {
+                        [this](AnyConversation&& c, ListPlacement&& p) {
                             order.push_back("added");
                             added.push_back(std::move(c));
+                            add_placements.push_back(std::move(p));
                         },
                 .conversation_updated =
-                        [this](AnyConversation&& c) {
+                        [this](AnyConversation&& c, ListPlacement&& p) {
                             order.push_back("updated");
                             updated.push_back(std::move(c));
+                            placements.push_back(std::move(p));
                         },
                 .conversation_removed =
-                        [this](const ConversationId& id) {
+                        [this](ConversationId&& id, ConversationList from) {
                             order.push_back("removed");
-                            removed.push_back(id);
+                            removed.push_back(std::move(id));
+                            removed_from.push_back(from);
                         },
                 .conversation_list_replaced =
                         [this](std::vector<AnyConversation>&& l) {

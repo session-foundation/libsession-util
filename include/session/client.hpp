@@ -1204,7 +1204,11 @@ class Client {
 
     void _emit_conversation_added(const ConversationId& id);
     void _emit_conversation_removed(const ConversationId& id);
-    void _emit_lists_replaced();
+    // Reports both lists as wholly changed -- a row added, removed, or moved to a new position --
+    // through whichever handlers the subscriber registered.  A replacement carries the order, so
+    // this cannot send one without also considering the order event, or a subscriber holding only
+    // that handler hears nothing.
+    void _report_lists_replaced(bool convos, bool requests);
     void _emit_history_replaced(const ConversationId& id);
     // Reports a message, and then reports every message that replies to it.
     //
@@ -1231,6 +1235,26 @@ class Client {
     bool _flush_scheduled = false;
     void _touch(const ConversationId& id);
     void _flush_pending();
+    // Reports one list, if a row in it changed and the subscriber asked for it.  The rows are the
+    // expensive part, so nothing is read for a handler that is not there.
+    // Which list each conversation was last *reported* in.  The subscriber's belief rather than
+    // the database's state, which is the point: it is what the subscriber has to take the row out
+    // of before putting it where it now belongs.
+    //
+    // Keyed by ConversationId and not by row id, because a removal is reported *after* the row is
+    // deleted -- `_delete_contact` commits the DELETE first -- so there is nothing left to look a
+    // row id up from, and an entry keyed that way could never be erased.
+    std::unordered_map<ConversationId, ConversationList> _placed;
+    // Where a conversation was and where it belongs now, and records the latter.
+    ListPlacement _place(const AnyConversation& convo);
+    void _report_list(
+            bool changed,
+            ConversationList list_kind,
+            std::vector<AnyConversation> (Client::*rows)(),
+            std::function<void(std::vector<AnyConversation>&&)> callbacks::* replaced);
+    // Reports both lists, given for each whether a row in it changed.  Called by `_flush_pending`,
+    // once per batch.
+    void _report_lists(bool convos_changed, bool requests_changed);
 
   public:
     /// The account state this Client is built on: keys, device group, configs, polling.  A
