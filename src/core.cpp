@@ -740,10 +740,15 @@ void Core::_drop_subscription(std::string_view why) {
     _sub_node.reset();
     _subscribed = false;
 
+    // Stopped now, but released on a later turn of the loop.  This is reachable from inside one of
+    // these tickers' own callbacks, and a Ticker's deleter runs inline once we are already on the
+    // loop (Loop::call_every hands out a shared_ptr whose deleter is a `call_get` of the delete,
+    // and call_get runs inline when inside) -- so dropping the last reference here would free the
+    // std::function we are currently executing.  Stopping is safe from within; freeing is not.
     for (auto* ticker : {&_sub_ticker, &_probe_ticker}) {
         if (*ticker) {
             (*ticker)->stop();
-            ticker->reset();
+            _loop.reset_soon(std::move(*ticker));
         }
     }
 
