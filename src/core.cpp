@@ -872,6 +872,12 @@ void Core::_subscription_probe() {
     if (!net)
         return _drop_subscription("network detached");
 
+    // Logged even though it is uneventful: this and the renewal are the only traffic a subscribed
+    // client makes, so their absence from a log is the first thing worth checking when pushes
+    // stop arriving -- and a subscription that has quietly stopped applying looks exactly like a
+    // conversation nobody is talking in.
+    log::debug(cat, "Probing {} for a swarm change", _sub_node->remote_pubkey.hex());
+
     auto body = nlohmann::json{
             {"pubkey", globals.session_id_hex()},
             {"namespace", PROBE_NAMESPACE},
