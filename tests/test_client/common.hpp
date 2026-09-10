@@ -174,7 +174,6 @@ struct Recorder {
     std::vector<AnyConversation> added, updated;
     std::vector<ConversationId> removed;
     std::vector<std::vector<AnyConversation>> replaced, requests_replaced;
-    std::vector<std::vector<ConversationId>> reordered, requests_reordered;
 
     /// One entry per *call*, so a test can tell one report of three messages from three reports of
     /// one.  `messages()` below flattens them when only the content matters.
@@ -215,16 +214,6 @@ struct Recorder {
                             order.push_back("requests");
                             requests_replaced.push_back(std::move(l));
                         },
-                .conversation_order_updated =
-                        [this](std::vector<ConversationId> ids) {
-                            order.push_back("reordered");
-                            reordered.push_back(std::move(ids));
-                        },
-                .request_order_updated =
-                        [this](std::vector<ConversationId> ids) {
-                            order.push_back("requests_reordered");
-                            requests_reordered.push_back(std::move(ids));
-                        },
                 .messages_added =
                         [this](std::vector<Message>&& m) {
                             order.push_back("message");
@@ -236,26 +225,6 @@ struct Recorder {
                             msg_updated.push_back(std::move(m));
                         },
         };
-    }
-
-    /// Which handlers a subscriber registers decides both what Client sends and which query it
-    /// runs to find out, so a test asserting either has to be able to say what it subscribed to.
-
-    /// Takes its ordering from the order events and never wants a whole list.
-    callbacks order_only() {
-        auto cbs = handlers();
-        cbs.conversation_list_replaced = nullptr;
-        cbs.request_list_replaced = nullptr;
-        return cbs;
-    }
-
-    /// Wants whole lists and does not handle order events -- an older subscriber, or one that would
-    /// rather re-read a list than track its order.
-    callbacks lists_only() {
-        auto cbs = handlers();
-        cbs.conversation_order_updated = nullptr;
-        cbs.request_order_updated = nullptr;
-        return cbs;
     }
 };
 
