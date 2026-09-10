@@ -9,8 +9,8 @@ TEST_CASE("Client: a stranger's message is a request, not a conversation", "[cli
     deliver(*c, sender, "hi, remember me?", from_epoch_ms(5000), "h1", "Jar Jar");
     sync(*c);
 
-    CHECK(c->conversations(wait).empty());
-    auto requests = c->message_requests(wait);
+    CHECK(c->conversations(block).empty());
+    auto requests = c->message_requests(block);
     REQUIRE(requests.size() == 1);
     CHECK(requests[0].id() == id);
     CHECK(requests[0].dm()->request);
@@ -21,9 +21,9 @@ TEST_CASE("Client: a stranger's message is a request, not a conversation", "[cli
     // which list it belongs to, and `request` is what says so.
     REQUIRE(r.added.size() == 1);
     CHECK(r.added[0].dm()->request);
-    REQUIRE(c->conversation(id, wait));
-    CHECK(c->conversation(id, wait)->dm()->request);
-    CHECK(c->conversation(id, wait)->messages(wait).size() == 1);
+    REQUIRE(c->conversation(id, block));
+    CHECK(c->conversation(id, block)->dm()->request);
+    CHECK(c->conversation(id, block)->messages(block).size() == 1);
 
     // And it is synced, so a request answered on one device is not still waiting on another.  Their
     // writing to us is what says they approved us; nothing yet says we approved them.
@@ -41,16 +41,16 @@ TEST_CASE("Client: answering a request accepts it", "[client][requests]") {
 
     deliver(*c, sender, "hello?", from_epoch_ms(5000), "h1");
     sync(*c);
-    REQUIRE(c->message_requests(wait).size() == 1);
+    REQUIRE(c->message_requests(block).size() == 1);
     r.order.clear();
 
     // There is no separate accept: writing to someone is what approving them is.
-    c->send_message(id, {.body = "hello yourself"}, wait);
+    c->send_message(id, {.body = "hello yourself"}, block);
     sync(*c);
 
-    CHECK(c->message_requests(wait).empty());
-    REQUIRE(c->conversations(wait).size() == 1);
-    CHECK_FALSE(c->conversations(wait)[0].dm()->request);
+    CHECK(c->message_requests(block).empty());
+    REQUIRE(c->conversations(block).size() == 1);
+    CHECK_FALSE(c->conversations(block)[0].dm()->request);
     CHECK(c->core.configs.contacts().get(oxenc::to_hex(sender.session_id))->approved);
 
     // It left one list and joined the other, which is neither an addition nor a removal to either,
@@ -65,7 +65,7 @@ TEST_CASE("Client: a linked device's answer accepts the request", "[client][requ
     auto id = ConversationId::dm(sender.session_id);
 
     deliver(*c, sender, "hello?", from_epoch_ms(5000), "h1");
-    REQUIRE(c->message_requests(wait).size() == 1);
+    REQUIRE(c->message_requests(block).size() == 1);
 
     // Our own message coming back off our own swarm because another device sent it.  syncTarget
     // says who it was addressed to, and sending to them is what approved them.
@@ -77,9 +77,9 @@ TEST_CASE("Client: a linked device's answer accepts the request", "[client][requ
             "",
             sender.session_id);
 
-    CHECK(c->message_requests(wait).empty());
-    REQUIRE(c->conversations(wait).size() == 1);
-    CHECK(c->conversations(wait)[0].id() == id);
+    CHECK(c->message_requests(block).empty());
+    REQUIRE(c->conversations(block).size() == 1);
+    CHECK(c->conversations(block)[0].id() == id);
 }
 
 TEST_CASE("Client: writing first leaves us awaiting their approval", "[client][requests]") {
@@ -87,37 +87,37 @@ TEST_CASE("Client: writing first leaves us awaiting their approval", "[client][r
     SenderKeys them;
     auto id = ConversationId::dm(them.session_id);
 
-    c->send_message(id, {.body = "are you there?"}, wait);
+    c->send_message(id, {.body = "are you there?"}, block);
     sync(*c);
 
     // The mirror of a request: we are in *their* requests list, and nothing they could be sent
     // says so -- only a message back from them clears it.  Meanwhile it is an ordinary conversation
     // of ours, since we chose to start it.
-    REQUIRE(c->conversations(wait).size() == 1);
-    CHECK(c->conversations(wait)[0].dm()->awaiting_approval);
-    CHECK_FALSE(c->conversations(wait)[0].dm()->request);
-    CHECK(c->message_requests(wait).empty());
+    REQUIRE(c->conversations(block).size() == 1);
+    CHECK(c->conversations(block)[0].dm()->awaiting_approval);
+    CHECK_FALSE(c->conversations(block)[0].dm()->request);
+    CHECK(c->message_requests(block).empty());
 
     deliver(*c, them, "here", from_epoch_ms(9000), "h1");
 
-    REQUIRE(c->conversation(id, wait));
-    CHECK_FALSE(c->conversation(id, wait)->dm()->awaiting_approval);
-    CHECK_FALSE(c->conversation(id, wait)->dm()->request);
+    REQUIRE(c->conversation(id, block));
+    CHECK_FALSE(c->conversation(id, block)->dm()->awaiting_approval);
+    CHECK_FALSE(c->conversation(id, block)->dm()->request);
 }
 
 TEST_CASE("Client: note to self is never a message request", "[client][requests]") {
     TempClient c;
     auto me = self_convo(*c.client);
 
-    c->send_message(me, {.body = "a note"}, wait);
+    c->send_message(me, {.body = "a note"}, block);
     sync(*c);
 
-    CHECK(c->message_requests(wait).empty());
-    REQUIRE(c->conversation(me, wait));
-    CHECK_FALSE(c->conversation(me, wait)->dm()->request);
+    CHECK(c->message_requests(block).empty());
+    REQUIRE(c->conversation(me, block));
+    CHECK_FALSE(c->conversation(me, block)->dm()->request);
 
     // Nor awaiting anything: there is nobody at the other end to accept.
-    CHECK_FALSE(c->conversation(me, wait)->dm()->awaiting_approval);
+    CHECK_FALSE(c->conversation(me, block)->dm()->awaiting_approval);
 }
 
 TEST_CASE("Client: a blocked account's messages are refused", "[client][requests]") {
@@ -126,17 +126,17 @@ TEST_CASE("Client: a blocked account's messages are refused", "[client][requests
     auto id = ConversationId::dm(sender.session_id);
 
     deliver(*c, sender, "first", from_epoch_ms(5000), "h1");
-    REQUIRE(c->conversation(id, wait)->messages(wait).size() == 1);
+    REQUIRE(c->conversation(id, block)->messages(block).size() == 1);
 
-    c->dm(id, wait)->set_blocked(true, wait);
+    c->dm(id, block)->set_blocked(true, block);
     deliver(*c, sender, "and again", from_epoch_ms(6000), "h2");
 
     // Refused on arrival rather than hidden when drawing, so nothing they send becomes history or
     // an unread count.
-    CHECK(c->conversation(id, wait)->messages(wait).size() == 1);
-    CHECK(c->conversation(id, wait)->unread() == 1);
+    CHECK(c->conversation(id, block)->messages(block).size() == 1);
+    CHECK(c->conversation(id, block)->unread() == 1);
 
-    c->dm(id, wait)->set_blocked(false, wait);
+    c->dm(id, block)->set_blocked(false, block);
     deliver(*c, sender, "still there?", from_epoch_ms(7000), "h3");
-    CHECK(c->conversation(id, wait)->messages(wait).size() == 2);
+    CHECK(c->conversation(id, block)->messages(block).size() == 2);
 }

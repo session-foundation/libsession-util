@@ -9,7 +9,7 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
 
     deliver(*c, sender, "hello there", from_epoch_ms(5000), "hash1", "Obi-Wan");
 
-    auto convos = c->conversations(wait);
+    auto convos = c->conversations(block);
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(sender.session_id));
     CHECK(convos[0].display_name() == "Obi-Wan");
@@ -17,7 +17,7 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
     CHECK(convos[0].last_activity() == from_epoch_ms(5000));
     CHECK(convos[0].unread() == 1);
 
-    auto msgs = c->conversation(convos[0].id(), wait)->messages(wait);
+    auto msgs = c->conversation(convos[0].id(), block)->messages(block);
     REQUIRE(msgs.size() == 1);
     CHECK(msgs[0].body == "hello there");
     CHECK_FALSE(msgs[0].outgoing);
@@ -26,8 +26,8 @@ TEST_CASE("Client: a received DM creates a conversation and a message", "[client
     CHECK(msgs[0].hash == "hash1");
     CHECK_FALSE(msgs[0].send_state.has_value());
 
-    CHECK(c->message(msgs[0].id, wait)->body == "hello there");
-    CHECK_FALSE(c->message(msgs[0].id + 1000, wait).has_value());
+    CHECK(c->message(msgs[0].id, block)->body == "hello there");
+    CHECK_FALSE(c->message(msgs[0].id + 1000, block).has_value());
 }
 
 TEST_CASE(
@@ -45,12 +45,12 @@ TEST_CASE(
             "",
             peer.session_id);
 
-    auto convos = c->conversations(wait);
+    auto convos = c->conversations(block);
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(peer.session_id));
     CHECK(convos[0].unread() == 0);
 
-    auto msgs = c->conversation(convos[0].id(), wait)->messages(wait);
+    auto msgs = c->conversation(convos[0].id(), block)->messages(block);
     REQUIRE(msgs.size() == 1);
     CHECK(msgs[0].body == "sent from my phone");
     CHECK(msgs[0].outgoing);
@@ -67,14 +67,14 @@ TEST_CASE("Client: a message to ourselves is a conversation with ourselves", "[c
     deliver(*c, self_keys(*c), "targeted", from_epoch_ms(5000), "self1", "", me);
     deliver(*c, self_keys(*c), "untargeted", from_epoch_ms(6000), "self2");
 
-    auto convos = c->conversations(wait);
+    auto convos = c->conversations(block);
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(me));
     CHECK(convos[0].unread() == 0);
     CHECK(convos[0].dm()->note_to_self);
     CHECK(c->is_note_to_self(convos[0].id()));
 
-    auto msgs = c->conversation(convos[0].id(), wait)->messages(wait);
+    auto msgs = c->conversation(convos[0].id(), block)->messages(block);
     REQUIRE(msgs.size() == 2);
     CHECK(msgs[0].outgoing);
     CHECK(msgs[1].outgoing);
@@ -90,11 +90,11 @@ TEST_CASE("Client: reads answer emptily before an account exists", "[client][con
     constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     auto convo = ConversationId::dm(sid);
 
-    CHECK(c->conversations(wait).empty());
-    CHECK(c->message_requests(wait).empty());
-    CHECK_FALSE(c->conversation(convo, wait).has_value());
-    CHECK_FALSE(c->dm(convo, wait).has_value());
-    CHECK_FALSE(c->message(1, wait).has_value());
+    CHECK(c->conversations(block).empty());
+    CHECK(c->message_requests(block).empty());
+    CHECK_FALSE(c->conversation(convo, block).has_value());
+    CHECK_FALSE(c->dm(convo, block).has_value());
+    CHECK_FALSE(c->message(1, block).has_value());
     CHECK_FALSE(c->is_note_to_self(convo));
 
     // Nothing here asks what a *nonexistent* conversation's messages are, or what marking one read
@@ -108,14 +108,14 @@ TEST_CASE("Client: note to self is reported, not left to the caller", "[client][
 
     // open_dm hands back a DM rather than an AnyConversation, so the flag is a plain field: asking
     // for the kind is what removes the narrowing.
-    auto self = c->open_dm(ConversationId::dm(own_sid(*c)), wait);
+    auto self = c->open_dm(ConversationId::dm(own_sid(*c)), block);
     CHECK(self.note_to_self);
-    CHECK(c->conversation(self.id, wait)->dm()->note_to_self);
+    CHECK(c->conversation(self.id, block)->dm()->note_to_self);
     CHECK(c->is_note_to_self(self.id));
 
-    auto other = c->open_dm(ConversationId::dm(peer.session_id), wait);
+    auto other = c->open_dm(ConversationId::dm(peer.session_id), block);
     CHECK_FALSE(other.note_to_self);
-    CHECK_FALSE(c->conversation(other.id, wait)->dm()->note_to_self);
+    CHECK_FALSE(c->conversation(other.id, block)->dm()->note_to_self);
     CHECK_FALSE(c->is_note_to_self(other.id));
 
     // A group or community is never note-to-self, whatever its id happens to be.
@@ -124,7 +124,7 @@ TEST_CASE("Client: note to self is reported, not left to the caller", "[client][
     CHECK_FALSE(c->is_note_to_self(ConversationId::community("http://example.com", "room")));
 
     // The list form agrees with the single-conversation form.
-    for (const auto& convo : c->conversations(wait))
+    for (const auto& convo : c->conversations(block))
         CHECK(convo.dm()->note_to_self == c->is_note_to_self(convo.id()));
 }
 
@@ -135,11 +135,11 @@ TEST_CASE("Client: syncTarget from another sender is ignored", "[client][receive
 
     deliver(*c, peer, "not yours to file", from_epoch_ms(5000), "h1", "", elsewhere.session_id);
 
-    auto convos = c->conversations(wait);
+    auto convos = c->conversations(block);
     REQUIRE(convos.size() == 1);
     CHECK(convos[0].id() == ConversationId::dm(peer.session_id));
 
-    auto msgs = c->conversation(convos[0].id(), wait)->messages(wait);
+    auto msgs = c->conversation(convos[0].id(), block)->messages(block);
     REQUIRE(msgs.size() == 1);
     CHECK_FALSE(msgs[0].outgoing);
 }
@@ -152,12 +152,12 @@ TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][rece
     deliver(*c, sender, "only once", from_epoch_ms(5000), "dup");
 
     auto convo = ConversationId::dm(sender.session_id);
-    CHECK(c->conversation(convo, wait)->messages(wait).size() == 1);
-    CHECK(c->conversation(convo, wait)->unread() == 1);
+    CHECK(c->conversation(convo, block)->messages(block).size() == 1);
+    CHECK(c->conversation(convo, block)->unread() == 1);
 
     // A genuinely different message from the same sender still lands.
     deliver(*c, sender, "and again", from_epoch_ms(6000), "notdup");
-    CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
+    CHECK(c->conversation(convo, block)->messages(block).size() == 2);
 }
 
 TEST_CASE("Client: the same message under a different swarm hash is deduped", "[client][receive]") {
@@ -187,8 +187,8 @@ TEST_CASE("Client: the same message under a different swarm hash is deduped", "[
             nullptr,
             7);
 
-    CHECK(c->conversation(convo, wait)->messages(wait).size() == 1);
-    CHECK(c->conversation(convo, wait)->unread() == 1);
+    CHECK(c->conversation(convo, block)->messages(block).size() == 1);
+    CHECK(c->conversation(convo, block)->unread() == 1);
 
     // Same millisecond, different message: the case the timestamp alone cannot tell apart, and the
     // whole reason the id exists.  Identical body, so nothing but the id distinguishes them.
@@ -201,14 +201,14 @@ TEST_CASE("Client: the same message under a different swarm hash is deduped", "[
             std::nullopt,
             nullptr,
             8);
-    CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
+    CHECK(c->conversation(convo, block)->messages(block).size() == 2);
 
     // A sender too old to set one has no identity beyond its timestamp, so two arrivals under
     // different swarm hashes cannot be told from one message stored twice.  Both land: a visible
     // duplicate is the failure we chose over silently dropping a real message.
     deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_a");
     deliver(*c, sender, "from an old client", from_epoch_ms(6000), "old_b");
-    CHECK(c->conversation(convo, wait)->messages(wait).size() == 4);
+    CHECK(c->conversation(convo, block)->messages(block).size() == 4);
 }
 
 TEST_CASE("Client: display name is unset rather than empty until known", "[client][convos]") {
@@ -222,7 +222,7 @@ TEST_CASE("Client: display name is unset rather than empty until known", "[clien
     auto stored = c->core.database().conn().prepared_get<std::optional<std::string>>(
             "SELECT name FROM accounts WHERE session_id = ?", sender.session_id);
     CHECK_FALSE(stored.has_value());
-    CHECK(c->conversation(convo, wait)->display_name().empty());
+    CHECK(c->conversation(convo, block)->display_name().empty());
 }
 
 TEST_CASE("Client: a later profile name updates the conversation", "[client][receive]") {
@@ -231,17 +231,17 @@ TEST_CASE("Client: a later profile name updates the conversation", "[client][rec
     auto convo = ConversationId::dm(sender.session_id);
 
     deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
-    CHECK(c->conversation(convo, wait)->display_name().empty());
+    CHECK(c->conversation(convo, block)->display_name().empty());
     // With no name known, name_or_id() falls back to the id rather than an empty string.
-    CHECK(c->conversation(convo, wait)->name_or_id() == convo.to_string());
+    CHECK(c->conversation(convo, block)->name_or_id() == convo.to_string());
 
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2", "Padmé");
-    CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
-    CHECK(c->conversation(convo, wait)->name_or_id() == "Padmé");
+    CHECK(c->conversation(convo, block)->display_name() == "Padmé");
+    CHECK(c->conversation(convo, block)->name_or_id() == "Padmé");
 
     // A message with no profile does not erase the name we already have.
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
-    CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+    CHECK(c->conversation(convo, block)->display_name() == "Padmé");
 }
 
 TEST_CASE("Client: non-conversation content does not create a conversation", "[client][receive]") {
@@ -273,7 +273,7 @@ TEST_CASE("Client: non-conversation content does not create a conversation", "[c
     bodyless.mutable_datamessage()->mutable_profile()->set_displayname("Ghost");
     deliver_content(bodyless, "bodyless");
 
-    CHECK(c->conversations(wait).empty());
+    CHECK(c->conversations(block).empty());
 }
 
 // ── Ordering, unread, drafts ────────────────────────────────────────────────────────────────────
@@ -287,14 +287,14 @@ TEST_CASE("Client: conversations are ordered by most recent activity", "[client]
     deliver(*c, alice, "first", from_epoch_ms(1000), "a1");
     deliver(*c, bob, "second", from_epoch_ms(2000), "b1");
 
-    auto convos = c->conversations(wait);
+    auto convos = c->conversations(block);
     REQUIRE(convos.size() == 2);
     CHECK(convos[0].id() == ConversationId::dm(bob.session_id));
     CHECK(convos[1].id() == ConversationId::dm(alice.session_id));
 
     // Alice speaking again moves her back to the top.
     deliver(*c, alice, "third", from_epoch_ms(3000), "a2");
-    convos = c->conversations(wait);
+    convos = c->conversations(block);
     CHECK(convos[0].id() == ConversationId::dm(alice.session_id));
     CHECK(preview_body(convos[0]) == "third");
 }
@@ -307,34 +307,34 @@ TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") 
     deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
-    CHECK(c->conversation(convo, wait)->unread() == 3);
+    CHECK(c->conversation(convo, block)->unread() == 3);
 
-    c->conversation(convo, wait)->mark_read(from_epoch_ms(2000), wait);
-    CHECK(c->conversation(convo, wait)->unread() == 1);
+    c->conversation(convo, block)->mark_read(from_epoch_ms(2000), block);
+    CHECK(c->conversation(convo, block)->unread() == 1);
 
     // The watermark never moves backwards.
-    c->conversation(convo, wait)->mark_read(from_epoch_ms(1000), wait);
-    CHECK(c->conversation(convo, wait)->unread() == 1);
+    c->conversation(convo, block)->mark_read(from_epoch_ms(1000), block);
+    CHECK(c->conversation(convo, block)->unread() == 1);
 
-    c->conversation(convo, wait)->mark_read(wait);
-    CHECK(c->conversation(convo, wait)->unread() == 0);
+    c->conversation(convo, block)->mark_read(block);
+    CHECK(c->conversation(convo, block)->unread() == 0);
 
     // A new arrival after a full read is unread again: "read everything" must not mean "read
     // everything that will ever arrive".
     deliver(*c, sender, "four", from_epoch_ms(4000), "h4");
-    CHECK(c->conversation(convo, wait)->unread() == 1);
+    CHECK(c->conversation(convo, block)->unread() == 1);
 
     // Even one that arrives late, bearing a timestamp older than what we already read to.
-    c->conversation(convo, wait)->mark_read(wait);
+    c->conversation(convo, block)->mark_read(block);
     deliver(*c, sender, "late", from_epoch_ms(3500), "h5");
-    CHECK(c->conversation(convo, wait)->unread() ==
+    CHECK(c->conversation(convo, block)->unread() ==
           0);  // known limitation of a timestamp watermark
 
     // Marking read on a conversation with nothing to read is a no-op, not an error.
     auto empty = ConversationId::dm(
             "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b);
-    CHECK_NOTHROW(c->open_dm(empty, wait).mark_read(wait));
-    CHECK(c->conversation(empty, wait)->unread() == 0);
+    CHECK_NOTHROW(c->open_dm(empty, block).mark_read(block));
+    CHECK(c->conversation(empty, block)->unread() == 0);
 }
 
 TEST_CASE("Client: cached counts stay in step with the messages table", "[client][convos]") {
@@ -372,11 +372,11 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
         CHECK(unread == actual_unread);
         CHECK(n == 3);
         CHECK(unread == 3);
-        CHECK(c->conversation(convo, wait)->unread() == 3);
+        CHECK(c->conversation(convo, block)->unread() == 3);
     }
 
     SECTION("marking read moves unread without touching the total") {
-        c->conversation(convo, wait)->mark_read(from_epoch_ms(2000), wait);
+        c->conversation(convo, block)->mark_read(from_epoch_ms(2000), block);
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
         CHECK(n == actual_n);
         CHECK(unread == actual_unread);
@@ -385,7 +385,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
     }
 
     SECTION("count tracks deletes made behind the application's back") {
-        auto id = c->conversation(convo, wait)->messages(wait).front().id;
+        auto id = c->conversation(convo, block)->messages(block).front().id;
         conn.prepared_exec("DELETE FROM messages WHERE id = ?", id);
 
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
@@ -397,7 +397,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
         CHECK(unread == 3);
         CHECK(actual_unread == 2);
 
-        c->conversation(convo, wait)->mark_read(from_epoch_ms(1000), wait);
+        c->conversation(convo, block)->mark_read(from_epoch_ms(1000), block);
         auto [n2, unread2, actual_n2, actual_unread2] = counts(alice.session_id);
         CHECK(unread2 == actual_unread2);
     }
@@ -407,7 +407,7 @@ TEST_CASE("Client: cached counts stay in step with the messages table", "[client
                 "SELECT c.id FROM conversations c JOIN accounts a ON a.id = c.dm"
                 " WHERE a.session_id = ?",
                 bob.session_id);
-        auto id = c->conversation(convo, wait)->messages(wait).front().id;
+        auto id = c->conversation(convo, block)->messages(block).front().id;
         conn.prepared_exec("UPDATE messages SET conversation = ? WHERE id = ?", convo_row, id);
 
         auto [n, unread, actual_n, actual_unread] = counts(alice.session_id);
@@ -425,19 +425,19 @@ TEST_CASE("Client: explicit conversation creation", "[client][convos]") {
     constexpr auto sid = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
     auto convo = ConversationId::dm(sid);
 
-    CHECK_FALSE(c->conversation(convo, wait).has_value());
+    CHECK_FALSE(c->conversation(convo, block).has_value());
 
-    auto created = c->open_dm(convo, wait);
+    auto created = c->open_dm(convo, block);
     CHECK(created.id == convo);
     CHECK(created.unread == 0);
     // Nothing to preview at all, which is a different answer from an empty body.
     CHECK(!created.last_preview);
-    CHECK(c->conversations(wait).size() == 1);
+    CHECK(c->conversations(block).size() == 1);
 
     // Opening one that already exists is not an error and does not duplicate it -- which is why
     // this is `open` and not `create`.
-    c->open_dm(convo, wait);
-    CHECK(c->conversations(wait).size() == 1);
+    c->open_dm(convo, block);
+    CHECK(c->conversations(block).size() == 1);
 }
 
 // ── Paging ──────────────────────────────────────────────────────────────────────────────────────
@@ -450,22 +450,22 @@ TEST_CASE("Client: message history pages backwards by cursor", "[client][message
     for (int i = 1; i <= 10; i++)
         deliver(*c, sender, "msg{}"_format(i), from_epoch_ms(i * 1000), "h{}"_format(i));
 
-    auto page1 = c->conversation(convo, wait)->messages(4, wait);
+    auto page1 = c->conversation(convo, block)->messages(4, block);
     REQUIRE(page1.size() == 4);
     CHECK(page1[0].body == "msg10");
     CHECK(page1[3].body == "msg7");
 
-    auto page2 = c->conversation(convo, wait)->messages(4, page1.back().cursor(), wait);
+    auto page2 = c->conversation(convo, block)->messages(4, page1.back().cursor(), block);
     REQUIRE(page2.size() == 4);
     CHECK(page2[0].body == "msg6");
     CHECK(page2[3].body == "msg3");
 
-    auto page3 = c->conversation(convo, wait)->messages(4, page2.back().cursor(), wait);
+    auto page3 = c->conversation(convo, block)->messages(4, page2.back().cursor(), block);
     REQUIRE(page3.size() == 2);
     CHECK(page3[0].body == "msg2");
     CHECK(page3[1].body == "msg1");
 
-    CHECK(c->conversation(convo, wait)->messages(4, page3.back().cursor(), wait).empty());
+    CHECK(c->conversation(convo, block)->messages(4, page3.back().cursor(), block).empty());
 }
 
 TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages]") {
@@ -481,7 +481,7 @@ TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages
     std::vector<std::string> seen;
     std::optional<MessageCursor> cursor;
     while (true) {
-        auto page = c->conversation(convo, wait)->messages(1, cursor, wait);
+        auto page = c->conversation(convo, block)->messages(1, cursor, block);
         if (page.empty())
             break;
         seen.push_back(page[0].body);
@@ -512,10 +512,10 @@ TEST_CASE("Client: a message can be shown as it was on the wire", "[client][mess
             },
             77);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 1);
 
-    auto dump = c->message_debug(msgs[0].id, wait);
+    auto dump = c->message_debug(msgs[0].id, block);
     REQUIRE(dump);
     INFO("dump:\n" << *dump);
 
@@ -540,7 +540,7 @@ TEST_CASE("Client: a message can be shown as it was on the wire", "[client][mess
 
     // A message with no stored wire form, and one that does not exist, are both "nothing to show"
     // rather than errors.
-    CHECK_FALSE(c->message_debug(msgs[0].id + 1000, wait).has_value());
+    CHECK_FALSE(c->message_debug(msgs[0].id + 1000, block).has_value());
 }
 
 TEST_CASE(
@@ -552,24 +552,24 @@ TEST_CASE(
     deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
-    REQUIRE(c->conversation(convo, wait)->unread() == 3);
+    REQUIRE(c->conversation(convo, block)->unread() == 3);
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     REQUIRE(msgs.size() == 3);
     auto middle = msgs[1];  // "two"
     REQUIRE(middle.body == "two");
     REQUIRE(middle.hash == "h2");
 
-    CHECK(c->delete_message(middle.id, wait));
+    CHECK(c->delete_message(middle.id, block));
 
     // Hidden by default...
-    auto visible = c->conversation(convo, wait)->messages(wait);
+    auto visible = c->conversation(convo, block)->messages(block);
     REQUIRE(visible.size() == 2);
     CHECK(visible[0].body == "three");
     CHECK(visible[1].body == "one");
 
     // ...and in its original place when asked for, saying who and when but nothing else.
-    auto all = c->conversation(convo, wait)->messages(50, std::nullopt, true, wait);
+    auto all = c->conversation(convo, block)->messages(50, std::nullopt, true, block);
     REQUIRE(all.size() == 3);
     CHECK(all[1].id == middle.id);
     CHECK(all[1].deleted == Deletion::here);
@@ -580,17 +580,17 @@ TEST_CASE(
     CHECK(all[1].hash == "h2");
 
     // Nothing left to read, so it stops being unread.
-    CHECK(c->conversation(convo, wait)->unread() == 2);
+    CHECK(c->conversation(convo, block)->unread() == 2);
 
     // The stored wire form goes with it, which is where the body actually survived.
-    CHECK_FALSE(c->message_debug(middle.id, wait).has_value());
+    CHECK_FALSE(c->message_debug(middle.id, block).has_value());
 
     // A redelivery under the same hash is still recognised as one we have seen.
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
-    CHECK(c->conversation(convo, wait)->messages(50, std::nullopt, true, wait).size() == 3);
+    CHECK(c->conversation(convo, block)->messages(50, std::nullopt, true, block).size() == 3);
 
     // Deleting a message that does not exist is false, not an error.
-    CHECK_FALSE(c->delete_message(middle.id + 10000, wait));
+    CHECK_FALSE(c->delete_message(middle.id + 10000, block));
 }
 
 TEST_CASE("Client: the list preview skips a deleted last message", "[client][convos][delete]") {
@@ -602,14 +602,14 @@ TEST_CASE("Client: the list preview skips a deleted last message", "[client][con
     deliver(*c, sender, "older", from_epoch_ms(1000), "h1");
     deliver(*c, sender, "newest", from_epoch_ms(2000), "h2");
 
-    auto newest = c->conversation(convo, wait)->messages(wait).front();
+    auto newest = c->conversation(convo, block)->messages(block).front();
     REQUIRE(newest.body == "newest");
-    REQUIRE(preview_body(*c->conversation(convo, wait)) == "newest");
+    REQUIRE(preview_body(*c->conversation(convo, block)) == "newest");
 
-    c->delete_message(newest.id, wait);
+    c->delete_message(newest.id, block);
 
     // The list says what was last actually said, rather than going blank.
-    CHECK(preview_body(*c->conversation(convo, wait)) == "older");
+    CHECK(preview_body(*c->conversation(convo, block)) == "older");
 }
 
 TEST_CASE("Client: purging removes what a deletion left", "[client][messages][delete]") {
@@ -621,37 +621,37 @@ TEST_CASE("Client: purging removes what a deletion left", "[client][messages][de
     deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
     deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
 
-    auto msgs = c->conversation(convo, wait)->messages(wait);
+    auto msgs = c->conversation(convo, block)->messages(block);
     auto live = msgs[0].id;  // "three"
-    c->delete_message(msgs[1].id, wait);
-    c->delete_message(msgs[2].id, wait);
+    c->delete_message(msgs[1].id, block);
+    c->delete_message(msgs[2].id, block);
 
     SECTION("one at a time, and only what was deleted") {
         // A live message is refused: this is the one call that destroys history outright.
-        CHECK_FALSE(c->purge_deleted_message(live, wait));
-        CHECK(c->conversation(convo, wait)->messages(wait).size() == 1);
+        CHECK_FALSE(c->purge_deleted_message(live, block));
+        CHECK(c->conversation(convo, block)->messages(block).size() == 1);
 
-        CHECK(c->purge_deleted_message(msgs[1].id, wait));
-        CHECK(c->conversation(convo, wait)->messages(50, std::nullopt, true, wait).size() == 2);
+        CHECK(c->purge_deleted_message(msgs[1].id, block));
+        CHECK(c->conversation(convo, block)->messages(50, std::nullopt, true, block).size() == 2);
 
         // Purging the same row twice is false the second time rather than an error.
-        CHECK_FALSE(c->purge_deleted_message(msgs[1].id, wait));
+        CHECK_FALSE(c->purge_deleted_message(msgs[1].id, block));
     }
 
     SECTION("all of them at once") {
-        CHECK(c->conversation(convo, wait)->purge_deleted(wait) == 2);
+        CHECK(c->conversation(convo, block)->purge_deleted(block) == 2);
 
-        auto left = c->conversation(convo, wait)->messages(50, std::nullopt, true, wait);
+        auto left = c->conversation(convo, block)->messages(50, std::nullopt, true, block);
         REQUIRE(left.size() == 1);
         CHECK(left[0].body == "three");
 
         // Nothing left to purge.
-        CHECK(c->conversation(convo, wait)->purge_deleted(wait) == 0);
+        CHECK(c->conversation(convo, block)->purge_deleted(block) == 0);
 
         // And having forgotten it, a redelivery is a new message again -- the cost the header warns
         // about, asserted here so it is a decision rather than a surprise.
         deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
-        CHECK(c->conversation(convo, wait)->messages(wait).size() == 2);
+        CHECK(c->conversation(convo, block)->messages(block).size() == 2);
     }
 }
 
@@ -661,20 +661,20 @@ TEST_CASE("Client: deleting for everyone is only for what we sent", "[client][me
     auto convo = ConversationId::dm(sender.session_id);
 
     deliver(*c, sender, "theirs", from_epoch_ms(1000), "h1");
-    auto theirs = c->conversation(convo, wait)->messages(wait).front();
+    auto theirs = c->conversation(convo, block)->messages(block).front();
 
     // Their message, in their swarm as well as ours: an unsend request from us would be ignored at
     // the other end, so we do not pretend to offer it.
-    CHECK_FALSE(c->delete_message_everywhere(theirs.id, wait));
-    CHECK_FALSE(c->message(theirs.id, wait)->deleted.has_value());
-    CHECK(c->message(theirs.id, wait)->body == "theirs");
+    CHECK_FALSE(c->delete_message_everywhere(theirs.id, block));
+    CHECK_FALSE(c->message(theirs.id, block)->deleted.has_value());
+    CHECK(c->message(theirs.id, block)->body == "theirs");
 
     // Deleting it for ourselves is what that caller wanted, and still works.
-    CHECK(c->delete_message(theirs.id, wait));
-    CHECK(c->message(theirs.id, wait)->deleted == Deletion::here);
+    CHECK(c->delete_message(theirs.id, block));
+    CHECK(c->message(theirs.id, block)->deleted == Deletion::here);
 
     // A message that does not exist is false either way, not an error.
-    CHECK_FALSE(c->delete_message_everywhere(theirs.id + 10000, wait));
+    CHECK_FALSE(c->delete_message_everywhere(theirs.id + 10000, block));
 }
 
 TEST_CASE("Client: an unsend request from the author deletes the message", "[client][delete]") {
@@ -710,7 +710,7 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
     };
 
     deliver(*c, sender, "regrettable", from_epoch_ms(1000), "h1", "", std::nullopt, nullptr, 42);
-    auto msg = c->conversation(convo, wait)->messages(wait).front();
+    auto msg = c->conversation(convo, block)->messages(block).front();
     REQUIRE(msg.body == "regrettable");
 
     SECTION("naming someone else's message, ignored") {
@@ -719,24 +719,24 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
         // is a different test -- it would be honoured, and rightly.
         SenderKeys stranger;
         unsend(stranger, sender.session_id, 1000, 42, "u2");
-        CHECK(c->message(msg.id, wait)->body == "regrettable");
-        CHECK_FALSE(c->message(msg.id, wait)->deleted.has_value());
+        CHECK(c->message(msg.id, block)->body == "regrettable");
+        CHECK_FALSE(c->message(msg.id, block)->deleted.has_value());
     }
 
     SECTION("from the author, honoured") {
         unsend(sender, sender.session_id, 1000, 42, "u3");
-        auto after = c->message(msg.id, wait);
+        auto after = c->message(msg.id, block);
         REQUIRE(after);
         CHECK(after->deleted == Deletion::everywhere);
         CHECK(after->body.empty());
         // The row stays, so a redelivery cannot resurrect it.
         CHECK(after->hash == "h1");
-        CHECK(c->conversation(convo, wait)->unread() == 0);
+        CHECK(c->conversation(convo, block)->unread() == 0);
     }
 
     SECTION("matching nothing, ignored") {
         unsend(sender, sender.session_id, 5555, 42, "u4");
-        CHECK(c->message(msg.id, wait)->body == "regrettable");
+        CHECK(c->message(msg.id, block)->body == "regrettable");
     }
 
     SECTION("ambiguous, refused rather than guessed") {
@@ -744,11 +744,11 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
         // case the id exists for, and the case a sender most often unsends.
         deliver(*c, sender, "one", from_epoch_ms(7000), "amb1");
         deliver(*c, sender, "two", from_epoch_ms(7000), "amb2");
-        REQUIRE(c->conversation(convo, wait)->messages(wait).size() == 3);
+        REQUIRE(c->conversation(convo, block)->messages(block).size() == 3);
 
         unsend(sender, sender.session_id, 7000, std::nullopt, "u5");
 
-        auto left = c->conversation(convo, wait)->messages(wait);
+        auto left = c->conversation(convo, block)->messages(block);
         CHECK(left.size() == 3);
         for (const auto& m : left)
             CHECK_FALSE(m.deleted.has_value());
@@ -787,10 +787,10 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
             std::nullopt,
             with_profile("Padmé", "http://fs.example/file/7#pubkey=aa", key, 500));
 
-    auto pic = c->conversation(convo, wait)->picture();
+    auto pic = c->conversation(convo, block)->picture();
     CHECK(pic.url == "http://fs.example/file/7#pubkey=aa");
     CHECK(pic.key == key);
-    CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+    CHECK(c->conversation(convo, block)->display_name() == "Padmé");
 
     SECTION("a newer profile replaces it") {
         std::vector<std::byte> key2(32, std::byte{0x9});
@@ -803,8 +803,8 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
                 std::nullopt,
                 with_profile("Padme", "http://fs.example/file/8", key2, 900));
 
-        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/8");
-        CHECK(c->conversation(convo, wait)->picture().key == key2);
+        CHECK(c->conversation(convo, block)->picture().url == "http://fs.example/file/8");
+        CHECK(c->conversation(convo, block)->picture().key == key2);
     }
 
     SECTION("a message that took a week to arrive does not undo a newer change") {
@@ -819,8 +819,8 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
                 std::nullopt,
                 with_profile("Old Name", "http://fs.example/file/old", stale, 100));
 
-        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
-        CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+        CHECK(c->conversation(convo, block)->picture().url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(c->conversation(convo, block)->display_name() == "Padmé");
     }
 
     SECTION("a url with no key is not stored, since it could only fail to open") {
@@ -833,13 +833,13 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
                 std::nullopt,
                 with_profile("", "http://fs.example/file/nokey", std::nullopt, 900));
 
-        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(c->conversation(convo, block)->picture().url == "http://fs.example/file/7#pubkey=aa");
     }
 
     SECTION("a message carrying no profile leaves it alone") {
         deliver(*c, sender, "plain", from_epoch_ms(5000), "h5");
-        CHECK(c->conversation(convo, wait)->picture().url == "http://fs.example/file/7#pubkey=aa");
-        CHECK(c->conversation(convo, wait)->display_name() == "Padmé");
+        CHECK(c->conversation(convo, block)->picture().url == "http://fs.example/file/7#pubkey=aa");
+        CHECK(c->conversation(convo, block)->display_name() == "Padmé");
     }
 
     SECTION("and it reaches the config, so our other devices learn it too") {

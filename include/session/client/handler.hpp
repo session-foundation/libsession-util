@@ -6,7 +6,8 @@
 
 namespace session::client {
 
-/// Passed where a handler would go, to say "wait for this and give me the answer" instead.
+/// Passed where a handler would go, to say "block until this is done and give me the answer"
+/// instead.
 ///
 /// Every asynchronous method has a blocking twin taking one of these.  The work is the same and
 /// happens in the same place -- on Core's loop -- so the only difference is who waits: the twin
@@ -14,15 +15,20 @@ namespace session::client {
 /// have reported through its `error` argument.
 ///
 /// A tag rather than a second class, and rather than an overload with no handler at all, because
-/// the point is that it be visible where it is used.  Waiting is a decision about the calling
+/// the point is that it be visible where it is used.  Blocking is a decision about the calling
 /// thread, so it belongs at the call site: a render loop must not do it, and a review can grep for
 /// it, neither of which works when the choice was made wherever the variable was declared.
 ///
 /// Calling one from a Client handler is safe rather than a deadlock -- the loop runs the work
 /// inline when it is already the current thread -- but it is still waiting, and anything else the
 /// loop owes is waiting behind it.
-struct wait_t {};
-inline constexpr wait_t wait{};
+///
+/// Named `block` rather than the more obvious `wait` because POSIX declares `::wait` in
+/// <sys/wait.h>: a client that does `using namespace session::client;` would then find both names
+/// and be able to use neither, and there is no using-declaration that resolves that at namespace
+/// scope.
+struct block_t {};
+inline constexpr block_t block{};
 
 /// Runs a job on the application's own thread.
 ///

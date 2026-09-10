@@ -139,7 +139,7 @@ class Client {
     //
     // Each returns immediately and invokes `cb` when the work is done -- through the dispatcher if
     // one was given, so on the application's own thread.  A caller that would rather block on the
-    // answer than be handed it passes `wait` in place of the handler and takes the return value.
+    // answer than be handed it passes `block` in place of the handler and takes the return value.
     //
     // **Every `cb` is invoked exactly once**, unless the Client is destroyed before its work runs.
     // That is what its leading `error` argument is for: unset when the call succeeded, and
@@ -160,7 +160,7 @@ class Client {
     /// Message requests are not in it — see `message_requests()` — and neither are hidden
     /// conversations.
     void conversations(failable_function<void(std::vector<AnyConversation>)> cb);
-    std::vector<AnyConversation> conversations(wait_t);
+    std::vector<AnyConversation> conversations(block_t);
 
     /// The message requests: accounts that have written to us and that we have never written to,
     /// most recently active first.
@@ -170,7 +170,7 @@ class Client {
     /// stops being a request when we answer it, since writing to someone is what approving them
     /// is; there is no separate accept, and no way back short of deleting the contact.
     void message_requests(failable_function<void(std::vector<AnyConversation>)> cb);
-    std::vector<AnyConversation> message_requests(wait_t);
+    std::vector<AnyConversation> message_requests(block_t);
 
     /// One conversation, or nullopt if we have no such conversation.
     ///
@@ -188,8 +188,8 @@ class Client {
     void conversation(
             const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
     void dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
-    std::optional<AnyConversation> conversation(const ConversationId& id, wait_t);
-    std::optional<DM> dm(const ConversationId& id, wait_t);
+    std::optional<AnyConversation> conversation(const ConversationId& id, block_t);
+    std::optional<DM> dm(const ConversationId& id, block_t);
 
     /// The conversation with someone, made if it was not there already — "open a chat with this
     /// account", which is the one thing `conversation()` cannot express.
@@ -207,7 +207,7 @@ class Client {
     ///
     /// @throws std::invalid_argument if the id is not a one-to-one conversation.
     void open_dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
-    DM open_dm(const ConversationId& id, wait_t);
+    DM open_dm(const ConversationId& id, block_t);
 
     /// True if this is our own account's session ID.
     ///
@@ -229,7 +229,7 @@ class Client {
 
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
     void message(int64_t id, failable_function<void(std::optional<Message>)> cb);
-    std::optional<Message> message(int64_t id, wait_t);
+    std::optional<Message> message(int64_t id, block_t);
 
     /// Blocks or unblocks an account named by id.
     ///
@@ -240,7 +240,7 @@ class Client {
     ///
     /// @throws std::invalid_argument if the id is not a one-to-one conversation, or is our own.
     void set_blocked(const ConversationId& id, bool blocked, failable_function<void()> cb);
-    void set_blocked(const ConversationId& id, bool blocked, wait_t);
+    void set_blocked(const ConversationId& id, bool blocked, block_t);
 
     /// Sends to a conversation named by id, creating it if it does not exist.
     ///
@@ -268,8 +268,8 @@ class Client {
             const ConversationId& id,
             OutgoingMessage msg,
             Conversation::upload_progress on_upload,
-            wait_t);
-    int64_t send_message(const ConversationId& id, OutgoingMessage msg, wait_t);
+            block_t);
+    int64_t send_message(const ConversationId& id, OutgoingMessage msg, block_t);
 
     /// Sends a failed message again, resuming rather than restarting: attachments that already
     /// reached the file server are left alone and only the ones that did not are uploaded, because
@@ -291,8 +291,8 @@ class Client {
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
             failable_function<void(bool started)> cb);
-    bool retry_send(int64_t message_id, Conversation::upload_progress on_upload, wait_t);
-    bool retry_send(int64_t message_id, wait_t);
+    bool retry_send(int64_t message_id, Conversation::upload_progress on_upload, block_t);
+    bool retry_send(int64_t message_id, block_t);
 
     /// Deletes one message from this device: its body, its decrypted content and everything it
     /// recorded about its attachments go, and what is left says only that someone said something
@@ -319,7 +319,7 @@ class Client {
     /// Returns false, having done nothing, if there is no such message.  Deleting one already
     /// deleted here is not an error and changes nothing.
     void delete_message(int64_t message_id, failable_function<void(bool deleted)> cb);
-    bool delete_message(int64_t message_id, wait_t);
+    bool delete_message(int64_t message_id, block_t);
 
     /// Deletes a message we sent, here and everywhere else it reached.
     ///
@@ -343,7 +343,7 @@ class Client {
     /// The message is marked `Deletion::everywhere` locally either way, since that records what we
     /// asked for, and it is what stops a client offering the same deletion twice.
     void delete_message_everywhere(int64_t message_id, failable_function<void(bool deleted)> cb);
-    bool delete_message_everywhere(int64_t message_id, wait_t);
+    bool delete_message_everywhere(int64_t message_id, block_t);
 
     /// Shows, or stops showing, a message as a gallery.
     ///
@@ -356,7 +356,7 @@ class Client {
     /// leaves its images unfetched, and getting them is the caller's move — `attachment_data` for
     /// each — because a setter that reached for the network would surprise whoever called it.
     void set_gallery(int64_t message_id, bool gallery, failable_function<void(bool set)> cb);
-    bool set_gallery(int64_t message_id, bool gallery, wait_t);
+    bool set_gallery(int64_t message_id, bool gallery, block_t);
 
     /// An attachment's contents, decrypted and whole.
     ///
@@ -384,7 +384,7 @@ class Client {
     /// Refusing a live message is the point rather than a nicety: this is the one operation here
     /// that removes history outright, and it is only ever entitled to remove what a deletion left.
     void purge_deleted_message(int64_t message_id, failable_function<void(bool removed)> cb);
-    bool purge_deleted_message(int64_t message_id, wait_t);
+    bool purge_deleted_message(int64_t message_id, block_t);
 
     /// The message as it arrived on the wire, rendered as indented text: one line per field that is
     /// set, named, with nested messages beneath their field and enums by name.
@@ -407,7 +407,7 @@ class Client {
     /// pruning removed.  Also nullopt if the stored bytes no longer parse, which is corruption
     /// rather than absence and is logged as such.
     void message_debug(int64_t message_id, failable_function<void(std::optional<std::string>)> cb);
-    std::optional<std::string> message_debug(int64_t message_id, wait_t);
+    std::optional<std::string> message_debug(int64_t message_id, block_t);
 
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
     ///
@@ -547,9 +547,9 @@ class Client {
     /// `set_cache_dir`, which is the application's to decide every run — a stored path would be the
     /// wrong one the moment the database moved.
     void set_attachment_cache_limit(std::optional<int64_t> bytes, failable_function<void()> cb);
-    void set_attachment_cache_limit(std::optional<int64_t> bytes, wait_t);
+    void set_attachment_cache_limit(std::optional<int64_t> bytes, block_t);
     void attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb);
-    std::optional<int64_t> attachment_cache_limit(wait_t);
+    std::optional<int64_t> attachment_cache_limit(block_t);
 
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
     ///
@@ -563,9 +563,9 @@ class Client {
     ///
     /// Persisted and device-local, for the same reasons as the cache limit.
     void set_auto_download_max_size(std::optional<int64_t> bytes, failable_function<void()> cb);
-    void set_auto_download_max_size(std::optional<int64_t> bytes, wait_t);
+    void set_auto_download_max_size(std::optional<int64_t> bytes, block_t);
     void auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb);
-    std::optional<int64_t> auto_download_max_size(wait_t);
+    std::optional<int64_t> auto_download_max_size(block_t);
 
     // -- Our own account ----------------------------------------------------------------------
     //
@@ -582,9 +582,9 @@ class Client {
     /// conversation works only once that conversation exists, which is a bug waiting for a fresh
     /// account.
     void display_name(failable_function<void(std::string)> cb);
-    std::string display_name(wait_t);
+    std::string display_name(block_t);
     void set_display_name(std::string_view name, failable_function<void()> cb);
-    void set_display_name(std::string_view name, wait_t);
+    void set_display_name(std::string_view name, block_t);
 
     /// Whether to tell somebody when we save a file they sent us.
     ///
@@ -593,9 +593,9 @@ class Client {
     /// and cannot require one, so a caller passing false is never overruled, and a client with no
     /// setting of its own still honours a choice made elsewhere.
     void notify_media_saved(failable_function<void(bool)> cb);
-    bool notify_media_saved(wait_t);
+    bool notify_media_saved(block_t);
     void set_notify_media_saved(bool notify, failable_function<void()> cb);
-    void set_notify_media_saved(bool notify, wait_t);
+    void set_notify_media_saved(bool notify, block_t);
 
     /// How often a handler that reports continuously — such as attachment upload progress — is
     /// allowed to fire, per thing being reported on.  Defaults to 100ms; zero lets every update

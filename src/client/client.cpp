@@ -652,14 +652,14 @@ void Client::retry_send(
             std::move(cb));
 }
 
-bool Client::retry_send(int64_t message_id, Conversation::upload_progress on_upload, wait_t) {
+bool Client::retry_send(int64_t message_id, Conversation::upload_progress on_upload, block_t) {
     return loop.call_get([this, message_id, on_upload = std::move(on_upload)] {
         return _retry_send(message_id, on_upload);
     });
 }
 
-bool Client::retry_send(int64_t message_id, wait_t) {
-    return retry_send(message_id, nullptr, wait);
+bool Client::retry_send(int64_t message_id, block_t) {
+    return retry_send(message_id, nullptr, block);
 }
 
 void Client::message_debug(
@@ -667,7 +667,7 @@ void Client::message_debug(
     _async([this, message_id] { return _message_debug(message_id); }, std::move(cb));
 }
 
-std::optional<std::string> Client::message_debug(int64_t message_id, wait_t) {
+std::optional<std::string> Client::message_debug(int64_t message_id, block_t) {
     return loop.call_get([this, message_id] { return _message_debug(message_id); });
 }
 
@@ -676,7 +676,7 @@ void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb
            std::move(cb));
 }
 
-bool Client::delete_message(int64_t message_id, wait_t) {
+bool Client::delete_message(int64_t message_id, block_t) {
     return loop.call_get(
             [this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
@@ -889,13 +889,13 @@ void Client::set_attachment_cache_limit(
         std::optional<int64_t> bytes, failable_function<void()> cb) {
     _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
 }
-void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, wait_t) {
+void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, block_t) {
     loop.call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
 }
 void Client::attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb) {
     _async([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); }, std::move(cb));
 }
-std::optional<int64_t> Client::attachment_cache_limit(wait_t) {
+std::optional<int64_t> Client::attachment_cache_limit(block_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
@@ -903,13 +903,13 @@ void Client::set_auto_download_max_size(
         std::optional<int64_t> bytes, failable_function<void()> cb) {
     _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
 }
-void Client::set_auto_download_max_size(std::optional<int64_t> bytes, wait_t) {
+void Client::set_auto_download_max_size(std::optional<int64_t> bytes, block_t) {
     loop.call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
 }
 void Client::auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb) {
     _async([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); }, std::move(cb));
 }
-std::optional<int64_t> Client::auto_download_max_size(wait_t) {
+std::optional<int64_t> Client::auto_download_max_size(block_t) {
     return loop.call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
 }
 
@@ -918,7 +918,7 @@ void Client::display_name(failable_function<void(std::string)> cb) {
            std::move(cb));
 }
 
-std::string Client::display_name(wait_t) {
+std::string Client::display_name(block_t) {
     return loop.call_get(
             [this] { return std::string{core.configs.user_profile().get_name().value_or("")}; });
 }
@@ -928,7 +928,7 @@ void Client::set_display_name(std::string_view name, failable_function<void()> c
            std::move(cb));
 }
 
-void Client::set_display_name(std::string_view name, wait_t) {
+void Client::set_display_name(std::string_view name, block_t) {
     loop.call_get([this, name] { core.configs.user_profile().set_name(name); });
 }
 
@@ -936,7 +936,7 @@ void Client::notify_media_saved(failable_function<void(bool)> cb) {
     _async([this] { return core.configs.user_profile().get_notify_media_saved(); }, std::move(cb));
 }
 
-bool Client::notify_media_saved(wait_t) {
+bool Client::notify_media_saved(block_t) {
     return loop.call_get([this] { return core.configs.user_profile().get_notify_media_saved(); });
 }
 
@@ -945,7 +945,7 @@ void Client::set_notify_media_saved(bool notify, failable_function<void()> cb) {
            std::move(cb));
 }
 
-void Client::set_notify_media_saved(bool notify, wait_t) {
+void Client::set_notify_media_saved(bool notify, block_t) {
     loop.call_get([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); });
 }
 
@@ -953,7 +953,7 @@ void Client::delete_message_everywhere(int64_t message_id, failable_function<voi
     _async([this, message_id] { return _delete_message_everywhere(message_id); }, std::move(cb));
 }
 
-bool Client::delete_message_everywhere(int64_t message_id, wait_t) {
+bool Client::delete_message_everywhere(int64_t message_id, block_t) {
     return loop.call_get([this, message_id] { return _delete_message_everywhere(message_id); });
 }
 
@@ -1100,7 +1100,7 @@ void Client::set_gallery(int64_t message_id, bool gallery, failable_function<voi
            std::move(cb));
 }
 
-bool Client::set_gallery(int64_t message_id, bool gallery, wait_t) {
+bool Client::set_gallery(int64_t message_id, bool gallery, block_t) {
     return loop.call_get([this, message_id, gallery] { return _set_gallery(message_id, gallery); });
 }
 
@@ -1108,7 +1108,7 @@ void Client::purge_deleted_message(int64_t message_id, failable_function<void(bo
     _async([this, message_id] { return _purge_deleted_message(message_id); }, std::move(cb));
 }
 
-bool Client::purge_deleted_message(int64_t message_id, wait_t) {
+bool Client::purge_deleted_message(int64_t message_id, block_t) {
     return loop.call_get([this, message_id] { return _purge_deleted_message(message_id); });
 }
 
@@ -1153,36 +1153,36 @@ void Client::set_blocked(
     _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
 }
 
-void Client::set_blocked(const ConversationId& id, bool blocked, wait_t) {
+void Client::set_blocked(const ConversationId& id, bool blocked, block_t) {
     _require_contact("set_blocked", id);
     loop.call_get([this, id, blocked] { _set_blocked(id, blocked); });
 }
 
-std::vector<AnyConversation> Client::conversations(wait_t) {
+std::vector<AnyConversation> Client::conversations(block_t) {
     return loop.call_get([this] { return _conversations(); });
 }
 
-std::vector<AnyConversation> Client::message_requests(wait_t) {
+std::vector<AnyConversation> Client::message_requests(block_t) {
     return loop.call_get([this] { return _message_requests(); });
 }
 
-std::optional<AnyConversation> Client::conversation(const ConversationId& id, wait_t) {
+std::optional<AnyConversation> Client::conversation(const ConversationId& id, block_t) {
     return loop.call_get([this, id] { return _conversation(id); });
 }
 
-std::optional<Message> Client::message(int64_t id, wait_t) {
+std::optional<Message> Client::message(int64_t id, block_t) {
     return loop.call_get([this, id] { return _message(id); });
 }
 
-int64_t Client::send_message(const ConversationId& id, OutgoingMessage msg, wait_t) {
-    return send_message(id, std::move(msg), nullptr, wait);
+int64_t Client::send_message(const ConversationId& id, OutgoingMessage msg, block_t) {
+    return send_message(id, std::move(msg), nullptr, block);
 }
 
 int64_t Client::send_message(
         const ConversationId& id,
         OutgoingMessage msg,
         Conversation::upload_progress on_upload,
-        wait_t) {
+        block_t) {
     _require_sendable("send_message", id, msg);
     return loop.call_get([&] { return _send_message(id, msg, std::move(on_upload)); });
 }
@@ -1210,7 +1210,7 @@ void Client::dm(
     _async([this, id] { return as_dm(_conversation(id)); }, std::move(cb));
 }
 
-std::optional<DM> Client::dm(const ConversationId& id, wait_t) {
+std::optional<DM> Client::dm(const ConversationId& id, block_t) {
     _require_dm("dm", id);
     return loop.call_get([this, id] { return as_dm(_conversation(id)); });
 }
@@ -1223,7 +1223,7 @@ void Client::open_dm(
            std::move(cb));
 }
 
-DM Client::open_dm(const ConversationId& id, wait_t) {
+DM Client::open_dm(const ConversationId& id, block_t) {
     _require_dm("open_dm", id);
     return loop.call_get([this, id] {
         return *as_dm(std::optional<AnyConversation>{_create_conversation(id)});
