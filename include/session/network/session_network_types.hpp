@@ -340,9 +340,9 @@ struct PathInfo {
     /// tell from here.  Sending direct, the only hop *is* the destination.  A Session Router
     /// tunnel to a `.snode` terminates at the storage node, so it is; a path to a client
     /// terminates at the pivot relay, with the rest belonging to the other side and invisible to
-    /// us; and an onion path is built before any destination is chosen, so its last hop is a
-    /// relay that will forward to whatever the request names.  Reporting what is known beats a
-    /// shape that promises a destination which is sometimes a guess.
+    /// us; and an `onion_requests` path is built before any destination is chosen, so its last
+    /// hop is a relay that will forward to whatever the request names.  Reporting what is known
+    /// beats a shape that promises a destination which is sometimes a guess.
     std::vector<PathHop> hops;
 };
 

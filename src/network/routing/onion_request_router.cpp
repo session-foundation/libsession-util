@@ -536,12 +536,12 @@ void OnionRequestRouter::clear_cache() {
 
 std::optional<PathInfo> OnionRequestRouter::get_path_to(const service_node& node) {
     return _jq.call_get([this, &node]() -> std::optional<PathInfo> {
-        // An onion path is built before any destination is chosen and carries requests to all of
-        // them, so the answerable question is which path a swarm request to this node would go
-        // down were one sent now.  Asked of the selection the sending path itself uses, rather
-        // than reimplemented: the choice turns on strike counts, how busy each path is, and
-        // skipping any path that contains the destination, and a second copy of that would drift
-        // into reporting a path requests do not take.
+        // An onion-request path is built before any destination is chosen and carries requests to
+        // all of them, so the answerable question is which path a swarm request to this node
+        // would go down were one sent now.  Asked of the selection the sending path itself uses,
+        // rather than reimplemented: the choice turns on strike counts, how busy each path is,
+        // and skipping any path that contains the destination, and a second copy of that would
+        // drift into reporting a path requests do not take.
         auto* path = _find_valid_path(
                 &node, RequestCategory::standard_small, std::nullopt, "path query");
         if (!path)
