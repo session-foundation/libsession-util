@@ -127,7 +127,6 @@ class Globals final : detail::CoreComponent {
     void restore_account(predefined_seed seed, failable_function<void()> cb);
     void restore_account(const predefined_seed& seed, await_t);
 
-  public:
     // Retrieval methods.  These query for the given key and, if the type matches, return the given
     // value.  You get back nullopt if the database key does not exist, or if it contains a value
     // of some other type.
