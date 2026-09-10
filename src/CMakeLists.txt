@@ -187,6 +187,7 @@ add_libsession_util_library(network
     onionreq/hop_encryption.cpp
     onionreq/parser.cpp
     onionreq/response_parser.cpp
+    network/ip_country/lookup.cpp
     network/key_types.cpp
     network/network_config.cpp
     network/request_queue.cpp
@@ -215,6 +216,22 @@ target_link_libraries(network
     date::date
     sessiondep::libevent_core
 )
+
+# The two databases define the same accessors, so the lookup code is identical either way and only
+# the table it searches differs; see src/network/ip_country/data.hpp.
+if(WITH_IP_GEOLOCATION)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/network/ip_country/data.cpp")
+        # Generating it needs a ~4.5MB download, so it is neither committed nor fetched during a
+        # build: ask for it explicitly, once, and it stays until the next refresh.
+        message(FATAL_ERROR
+            "WITH_IP_GEOLOCATION is enabled but the database has not been generated yet.  Run\n"
+            "    ${PROJECT_SOURCE_DIR}/utils/update-ip-country-db.py\n"
+            "to download a DB-IP Lite release and generate it, then re-run cmake.")
+    endif()
+    target_sources(network PRIVATE network/ip_country/data.cpp)
+else()
+    target_sources(network PRIVATE network/ip_country/no_data.cpp)
+endif()
 
 if(ENABLE_NETWORKING_SROUTER)
     target_sources(network
