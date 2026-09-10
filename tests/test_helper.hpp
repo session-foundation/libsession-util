@@ -321,6 +321,17 @@ class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
 
+    /// Runs everything already queued on Core's job queue and waits for it.
+    ///
+    /// Needed wherever a test drives a network response by hand: in production those arrive on the
+    /// Network's own loop and Core marshals them onto its queue, so the work is finished a moment
+    /// after the callback returns rather than during it.  A test calling the handler directly has
+    /// to wait for that in the same way, and the queue is FIFO, so a round-trip through it is
+    /// enough -- everything posted earlier has run by the time this returns.
+    static void drain(core::Core& core) {
+        core._jq.call_get([] {});
+    }
+
     /// Puts a swarm straight into the pool's cache.  get_swarm consults it first and answers from
     /// it without touching the network, which is what lets swarm-level behaviour be tested at all:
     /// a test pool has no seed nodes, so nothing would ever resolve otherwise.

@@ -450,11 +450,11 @@ void Client::_emit(std::function<void(const callbacks&)> invoke) {
 }
 
 void Client::set_dispatcher(dispatcher d) {
-    loop.call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
+    _jq.call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
 }
 
 void Client::set_high_freq_dispatch_interval(std::chrono::milliseconds interval) {
-    loop.call([this, interval] { _high_freq_dispatch_interval = interval; });
+    _jq.call([this, interval] { _high_freq_dispatch_interval = interval; });
 }
 
 void Client::_dispatch_out(std::function<void()> job) {
@@ -794,7 +794,7 @@ void Client::profile_picture(
         const ConversationId& id,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
         failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
-    loop.call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
+    _jq.call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
         try {
             _profile_picture(id, std::move(on_progress), std::move(cb));
         } catch (const std::exception& e) {
@@ -962,7 +962,7 @@ void Client::attachment_data(
         size_t index,
         std::function<void(const AttachmentProgress&)> on_progress,
         failable_function<void(std::vector<std::byte>)> cb) {
-    loop.call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
+    _jq.call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
         try {
             _attachment_data(message_id, index, std::move(on_progress), cb);
         } catch (const std::exception& e) {
@@ -1061,7 +1061,7 @@ void Client::_fetch_cached(
             // Onto the loop before touching the registry -- this arrives on the network thread, and
             // `_in_flight` is ours.
             [this, name](int64_t done, int64_t total, std::optional<int> r) {
-                loop.call([this, name, done, total, r] {
+                _jq.call([this, name, done, total, r] {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1072,7 +1072,7 @@ void Client::_fetch_cached(
                 });
             },
             [this, name, store = std::move(store)](std::optional<std::string> error) {
-                loop.call([this, name, store, error = std::move(error)]() mutable {
+                _jq.call([this, name, store, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1254,14 +1254,14 @@ void Client::save_attachment(
     // Not _async: what that reports is the *start* of the transfer, and the answer a caller wants
     // is whether the file arrived, which is minutes away.  So the callback is carried down to the
     // download's own completion, and only the failures that happen before it starts come back here.
-    loop.call([this,
-               message_id,
-               index,
-               dest = std::move(dest),
-               on_progress = std::move(on_progress),
-               cb,
-               notify_sender,
-               replace]() mutable {
+    _jq.call([this,
+              message_id,
+              index,
+              dest = std::move(dest),
+              on_progress = std::move(on_progress),
+              cb,
+              notify_sender,
+              replace]() mutable {
         try {
             _save_attachment(
                     message_id,
@@ -2403,10 +2403,10 @@ void Client::_prefetch_picture(sqlite::Connection& c, int64_t account, const std
 
         auto& [sid, key] = *row;
 
-        loop.call_soon([this,
-                        id = ConversationId::dm(sid),
-                        url,
-                        key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
+        _jq.call_soon([this,
+                       id = ConversationId::dm(sid),
+                       url,
+                       key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
             _fetch_picture(id, std::move(url), std::move(key));
         });
     } catch (const std::exception& e) {
@@ -3788,7 +3788,7 @@ void Client::_upload_next(
         // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
         // own continuation -- so a failure has to be turned into the message failing, which
         // is what the application is watching.
-        loop.call([this, client_id, index, on_upload, plaintext_size, result = std::move(result)] {
+        _jq.call([this, client_id, index, on_upload, plaintext_size, result = std::move(result)] {
             try {
                 if (auto* err = std::get_if<int16_t>(&result)) {
                     log::warning(
@@ -4400,7 +4400,7 @@ void Client::_save_attachment(
         // we sent would claim they have a file they may never have opened.  A note to self
         // is exempt: there the recipient is us, so saving it really is the recipient
         // saving it.
-        loop.call([this, message_id, index, notify_sender] {
+        _jq.call([this, message_id, index, notify_sender] {
             if (_saved_by_recipient(message_id))
                 _record_saved(message_id, index, clock_now_ms());
 

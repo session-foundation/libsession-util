@@ -83,19 +83,35 @@ class Globals final : detail::CoreComponent {
     // account: that one may already have a group belonging to devices we have not met.
     void _mark_new_account();
 
+    // What both public forms of each dispatch onto the loop; each asserts it got there.
+    void _create_account();
+    void _restore_account(const predefined_seed& seed);
+
   public:
     /// Whether this account has an identity yet.
     ///
     /// Only ever false when the Core was constructed with defer_account and the database held no
     /// seed.  Until it is true, everything needing the account -- session_id(), account_seed(),
     /// send_dm(), attaching a network -- throws no_account.
+    ///
+    /// Safe to read from any thread once the identity is settled, which is what the rest of this
+    /// paragraph is about.  This and the accessors below read state that `create_account()` and
+    /// `restore_account()` write, and nothing synchronises the two: an application that reads
+    /// them while one of those is still in flight on the loop is racing itself.  Await the
+    /// handler, or use the `await` form, and the question does not arise -- an identity never
+    /// changes again once it exists.
     bool have_account() const { return _have_account; }
 
     /// Generates a fresh account and stores it.
     ///
+    /// Two forms and no third: this rewrites the cached key material Core's loop reads, so it
+    /// happens on the loop either way.  Code already there uses the `await` form and pays nothing,
+    /// since `call_get` runs the job inline when it is already the loop thread.
+    ///
     /// @throws std::logic_error if this account already has an identity: adopting a second one
     /// would orphan every message and key already stored against the first.
-    void create_account();
+    void create_account(failable_function<void()> cb);
+    void create_account(await_t);
 
     /// Adopts an existing account seed, as typed from a recovery phrase or transferred from
     /// another device, and stores it.
@@ -104,12 +120,22 @@ class Globals final : detail::CoreComponent {
     /// is encrypted to the account root key, so the seed must be adopted before
     /// devices.build_link_request() can be called.
     ///
+    /// The handler form takes the seed by value because it outlives the call: it is carried to the
+    /// loop and zeroed with the job, rather than borrowed from a caller that has already returned.
+    ///
     /// @throws std::logic_error if this account already has an identity.
-    void restore_account(const predefined_seed& seed);
+    void restore_account(predefined_seed seed, failable_function<void()> cb);
+    void restore_account(const predefined_seed& seed, await_t);
 
   public:
     // Retrieval methods.  These query for the given key and, if the type matches, return the given
-    // value.  You get back nullopt if the database key does not exist, or if it contains
+    // value.  You get back nullopt if the database key does not exist, or if it contains a value
+    // of some other type.
+    //
+    // These, `set` and `erase` are the exception to the threading rule on the rest of this class:
+    // each is one self-contained query against a connection the pool hands the calling thread, and
+    // touches nothing cached.  An application may call them from wherever it likes, and gets
+    // whatever SQLite's own locking gives it if two threads write the same key at once.
     std::optional<int64_t> get_integer(std::string_view key);
     std::optional<double> get_real(std::string_view key);
     std::optional<std::string> get_text(std::string_view key);

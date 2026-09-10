@@ -1180,7 +1180,11 @@ class Client {
     // leave them waiting for an answer that is never coming.
     template <typename Produce, typename Cb>
     void _async(Produce produce, Cb cb) {
-        loop.call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
+        // `_jq`, not `loop`: this captures `this` and runs later, and ~Client has to be able to
+        // throw it away.  On the loop's own queue it would instead run during Core's destruction
+        // -- the loop thread keeps draining until ~Loop, which is the *last* thing ~Core does --
+        // reaching a Client whose components have already gone.
+        _jq.call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
             using Result = decltype(produce());
             try {
                 if constexpr (std::is_void_v<Result>) {
@@ -1254,6 +1258,15 @@ class Client {
     // here is *cancelled* if the Client is destroyed with it still outstanding.  Running it instead
     // would mean reporting a change to the subscribers of a Client that is going away, against a
     // Core whose database is already being torn down.
+    //
+    // **Everything this class defers must go here**, not on `loop`.  The loop's own queue is not
+    // emptied until `~Loop`, which is the last thing `~Core` does, so a job left on it keeps being
+    // drained by the loop thread throughout the destruction of every Core member -- and every one
+    // of these jobs holds `this` and reaches through it into those members.  Stopping this queue
+    // is the first thing `~Client` does, while all of that is still whole.
+    //
+    // `loop.call_get()` is the exception and stays as it is: the calling thread is blocked inside
+    // it, so there is no window in which the caller can have gone away.
     //
     // Declared after `core` -- the one thing that belongs below it -- because a JobQueue needs its
     // loop alive in order to stop, so it has to be destroyed while Core still exists.

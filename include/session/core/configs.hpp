@@ -37,6 +37,17 @@ namespace session::core {
 /// them before an account exists in any case: a network cannot be attached without one, so neither
 /// polling nor pushing can run, and a direct caller gets the same `no_account` any other
 /// account-dependent call would throw.
+///
+/// **Every method here belongs to Core's loop**, with no exceptions of the kind Globals has: there
+/// is no self-contained query on this class.  The accessors hand out a reference into an object
+/// that `merge()` rewrites on the loop as poll results arrive, and building them is itself lazy,
+/// so a caller on another thread races either the construction or the merge.  A debug build
+/// asserts it.
+///
+/// An application does not reach these directly.  `session::client::Client` wraps the parts it
+/// needs -- `display_name()` and the rest of "our own account" -- and does the hop for the caller;
+/// anything else wanting a config from another thread does the same thing, rather than reading one
+/// from where it happens to be standing.
 class Configs : public detail::CoreComponent {
     friend class session::TestHelper;
 
