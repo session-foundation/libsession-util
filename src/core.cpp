@@ -817,6 +817,15 @@ void Core::_send_subscribe(network::Network* net, network::service_node node) {
                                 cat,
                                 "Subscribed to {}; polling stopped",
                                 node.remote_pubkey.hex());
+
+                        // One last poll, against the member we just subscribed with.
+                        //
+                        // Draining ran before the subscription existed, so a message stored
+                        // between the last retrieve's snapshot and the subscription taking effect
+                        // was in neither: too late for the retrieve, too early to be pushed.  This
+                        // is the only thing that closes that window -- the renew sends no
+                        // retrieve, and the probe asks about a namespace that is empty by design.
+                        _send_poll({POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0, node);
                     }
                 });
             });
