@@ -16,7 +16,15 @@ class IRouter {
     virtual void clear_cache() = 0;
 
     virtual ConnectionStatus get_status() const = 0;
-    virtual std::vector<PathInfo> get_active_paths() { return {}; };
+    /// The route traffic to `node` is taking right now, for showing a user where it goes.
+    ///
+    /// A snapshot, not a commitment: a router may rotate away from it at any time, and asking
+    /// again a moment later can legitimately give a different answer.  Nullopt when there is
+    /// nothing to report -- nothing has been sent to that node yet, or no route to it exists.
+    ///
+    /// Takes the whole node rather than its pubkey because sending direct has no route to look
+    /// up: the answer is the node itself, and that needs its address.
+    virtual std::optional<PathInfo> get_path_to(const service_node&) { return std::nullopt; };
     virtual std::vector<service_node> get_all_used_nodes() { return {}; };
     virtual void send_request(Request request, network_response_callback_t callback) = 0;
     [[deprecated("use upload_file() instead")]]

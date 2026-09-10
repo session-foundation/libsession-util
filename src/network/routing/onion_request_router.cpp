@@ -534,16 +534,24 @@ void OnionRequestRouter::clear_cache() {
     });
 }
 
-std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
-    return _jq.call_get([this] {
-        std::vector<PathInfo> result;
-        result.reserve(_paths.size());
+std::optional<PathInfo> OnionRequestRouter::get_path_to(const service_node& /*node*/) {
+    return _jq.call_get([this]() -> std::optional<PathInfo> {
+        // The destination is not part of the answer here, and is ignored: an onion path is built
+        // before any destination is chosen and carries requests to all of them, so what a caller
+        // can be told is which path a swarm request would go down were one sent now.  Which pool
+        // that comes from is ours to know, not theirs to be handed and asked to filter.
+        auto it = _paths.find(PathCategory::standard);
+        if (it == _paths.end() || it->second.empty())
+            return std::nullopt;
 
-        for (const auto& [category, path_list] : _paths)
-            for (const auto& p : path_list)
-                result.push_back({p.nodes, OnionPathMetadata{category}});
+        const auto& path = it->second.front();
 
-        return result;
+        PathInfo info;
+        info.hops.reserve(path.nodes.size());
+        for (const auto& n : path.nodes)
+            info.hops.push_back({n.remote_pubkey, n.ip});
+
+        return info;
     });
 }
 

@@ -126,7 +126,9 @@ class Network {
     void clear_cache();
 
     ConnectionStatus get_status();
-    std::vector<PathInfo> get_active_paths();
+    /// The route traffic to `node` is taking right now, for showing a user where it goes.  A
+    /// snapshot rather than a commitment; see IRouter::get_path_to.
+    std::optional<PathInfo> get_path_to(const service_node& node);
 
     /// API: network/get_swarm
     ///

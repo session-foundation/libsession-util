@@ -222,10 +222,6 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
 
 LIBSESSION_EXPORT CONNECTION_STATUS session_network_get_status(network_object* network);
 
-LIBSESSION_EXPORT void session_network_get_active_paths(
-        network_object* network, session_path_info** out_paths, size_t* out_paths_len);
-
-LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
 
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object* network,

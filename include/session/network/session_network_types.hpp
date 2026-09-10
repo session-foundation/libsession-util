@@ -321,19 +321,29 @@ namespace response {
     std::optional<int16_t> find_uniform_batch_error(std::string_view body);
 }  // namespace response
 
-struct OnionPathMetadata {
-    PathCategory category;
-};
-struct SessionRouterTunnelMetadata {
-    std::string destination_pubkey;
-    std::string destination_snode_address;
+/// One hop of a route, for showing a user where their traffic goes.  Identity and location, which
+/// is all a diagnostic needs -- deliberately not a `service_node`, because a hop is not always one:
+/// a Session Router relay has no ports, no storage server version and no swarm, and filling those
+/// in with zeros would make a swarm id of 0 that means something else.
+struct PathHop {
+    ed25519_pubkey pubkey;
+    oxen::quic::ipv4 ip;
 };
 
-using PathMetadata = std::variant<OnionPathMetadata, SessionRouterTunnelMetadata>;
-
+/// A route, as shown to a user.  Deliberately separate from how a router represents the paths it
+/// actually sends on: those carry pool membership, strike counts and other bookkeeping that means
+/// nothing outside the router, and mixing the two ends up publishing one to serve the other.
 struct PathInfo {
-    std::vector<service_node> nodes;
-    PathMetadata metadata;
+    /// The hops we can see, in order from the one nearest us.
+    ///
+    /// Whether the last of them is the destination depends on the route, and the caller cannot
+    /// tell from here.  Sending direct, the only hop *is* the destination.  A Session Router
+    /// tunnel to a `.snode` terminates at the storage node, so it is; a path to a client
+    /// terminates at the pivot relay, with the rest belonging to the other side and invisible to
+    /// us; and an onion path is built before any destination is chosen, so its last hop is a
+    /// relay that will forward to whatever the request names.  Reporting what is known beats a
+    /// shape that promises a destination which is sometimes a guess.
+    std::vector<PathHop> hops;
 };
 
 }  // namespace session::network
