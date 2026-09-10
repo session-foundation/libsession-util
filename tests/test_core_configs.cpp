@@ -407,7 +407,7 @@ TEST_CASE("Configs: merging a change identical to our own", "[core][configs][not
     // reverse, and the case above covers that.
 }
 
-TEST_CASE("Configs: what a skipped seqno costs afterwards", "[core][configs][notify]") {
+TEST_CASE("Configs: an adopted duplicate leaves no gap behind", "[core][configs][notify]") {
     ChangeWatcher w;
     TempCore c{w.callbacks()};
 
@@ -430,15 +430,15 @@ TEST_CASE("Configs: what a skipped seqno costs afterwards", "[core][configs][not
         c->receive_messages(incoming, config::Namespace::Contacts, true);
     }
 
-    // We are now clean at a seqno the swarm has never held.
-    auto phantom = c->configs.contacts().seqno();
-    CHECK(phantom == agreed_seqno + 1);
+    // Adopting their identical config leaves us on the seqno the swarm actually holds, rather than
+    // one past it: no number is consumed that no stored message occupies.
+    CHECK(c->configs.contacts().seqno() == agreed_seqno);
     CHECK_FALSE(c->configs.contacts().needs_push());
 
-    // The other device, still at the seqno it actually published, now makes a further change of its
-    // own -- which lands on the number we already consumed.
+    // So the other device's further change of its own lands on the next number up, with nothing of
+    // ours already sitting on it.
     them.set(them.get_or_construct(b));
-    REQUIRE(them.seqno() == phantom);
+    REQUIRE(them.seqno() == agreed_seqno + 1);
 
     {
         auto [seqno, messages, obsolete] = them.push();
@@ -446,20 +446,17 @@ TEST_CASE("Configs: what a skipped seqno costs afterwards", "[core][configs][not
         c->receive_messages(incoming, config::Namespace::Contacts, true);
     }
 
-    // What matters, and all that is asserted: their change arrives intact and ours is still there.
-    // No data is lost by the collision.
+    // Their change arrives intact and ours is still there.
     CHECK(c->configs.contacts().size() == 2);
     CHECK(c->configs.contacts().get(a).has_value());
     CHECK(c->configs.contacts().get(b).has_value());
 
-    // What is *observed* but deliberately not asserted, because it is the defect rather than the
-    // contract: their ordinary update lands on the number our phantom already consumed, so instead
-    // of being adopted cleanly it resolves as a conflict -- one past both, leaving us dirty and
-    // owing a push we would not otherwise have made.  One real change, two seqnos.
-    //
-    // It settles once they adopt ours, so it does not run away.  The cost is to the "within N"
-    // window: two of its five are spent carrying a single change, and a device holding an unpushed
-    // change is dropped that much sooner.  Fixing the spurious increment removes both seqnos.
+    // ...and it is adopted at its own seqno rather than resolving as a conflict one past both, so
+    // we are left neither dirty nor owing a push for a change that was never ours.  One real
+    // change, one seqno -- which is also what keeps the "within N" conflict window from spending
+    // two of its five carrying a single change.
+    CHECK(c->configs.contacts().seqno() == agreed_seqno + 1);
+    CHECK_FALSE(c->configs.contacts().needs_push());
 }
 
 TEST_CASE("Configs: a local change is not reported back", "[core][configs][notify]") {

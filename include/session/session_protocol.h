@@ -62,6 +62,8 @@ typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
     SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     SESSION_PROTOCOL_PRO_STATUS_VALID,
     SESSION_PROTOCOL_PRO_STATUS_EXPIRED,
+    // Nothing could be evaluated, so the proof is unusable (see session::ProStatus::Invalid).
+    SESSION_PROTOCOL_PRO_STATUS_INVALID,
 } SESSION_PROTOCOL_PRO_STATUS;
 
 typedef struct session_protocol_pro_signed_message {
@@ -70,7 +72,6 @@ typedef struct session_protocol_pro_signed_message {
 } session_protocol_pro_signed_message;
 
 typedef struct session_protocol_pro_proof {
-    uint8_t version;
     cbytes32 revocation_tag;
     cbytes32 rotating_pubkey;
     int64_t expiry_ts;

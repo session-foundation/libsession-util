@@ -567,8 +567,6 @@ namespace {
     }
 
     void print(const SessionProtos::ProProof& m, std::string& out, int depth) {
-        if (m.has_version())
-            line(out, depth, "version", 1, fmt::format("{}", m.version()));
         if (m.has_revocationtag())
             line(out, depth, "revocationTag", 2, hex(m.revocationtag()));
         if (m.has_rotatingpublickey())
