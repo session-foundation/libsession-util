@@ -201,6 +201,11 @@ class Devices final : detail::CoreComponent {
     // (i.e. we are not in the device group, or all our keys have rotated past this message).
     std::vector<std::byte> decrypt_device_data(std::span<const std::byte> data);
 
+    // What both public forms of each dispatch onto the loop, and what the rest of this class
+    // calls internally, since it is already there.  Each asserts it got there.
+    std::pair<device::Info, bool> _device_info();
+    void _update_info(const device::Info& info);
+
   public:
     // Returns the current device's random identifier, in hex.
     std::string device_id() const;
@@ -215,7 +220,11 @@ class Devices final : detail::CoreComponent {
             std::span<const std::byte> only_device = {});
 
     // Returns *this* device's info and whether it is registered in the device group.
-    std::pair<device::Info, bool> device_info();
+    //
+    // Reads the device config, which the loop merges into, so it happens on the loop either way:
+    // code already there uses the `await` form and pays nothing for it.
+    void device_info(failable_function<void(std::pair<device::Info, bool>)> cb);
+    std::pair<device::Info, bool> device_info(await_t);
 
     struct LinkRequestResult {
         std::vector<std::byte> message;        // encrypted bytes to push to Namespace::Devices
@@ -227,13 +236,27 @@ class Devices final : detail::CoreComponent {
     // std::logic_error if it is already registered.  The returned message is to be pushed to
     // Namespace::Devices with a 10-minute TTL.  The sas field contains the short authentication
     // string that should be displayed to the user for verification against the accepting device.
-    LinkRequestResult build_link_request();
+    //
+    // Reads the device config and writes the pending request, so it happens on the loop either
+    // way; an application driving a linking screen is on its own thread and wants one of these.
+    void build_link_request(failable_function<void(LinkRequestResult)> cb);
+    LinkRequestResult build_link_request(await_t);
+
+  private:
+    LinkRequestResult _build_link_request();
+
+  public:
 
     // Updates this device's info locally to match the given info; if the current device is
     // registered then this dirties the device config data, requiring a push.
     //
     // The state and pk_* fields of the input value are ignored.
-    void update_info(const device::Info& info);
+    //
+    // Filling these in is the application's job -- libsession establishes the group with them
+    // blank -- and an application is on its own thread when it does.  The handler form takes the
+    // info by value: it outlives the call.
+    void update_info(device::Info info, failable_function<void()> cb);
+    void update_info(const device::Info& info, await_t);
 
     // Creates the account's device group with this device as its only member, if one is owed.
     //
