@@ -209,15 +209,23 @@ static constexpr auto SUBSCRIBE_NAMESPACES = [] {
     return ns;
 }();
 
-// How often a live subscription is renewed, and its node re-polled.
-//
-// Far shorter than keeping the subscription alive needs: the storage server expires one 65 minutes
-// after the last renewal, so any interval under an hour would do for that alone.  It is this short
-// because renewal is not the only thing the timer is for.  A subscribed client sends nothing else,
-// so this is also the only thing that can notice the node has stopped holding our swarm, or that
-// the connection is unusable in a way QUIC has not reported yet.  Both requests are a few hundred
-// bytes.
-static constexpr auto SUBSCRIPTION_RENEW_INTERVAL = 30s;
+// How often a live subscription is re-sent.  The storage server expires one 65 minutes after the
+// last renewal, so this leaves four times the headroom it needs -- and the expiry only ever
+// matters on a connection that has stayed up that long, since losing the connection loses the
+// subscription outright.
+static constexpr auto SUBSCRIPTION_RENEW_INTERVAL = 15min;
+
+// How often the subscribed node is probed; see _subscription_probe.
+static constexpr auto SUBSCRIPTION_PROBE_INTERVAL = 30s;
+
+// The namespace the probe asks about: negative and of the form -(20n+1), which is what makes a
+// retrieve of it need no signature (oxenss/common/namespace.h, is_noauth_retrieve_namespace), and
+// otherwise unassigned, so it is permanently empty and the reply is a fixed 57 bytes.  Deliberately
+// not a memorable number: it should not look like it means something.
+static constexpr int16_t PROBE_NAMESPACE = -3741;
+
+// A probe is answered or it is not; there is no reason to spend the swarm budget on it.
+static constexpr auto PROBE_TIMEOUT = 10s;
 
 // What the storage server pushes a subscribed client, as the endpoint of a request of its own.
 static constexpr auto NOTIFY_ENDPOINT = "notify"sv;
@@ -336,11 +344,6 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
                             timeout ? "timed out"
                             : body  ? *body
                                     : "request failed");
-
-                    // A subscribed client polls only this node, only on the renew tick, so a
-                    // failure here is the one signal that it has stopped being usable -- including
-                    // a 421 whose retry also failed, which is how a swarm change reaches us.
-                    _note_poll_failed(node);
                     return;
                 }
 
@@ -634,7 +637,9 @@ void Core::_send_subscribe(network::Network* net, network::service_node node) {
                             _poll_ticker.reset();
                         }
                         _sub_ticker = _loop.call_every(
-                                SUBSCRIPTION_RENEW_INTERVAL, [this] { _subscription_tick(); });
+                                SUBSCRIPTION_RENEW_INTERVAL, [this] { _subscription_renew(); });
+                        _probe_ticker = _loop.call_every(
+                                SUBSCRIPTION_PROBE_INTERVAL, [this] { _subscription_probe(); });
 
                         log::info(
                                 cat,
@@ -645,7 +650,40 @@ void Core::_send_subscribe(network::Network* net, network::service_node node) {
             });
 }
 
-void Core::_subscription_tick() {
+void Core::_subscription_renew() {
+    if (!_sub_node)
+        return;
+
+    if (auto* net = _network.get())
+        _send_subscribe(net, *_sub_node);
+}
+
+// Asks the subscribed node to retrieve a namespace that is always empty, purely for the 421 we get
+// back if it has stopped holding our swarm.
+//
+// This exists because a subscription that has stopped applying is *silent*.  The storage server
+// runs no swarm check when subscribing and none when a swarm changes underneath one: `get_notifiers`
+// simply stops matching, so a client that has given up polling cannot tell "nothing has been sent
+// to me" from "I am subscribed to a node that no longer holds my messages".
+//
+// It is deliberately the cheapest question that still produces a 421.  The storage server decides
+// that from the pubkey alone, on the first two lines of its retrieve handler -- before the
+// signature-required check and before verifying anything -- so the request needs no signature, no
+// ed25519 pubkey and no timestamp, and PROBE_NAMESPACE has nothing in it so it needs no cursor
+// either.  97 bytes out, 57 back.
+//
+// Two things this leans on, neither of them a promised contract:
+//
+// - that the swarm check precedes the auth check.  If the server ever reorders them this stops
+//   working *silently*, answering 200-with-nothing where it used to answer 421.
+// - that no swarm_pubkey is set on the request, which is what stops the network layer from
+//   quietly retrying a 421 on some other swarm member and reporting success.  We are asking about
+//   this node specifically; an answer from a different one would defeat the point.
+//
+// Temporary.  The storage server is gaining a notification that tells a subscriber outright when
+// its subscription has stopped applying, and carries the replacement swarm with it.  Once that has
+// been deployed widely enough this can go, though it has to outlive the last un-upgraded node.
+void Core::_subscription_probe() {
     if (!_sub_node)
         return;
 
@@ -653,18 +691,44 @@ void Core::_subscription_tick() {
     if (!net)
         return _drop_subscription("network detached");
 
-    // The poll is not how messages arrive any more -- pushes are -- but a retrieve is the only
-    // request that learns this node has stopped holding our swarm, since a subscribe succeeds
-    // whatever swarm the node is in.
-    _send_poll(net, *_sub_node, {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
-    _send_subscribe(net, *_sub_node);
-}
+    auto body = nlohmann::json{
+            {"pubkey", globals.session_id_hex()},
+            {"namespace", PROBE_NAMESPACE},
+    }.dump();
 
-void Core::_note_poll_failed(const network::service_node& node) {
-    _loop.call([this, node] {
-        if (_sub_node && _sub_node->remote_pubkey == node.remote_pubkey)
-            _drop_subscription("poll of the subscribed node failed");
-    });
+    auto node = *_sub_node;
+    network::Request req{
+            node,
+            "retrieve",
+            to_vector(body),
+            network::RequestCategory::standard_small,
+            PROBE_TIMEOUT};
+
+    net->send_request(
+            std::move(req),
+            [this, node](
+                    bool success,
+                    bool /*timeout*/,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> /*body*/) {
+                if (success)
+                    return;
+
+                _loop.call([this, node, status_code] {
+                    if (!_sub_node || _sub_node->remote_pubkey != node.remote_pubkey)
+                        return;
+
+                    if (status_code == network::ERROR_MISDIRECTED_REQUEST)
+                        return _drop_subscription("node no longer holds our swarm");
+
+                    // Anything else is the node being unreachable or unwell.  A dead connection
+                    // reaches us through on_connection_lost instead, so getting here means it is
+                    // notionally up but not answering, which is no better for a client that has
+                    // nothing else to fall back on.
+                    _drop_subscription("probe failed (status {})"_format(status_code));
+                });
+            });
 }
 
 void Core::_drop_subscription(std::string_view why) {
@@ -676,9 +740,11 @@ void Core::_drop_subscription(std::string_view why) {
     _sub_node.reset();
     _subscribed = false;
 
-    if (_sub_ticker) {
-        _sub_ticker->stop();
-        _sub_ticker.reset();
+    for (auto* ticker : {&_sub_ticker, &_probe_ticker}) {
+        if (*ticker) {
+            (*ticker)->stop();
+            ticker->reset();
+        }
     }
 
     // Back to polling, which is also what picks the next node: the swarm member a fresh

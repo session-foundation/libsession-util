@@ -372,6 +372,7 @@ class Core {
     std::optional<network::service_node> _sub_node;
     bool _subscribed = false;
     std::shared_ptr<oxen::quic::Ticker> _sub_ticker;
+    std::shared_ptr<oxen::quic::Ticker> _probe_ticker;
 
     // Subscribes to `node` if a subscription is possible and we do not already have one.  Called
     // when a poll of `node` drains, which is what makes it the node we subscribe with: it has an
@@ -379,13 +380,14 @@ class Core {
     void _maybe_subscribe(const network::service_node& node);
     void _send_subscribe(network::Network* net, network::service_node node);
 
-    // Renews the subscription and re-polls the subscribed node.  The poll is not for delivery --
-    // pushes do that -- but for the swarm correction a retrieve gets and pushes do not.
-    void _subscription_tick();
+    // Re-sends the subscribe, so that the server's expiry never elapses on a connection that is
+    // still up.
+    void _subscription_renew();
 
-    // Called when a poll of `node` fails, which for the subscribed node is the signal that it has
-    // stopped being usable.
-    void _note_poll_failed(const network::service_node& node);
+    // Asks the subscribed node a question whose only purpose is the 421 we get if it has stopped
+    // holding our swarm.  Nothing else would notice: a subscription that has stopped applying is
+    // silent, not an error.  Temporary -- see the comment on the definition.
+    void _subscription_probe();
 
     // Gives up the subscription and returns to polling.
     void _drop_subscription(std::string_view why);
