@@ -1,6 +1,7 @@
 #include "session/core/configs.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/quic/loop.hpp>
@@ -33,6 +34,12 @@ Configs::Configs(Core& core) : CoreComponent{core} {}
 Configs::~Configs() = default;
 
 void Configs::_load() {
+    // Every public entry point on this class reaches the config objects through here, so this is
+    // the one place the threading rule has to hold: the objects are built lazily, so two threads
+    // arriving together would race on construction, and once built they are what `merge()` mutates
+    // on the loop while a reader is walking them.
+    assert(on_loop());
+
     if (_loaded)
         return;
 
@@ -263,11 +270,9 @@ void Configs::_schedule_push() {
 }
 
 void Configs::_arm_push_timer(std::chrono::milliseconds delay) {
-    loop().call_later(delay, [this, alive = std::weak_ptr<int>{_alive}] {
-        if (alive.expired())
-            return;
-        _push_if_due();
-    });
+    // On Core's queue rather than the loop, so stopping the queue deletes the pending timer.  The
+    // `_alive` canary the network callback below still needs is exactly what that spares us here.
+    jq().call_later(delay, [this] { _push_if_due(); });
 }
 
 void Configs::_push_if_due() {
@@ -293,6 +298,10 @@ void Configs::_push_if_due() {
 }
 
 void Configs::push_now() {
+    // Its own assert because the early return below reads push state without going through
+    // _load(), so this is the one path that could otherwise skip the check entirely.
+    assert(on_loop());
+
     if (_push_in_flight)
         return;
     _send_push();

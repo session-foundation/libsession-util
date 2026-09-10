@@ -592,9 +592,17 @@ class Core {
     /// The event loop this account's work runs on.
     ///
     /// Everything Core does off the caller's thread — polling, send completion, and therefore every
-    /// callback it fires — happens here.  A layer above Core dispatches its own database work onto
-    /// it with `loop().call(...)` so that all access is serialised onto one thread, rather than
-    /// relying on the database being safe to touch from several.
+    /// callback it fires — happens here.
+    ///
+    /// The database itself does not need this: `sqlite::Database` is a pool that hands each thread
+    /// its own connection, so a self-contained query is safe from anywhere.  What needs the loop is
+    /// everything a component holds *beside* its tables — the cached account keys, the config
+    /// objects, and the lazy construction of both — none of which is synchronised and all of which
+    /// polling touches.  `detail::CoreComponent` says which methods that covers, and they assert it
+    /// in a debug build.
+    ///
+    /// A layer above Core that keeps its own tables dispatches its own work here for the same
+    /// reason it would anywhere else: to serialise its own state, not the database's.
     ///
     /// `call()` runs the job inline when the caller is already on this thread, so a single-threaded
     /// application pays nothing for the indirection.
@@ -618,6 +626,10 @@ class Core {
 
     // Global value storage.  This are used by some components, but can also be used by the
     // application to persist settings.
+    //
+    // `get_*`/`set`/`erase` are self-contained queries and are safe to call from any thread; the
+    // rest of Globals is not.  See the threading note on `detail::CoreComponent`, which applies
+    // to every component below as well.
     Globals globals{*this};
 
     // Session Pro-related capabilities
@@ -637,6 +649,21 @@ class Core {
     // is_final=true to flush any actions that are deferred until the end of a fetch.
     void receive_messages(
             std::span<const SwarmMessage> messages, config::Namespace ns, bool is_final);
+
+  private:
+    // Set at the end of init(), i.e. once construction is complete and another thread could
+    // reach a component.  Read by CoreComponent::on_loop() so that the components' `init()`,
+    // which necessarily runs on the constructing thread, is not treated as misuse.
+    bool _constructed = false;
+
+    // Where component work runs.  A queue of our own rather than the loop's shared one so that
+    // whatever is still outstanding is *cancelled* when Core goes away instead of running against
+    // components that are already destroyed -- the same reason Client keeps its own.
+    //
+    // Declared last so it is destroyed first, before the components its jobs reach.  It has to be
+    // destroyed while `_loop` is still alive, which it is: `_loop` is declared first and so is
+    // destroyed last.
+    quic::JobQueue _jq{_loop};
 };
 
 }  // namespace session::core
