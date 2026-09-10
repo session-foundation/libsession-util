@@ -58,7 +58,6 @@ typedef struct session_network_config {
     bool increase_no_file_limit;
     uint8_t path_length;
     bool enforce_subnet_diversity;
-    uint8_t redirect_retry_count;
     uint64_t min_retry_delay_ms;
     uint64_t max_retry_delay_ms;
     uint8_t num_nodes_to_check_for_network_offset;
@@ -92,6 +91,9 @@ typedef struct session_network_config {
 
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
     uint32_t quic_handshake_timeout_seconds;
+    /// Handshake timeout for connections whose packets travel through a Session Router tunnel,
+    /// which have a multi-hop round trip to complete rather than a direct one.
+    uint32_t quic_tunnel_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
     bool quic_disable_mtu_discovery;  // deprecated: use quic_max_udp_payload instead
     /// Maximum QUIC UDP payload size for PMTUD; 0 for default (no cap).
@@ -219,10 +221,6 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
 
 LIBSESSION_EXPORT CONNECTION_STATUS session_network_get_status(network_object* network);
 
-LIBSESSION_EXPORT void session_network_get_active_paths(
-        network_object* network, session_path_info** out_paths, size_t* out_paths_len);
-
-LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
 
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object* network,

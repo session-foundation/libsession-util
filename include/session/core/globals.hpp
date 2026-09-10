@@ -107,7 +107,6 @@ class Globals final : detail::CoreComponent {
     /// @throws std::logic_error if this account already has an identity.
     void restore_account(const predefined_seed& seed);
 
-  public:
     // Retrieval methods.  These query for the given key and, if the type matches, return the given
     // value.  You get back nullopt if the database key does not exist, or if it contains
     std::optional<int64_t> get_integer(std::string_view key);

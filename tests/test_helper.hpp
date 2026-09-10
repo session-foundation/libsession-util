@@ -46,9 +46,30 @@ class MockNetwork : public network::Network {
     // The node returned by get_swarm; tests can change this to simulate swarm-member switches.
     network::service_node current_node;
 
+    /// A swarm of more than one member, for exercising anything that moves between them.  Empty
+    /// means "just `current_node`", which is what most tests want and need not think about.
+    std::vector<network::service_node> swarm;
+
+    /// Set to answer requests as they are sent rather than leaving them in `sent_requests` for the
+    /// test to fire by hand.  Return nullopt to leave one pending.
+    ///
+    /// Called with the request; the tuple is (success, timeout, status, body).  Requests are still
+    /// recorded either way, so a test can assert on what was sent as well as script the answer.
+    using Reply = std::tuple<bool, bool, int16_t, std::optional<std::string>>;
+    std::function<std::optional<Reply>(const network::Request&)> auto_reply;
+
     void send_request(
             network::Request request, network::network_response_callback_t callback) override {
-        sent_requests.push_back({std::move(request), std::move(callback)});
+        std::optional<Reply> scripted;
+        if (auto_reply)
+            scripted = auto_reply(request);
+
+        sent_requests.push_back({std::move(request), callback});
+
+        if (scripted) {
+            auto [ok, timeout, status, body] = std::move(*scripted);
+            callback(ok, timeout, status, {}, std::move(body));
+        }
     }
 
     void get_swarm(
@@ -57,7 +78,7 @@ class MockNetwork : public network::Network {
             std::function<
                     void(network::swarm_id_t swarm_id, std::vector<network::service_node> swarm)>
                     callback) override {
-        callback(0, {current_node});
+        callback(0, swarm.empty() ? std::vector{current_node} : swarm);
     }
 
     std::vector<network::DownloadRequest> downloads;

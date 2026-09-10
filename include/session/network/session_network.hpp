@@ -69,6 +69,30 @@ class Network {
     std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)>
             on_network_info_changed;
 
+    /// Hook to be notified when a storage server sends us something we did not ask for, on a
+    /// connection we already hold -- which is how a swarm subscription delivers messages.  `node`
+    /// names the swarm member; `endpoint` and `body` are the pushed request's, unparsed.
+    ///
+    /// Only reachable with a routing mode that gives the storage server a connection to us, which
+    /// means `session_router` or `direct`.  Under `onion_requests` the server has nothing to push
+    /// down: the connection it can see belongs to the last relay rather than to us, so it would
+    /// key the subscription to that relay.  This is not a property of onion routing in general --
+    /// `session_router` is onion-routed too, and is the mode this exists for.
+    std::function<
+            void(const ed25519_pubkey& node,
+                 std::string_view endpoint,
+                 std::span<const std::byte> body)>
+            on_server_push;
+
+    /// Hook to be notified once a connection to `node` is usable, including when it comes back
+    /// after having been lost.  Per-connection state the far end holds for us -- a subscription --
+    /// does not survive that, so this is where it has to be established again.
+    std::function<void(const ed25519_pubkey& node)> on_connection_established;
+
+    /// Hook to be notified when a connection to `node` is gone, for any reason.  A subscription
+    /// held on it is gone too, and the far end will not say so: it simply stops pushing.
+    std::function<void(const ed25519_pubkey& node)> on_connection_lost;
+
     template <typename... Opt>
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
@@ -87,13 +111,26 @@ class Network {
     uint16_t hardfork() const { return _fork_versions.load().hardfork; };
     uint16_t softfork() const { return _fork_versions.load().softfork; };
 
+    /// Whether a storage server can push to us on this network, i.e. whether `on_server_push` can
+    /// ever fire and a subscription is worth making.
+    ///
+    /// False for onion requests, and not as a matter of it being unimplemented: the storage server
+    /// keys a subscription to the connection the request arrived on, which for an onion request is
+    /// the last relay's rather than ours, so subscribing over one would register a relay as the
+    /// subscriber.  Anything relying on pushed messages has to keep polling in that mode.
+    bool supports_server_push() const {
+        return config.router != opt::router::Type::onion_requests;
+    }
+
     void suspend();
     void resume(bool automatically_reconnect = true);
     void close_connections();
     void clear_cache();
 
     ConnectionStatus get_status();
-    std::vector<PathInfo> get_active_paths();
+    /// The route traffic to `node` is taking right now, for showing a user where it goes.  A
+    /// snapshot rather than a commitment; see IRouter::get_path_to.
+    std::optional<PathInfo> get_path_to(const service_node& node);
 
     /// API: network/get_swarm
     ///
@@ -142,20 +179,9 @@ class Network {
     void _recalculate_status();
     void _update_status(ConnectionStatus new_status);
     void _update_network_state(const std::string& body);
-    void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
-
-    // Re-sends a request to the next member of the same swarm, after the one it was sent to could
-    // not be reached.  Distinct from the 421 path: there the swarm information was wrong and is
-    // thrown away, here it is right and only one member of it is unusable.  Gives up when
-    // selection has no member left that has not already failed, reporting the original failure
-    // rather than one of its own invention.
-    void _retry_next_swarm_node(
-            Request original_request,
-            bool timeout,
-            int16_t status_code,
-            std::vector<std::pair<std::string, std::string>> headers,
-            std::optional<std::string> body,
-            network_response_callback_t final_callback);
+    // Writes the swarm a 421 reported into the cache.  Does not retry: choosing another member is
+    // the caller's, since only the caller can know which node it ended up talking to.
+    void _adopt_swarm_from_421(const x25519_pubkey& swarm_pubkey, std::string_view body);
 
     void _resync_clock(
             std::optional<Request> original_request, network_response_callback_t request_callback);

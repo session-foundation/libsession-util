@@ -22,6 +22,7 @@ namespace session::network {
 namespace config {
     struct QuicTransport {
         std::chrono::milliseconds handshake_timeout;
+        std::chrono::milliseconds tunnel_handshake_timeout;
         std::chrono::seconds keep_alive;
 
         std::optional<size_t> max_udp_payload;
@@ -92,7 +93,8 @@ class QuicTransport : public ITransport {
     void _establish_connection(
             const oxen::quic::RemoteAddress& address,
             const std::string& initiating_req_id,
-            const RequestCategory category);
+            const RequestCategory category,
+            bool tunnelled);
     void _send_on_connection(
             oxen::quic::ConnectionID conn_id,
             const std::string remote_pubkey_hex,

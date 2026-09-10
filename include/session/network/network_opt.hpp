@@ -230,14 +230,6 @@ namespace opt {
     /// included in the same path when building onion request or session router paths.
     struct disable_subnet_diversity {};
 
-    /// Can be used to override the default (1) number of request retries that will occur when
-    /// receiving a 421 error.
-    struct redirect_retry_count {
-        uint8_t count;
-
-        redirect_retry_count(uint8_t count) : count{count} {}
-    };
-
     struct retry_delay {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
@@ -379,13 +371,22 @@ namespace opt {
 
     // MARK: Quic Transport Options
 
-    /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
+    /// Can be used to override the default (5s) handshake timeout duration for Quic connections
+    /// made directly to a node's own address.
     struct quic_handshake_timeout {
         std::chrono::milliseconds duration;
         quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
-    /// Can be used to override the default (0ms) keep alive duration for Quic connections.
+    /// Can be used to override the default (10s) handshake timeout duration for Quic connections
+    /// whose packets travel through a Session Router tunnel, which have a multi-hop round trip to
+    /// complete rather than a direct one.
+    struct quic_tunnel_handshake_timeout {
+        std::chrono::milliseconds duration;
+        quic_tunnel_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
+    };
+
+    /// Can be used to override the default (10s) keep alive duration for Quic connections.
     struct quic_keep_alive {
         std::chrono::seconds duration;
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
@@ -467,7 +468,6 @@ namespace opt {
             increase_no_file_limit,
             path_length,
             disable_subnet_diversity,
-            redirect_retry_count,
             retry_delay,
             num_nodes_to_check_for_network_offset,
             min_resume_clock_resync_interval,
@@ -490,6 +490,7 @@ namespace opt {
 
             // Quic transport options
             quic_handshake_timeout,
+            quic_tunnel_handshake_timeout,
             quic_keep_alive,
             quic_max_udp_payload,
 

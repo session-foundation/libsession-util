@@ -109,7 +109,10 @@ void QuicTransport::verify_connectivity(
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
             _establish_connection(
-                    {node.remote_pubkey.view(), node.host(), node.omq_port}, request_id, category);
+                    {node.remote_pubkey.view(), node.host(), node.omq_port},
+                    request_id,
+                    category,
+                    false);
     });
 }
 
@@ -267,15 +270,19 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
             "[Request {}] No connection to {}, initiating new connection.",
             request.request_id,
             remote_pubkey_hex);
+    // Everything the connect needs has to be read before the request is moved into the queue.
     std::string initiating_req_id = request.request_id;
+    auto category = request.category;
+    bool tunnelled = request.tunnelled;
     _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(*remote, initiating_req_id, request.category);
+    _establish_connection(*remote, initiating_req_id, category, tunnelled);
 }
 
 void QuicTransport::_establish_connection(
         const oxen::quic::RemoteAddress& address,
         const std::string& initiating_req_id,
-        const RequestCategory /*category*/) {
+        const RequestCategory /*category*/,
+        bool tunnelled) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
 
     try {
@@ -302,7 +309,8 @@ void QuicTransport::_establish_connection(
                 address,
                 creds,
                 oxen::quic::opt::outbound_alpn(ALPN),
-                oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
+                oxen::quic::opt::handshake_timeout{
+                        tunnelled ? _config.tunnel_handshake_timeout : _config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
                 // libquic hands these a live Connection, so they run inline on the loop rather than
                 // as jobs of ours.  ~QuicTransport destroys the endpoint on the loop before the
@@ -317,6 +325,32 @@ void QuicTransport::_establish_connection(
                     auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
                     auto conn_id = conn.reference_id();
                     auto stream_id = stream->stream_id();
+
+                    // Anything the far end sends us of its own accord arrives here.  Registered
+                    // generically rather than per endpoint name because what those names mean is
+                    // the storage server's business, not the transport's.
+                    //
+                    // Caught rather than left to propagate: this runs inside libquic's stream
+                    // machinery, where an exception would tear down the connection for a fault in
+                    // a consumer's handler.
+                    stream->register_generic_handler(
+                            [this, address_pubkey_hex](oxen::quic::message msg) {
+                                if (!on_server_push)
+                                    return;
+                                try {
+                                    on_server_push(
+                                            ed25519_pubkey::from_hex(address_pubkey_hex),
+                                            msg.endpoint(),
+                                            msg.body<std::byte>());
+                                } catch (const std::exception& e) {
+                                    log::error(
+                                            cat,
+                                            "Handler for pushed '{}' from {} threw: {}",
+                                            msg.endpoint(),
+                                            address_pubkey_hex,
+                                            e.what());
+                                }
+                            });
                     auto it = _pending_verification_callbacks.find(address_pubkey_hex);
                     decltype(it->second) verification_callbacks;
                     if (it != _pending_verification_callbacks.end()) {
@@ -345,6 +379,22 @@ void QuicTransport::_establish_connection(
                         for (auto&& [req, cb] : std::move(requests_to_process))
                             _send_on_connection(
                                     conn_id, address_pubkey_hex, std::move(req), std::move(cb));
+                    }
+
+                    // Last, so that anything already waiting on this connection goes out ahead of
+                    // whatever the listener sends, and so that the connection is in
+                    // `_active_connection_ids` by the time it does.
+                    if (on_connection_established) {
+                        try {
+                            on_connection_established(
+                                    ed25519_pubkey::from_hex(address_pubkey_hex));
+                        } catch (const std::exception& e) {
+                            log::error(
+                                    cat,
+                                    "Connection-established listener for {} threw: {}",
+                                    address_pubkey_hex,
+                                    e.what());
+                        }
                     }
                 },
                 [this, address_pubkey_hex, initiating_req_id](
@@ -608,8 +658,20 @@ void QuicTransport::_fail_connection(
         auto to_fail = std::move(it->second);
         _failure_listeners.erase(it);
 
-        for (const auto& listener : it->second)
+        for (const auto& listener : to_fail)
             listener();
+    }
+
+    if (on_connection_lost) {
+        try {
+            on_connection_lost(ed25519_pubkey::from_hex(address_pubkey_hex));
+        } catch (const std::exception& e) {
+            log::error(
+                    cat,
+                    "Connection-lost listener for {} threw: {}",
+                    address_pubkey_hex,
+                    e.what());
+        }
     }
 
     // If we have no longer have any active connections then we are disconnected

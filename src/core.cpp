@@ -4,6 +4,7 @@
 #include <fmt/ranges.h>
 #include <mlkem_native.h>
 #include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
@@ -95,6 +96,34 @@ quic::Loop& Core::loop() {
     return _loop;
 }
 
+Core::~Core() {
+    // Tearing a Network down fails every request its transport is still holding, and failing them
+    // fires the hooks installed in set_network -- which marshal onto our loop and reach members
+    // that are already gone.  Members are destroyed in reverse declaration order and every ticker
+    // is declared after `_network`, so by the time ~Network runs they have been released while
+    // `_loop`, declared first, is still alive to run the job: `stop()` on a freed Ticker, at every
+    // exit that had a subscription.
+    //
+    // So detach before anything is torn down.  ~Network pays its own router and transport the
+    // same courtesy for the same reason, and doing it here rather than by shuffling the member
+    // declarations leaves the requirement stated instead of resting on where a field sits.
+    if (_network) {
+        _network->on_server_push = nullptr;
+        _network->on_connection_established = nullptr;
+        _network->on_connection_lost = nullptr;
+    }
+
+    // Stopped while they are certainly still alive.  Releasing them is left to the members
+    // themselves, which happens before `_loop` goes and so can still reach it.
+    for (auto* ticker : {&_poll_ticker, &_sub_ticker, &_probe_ticker})
+        if (*ticker)
+            (*ticker)->stop();
+
+    // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
+    // destroyed by whoever owns it.
+    _network.reset();
+}
+
 void Core::set_network(std::unique_ptr<network::Network> network) {
     // Polling signs its retrieve requests with the account key, so attaching a network before the
     // account has an identity would fail inside a background poll rather than here.  Refuse at the
@@ -102,11 +131,55 @@ void Core::set_network(std::unique_ptr<network::Network> network) {
     if (network && !globals.have_account())
         throw no_account{};
 
+    // Replacing an attached Network is unsupported, and unsupported here means unsafe rather than
+    // merely unimplemented: see the TODO in core.hpp.  Refuse rather than corrupt.
+    if (_network)
+        throw network_already_attached{};
+
     // Ownership moves in via release() because the two pointer types differ deliberately: the
     // parameter is a plain unique_ptr so callers can hand over a std::make_unique, while the
     // member's deleter (which is just `delete`) is what keeps Network an incomplete type in
     // core.hpp -- including session_network.hpp there costs ~6x the compile time per file.
     _network.reset(network.release());
+
+    if (_network) {
+        // These fire on the network's loop; each hops onto ours before touching subscription
+        // state.  Safe to capture `this` bare: the Network is declared after `_loop` so it is
+        // destroyed first, and ~Network does not return until no callback of its is still in
+        // flight.
+        // Deliberately handled where it arrives rather than hopped onto our loop, unlike the two
+        // below.  Poll responses call receive_messages() from the network's loop, so staying on it
+        // keeps every delivery serialised on one thread; marshalling only pushes would let one run
+        // against a poll.  It also avoids copying the body, which is only valid for this call.
+        //
+        // Which node sent it therefore cannot be checked -- `_sub_node` is our loop's -- and does
+        // not need to be: everything here is authenticated downstream, replays dedup on the swarm
+        // hash, and configs merge by seqno, so the worst a connected node achieves by pushing us
+        // something is making us do work we would have done anyway.
+        _network->on_server_push = [this](const network::ed25519_pubkey& /*node*/,
+                                          std::string_view endpoint,
+                                          std::span<const std::byte> body) {
+            _handle_server_push(endpoint, body);
+        };
+
+        _network->on_connection_lost = [this](const network::ed25519_pubkey& node) {
+            _loop.call([this, node] {
+                if (_sub_node && _sub_node->remote_pubkey == node)
+                    _drop_subscription("connection lost");
+            });
+        };
+
+        _network->on_connection_established = [this](const network::ed25519_pubkey& node) {
+            _loop.call([this, node] {
+                // A rebuilt connection carries no subscription: the far end keyed the old one to
+                // the connection that just went away.  Losing it should already have dropped us,
+                // so this is the case where it somehow did not.
+                if (_subscribed && _sub_node && _sub_node->remote_pubkey == node)
+                    _drop_subscription("connection was re-established");
+            });
+        };
+    }
+
     _update_polling();
 }
 
@@ -152,33 +225,251 @@ static constexpr std::array POLL_NAMESPACES = {
 // fewer; this exists so that a node whose `more` never goes false cannot poll indefinitely.
 static constexpr int POLL_MAX_ROUNDS = 20;
 
-void Core::_poll() {
-    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
-    // could make the loop thread the last owner and run ~Network there.
+// The namespaces we ask a storage server to push to us: the ones we poll, in ascending order,
+// which is what the server requires (it rejects an unordered `n=` list).  Derived from
+// POLL_NAMESPACES rather than written out so that adding a namespace to the poll cannot leave the
+// subscription silently not covering it.
+static constexpr auto SUBSCRIBE_NAMESPACES = [] {
+    std::array<int16_t, POLL_NAMESPACES.size()> ns{};
+    for (size_t i = 0; i < POLL_NAMESPACES.size(); i++)
+        ns[i] = static_cast<int16_t>(POLL_NAMESPACES[i]);
+    std::ranges::sort(ns);
+    return ns;
+}();
+
+// How often a live subscription is re-sent.  The storage server expires one 65 minutes after the
+// last renewal, so this leaves four times the headroom it needs -- and the expiry only ever
+// matters on a connection that has stayed up that long, since losing the connection loses the
+// subscription outright.
+static constexpr auto SUBSCRIPTION_RENEW_INTERVAL = 15min;
+
+// How often the subscribed node is probed; see _subscription_probe.
+static constexpr auto SUBSCRIPTION_PROBE_INTERVAL = 30s;
+
+// The namespace the probe asks about: negative and of the form -(20n+1), which is what makes a
+// retrieve of it need no signature (oxenss/common/namespace.h, is_noauth_retrieve_namespace), and
+// otherwise unassigned, so it is permanently empty and the reply is a fixed 57 bytes.  Deliberately
+// not a memorable number: it should not look like it means something.
+static constexpr int16_t PROBE_NAMESPACE = -3741;
+
+// A probe is answered or it is not; there is no reason to spend the swarm budget on it.
+static constexpr auto PROBE_TIMEOUT = 10s;
+
+// What the storage server pushes a subscribed client, as the endpoint of a request of its own.
+static constexpr auto NOTIFY_ENDPOINT = "notify"sv;
+
+// How many times a swarm request is re-aimed after a 421 before it is given up on.
+//
+// One redirect is the ordinary case: our membership was stale, the rejection corrected it, the
+// next member answers.  More than that means the corrected swarm is also being rejected, and
+// asking a fourth time will not change that.
+static constexpr int SWARM_REDIRECT_LIMIT = 3;
+
+// The least time worth starting another attempt with.  A request given a second or two cannot
+// resolve a node, connect and get an answer, so spending the remainder of the budget on it only
+// delays telling the caller what we already know.
+static constexpr auto MIN_RETRY_BUDGET = 2s;
+
+struct Core::SwarmOp {
+    network::x25519_pubkey swarm_pubkey;
+    std::string endpoint;
+    std::function<std::vector<std::byte>(const network::service_node&)> make_body;
+    std::function<void(SwarmResponse)> on_done;
+
+    // Members already spent on this operation, in the order they were tried: ones that could not
+    // be reached, and ones that said the account is not theirs.  Both are reasons not to ask
+    // again, and a list rather than a count because "once per member" cannot be expressed as a
+    // number -- choosing the next one has to know which are gone.
+    std::vector<network::service_node> spent;
+
+    // A member to go back to rather than choosing afresh, for an operation that has to continue
+    // against the one it started with -- a retrieve continuation resumes from a cursor that is
+    // that member's alone.  Dropped the moment that member turns out to be wrong or unusable,
+    // which puts us back to choosing normally.
+    std::optional<network::service_node> prefer;
+
+    int redirects = 0;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+};
+
+void Core::_swarm_request(
+        network::x25519_pubkey swarm_pubkey,
+        std::string endpoint,
+        std::function<std::vector<std::byte>(const network::service_node&)> make_body,
+        std::function<void(SwarmResponse)> on_done,
+        std::optional<network::service_node> prefer) {
+    auto op = std::make_shared<SwarmOp>(
+            swarm_pubkey, std::move(endpoint), std::move(make_body), std::move(on_done));
+    op->prefer = std::move(prefer);
+    _swarm_attempt(std::move(op));
+}
+
+void Core::_swarm_attempt(std::shared_ptr<SwarmOp> op) {
+    // Non-owning, as everywhere else here: keeping the Network alive from a callback could make
+    // the loop thread its last owner and run ~Network there.
     auto* net = _network.get();
-    if (!net) {
+    if (!net)
+        return op->on_done({false, network::ERROR_NO_ROUTING_LAYER, "no network attached", {}});
+
+    // Read out before the call: `op` is moved into the callback below, and the order of those two
+    // against each other is unspecified, so reading through `op` in the argument list can happen
+    // after it has been emptied.
+    auto swarm_pubkey = op->swarm_pubkey;
+
+    net->get_swarm(
+            swarm_pubkey,
+            false,
+            [this, op = std::move(op), net](
+                    network::swarm::swarm_id_t, std::vector<network::service_node> swarm) mutable {
+        auto fail = [&op](int16_t status, std::string why) {
+            op->on_done(
+                    {false,
+                     status,
+                     std::move(why),
+                     op->spent.empty() ? network::service_node{} : op->spent.back()});
+        };
+
+        if (swarm.empty())
+            return fail(network::ERROR_NO_SNODE_POOL, "no swarm members available");
+
+        if (op->prefer) {
+            auto pinned = *op->prefer;
+            return _swarm_send(std::move(op), std::move(pinned));
+        }
+
+        // The first member not already spent.  get_swarm shuffles and partitions by strike count,
+        // so this is the least-struck members first in a random order among equals -- the right
+        // preference anyway; what matters is only that a member already tried is never chosen
+        // again, which is what ends the walk.
+        auto next = std::ranges::find_if(swarm, [&op](const network::service_node& n) {
+            return std::ranges::find(op->spent, n) == op->spent.end();
+        });
+
+        if (next == swarm.end()) {
+            log::warning(
+                    cat,
+                    "No swarm member left to try for '{}': all {} are spent.",
+                    op->endpoint,
+                    op->spent.size());
+            return fail(network::ERROR_INVALID_DESTINATION, "no usable swarm member");
+        }
+
+        _swarm_send(std::move(op), *next);
+    });
+}
+
+void Core::_swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node) {
+    auto* net = _network.get();
+    if (!net)
+        return op->on_done({false, network::ERROR_NO_ROUTING_LAYER, "no network attached", node});
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - op->started);
+    if (SWARM_OVERALL_TIMEOUT - elapsed < MIN_RETRY_BUDGET) {
+        log::warning(cat, "Out of time to try another member for '{}'.", op->endpoint);
+        return op->on_done(
+                {false, network::ERROR_REQUEST_TIMEOUT, "swarm request budget exhausted", node});
+    }
+
+    // Rebuilt per attempt: a retrieve carries the chosen node's cursor, so reusing the body built
+    // for a previous member would resume from a position that member never gave us.
+    net->send_request(
+            swarm_request(node, op->swarm_pubkey, op->endpoint, op->make_body(node)),
+            [this, op, node](
+                    bool /*success*/,
+                    bool timeout,
+                    int16_t status,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) mutable {
+                // Not this member's swarm.  Network has already taken the corrected membership
+                // out of the rejection, so resolving again gets the new one -- and whatever we
+                // were sticking to is exactly what was wrong.
+                if (status == network::ERROR_MISDIRECTED_REQUEST) {
+                    op->prefer.reset();
+
+                    // Spent, not merely wrong to stick to: a member that says the account is not
+                    // its own will say so again, and the corrected swarm may not have arrived --
+                    // an older server sends no swarm with the rejection, and then re-resolving
+                    // returns the very same membership.
+                    op->spent.push_back(node);
+
+                    if (++op->redirects > SWARM_REDIRECT_LIMIT)
+                        log::warning(
+                                cat,
+                                "Giving up on '{}': redirected {} times.",
+                                op->endpoint,
+                                op->redirects - 1);
+                    else {
+                        log::info(
+                                cat,
+                                "{} does not hold {}; re-resolving its swarm.",
+                                node.remote_pubkey.hex(),
+                                op->swarm_pubkey.hex());
+                        return _swarm_attempt(std::move(op));
+                    }
+                }
+
+                // The member itself could not be reached.  The swarm is not in question, so move
+                // to another one rather than failing.
+                else if (status == network::ERROR_INVALID_DESTINATION) {
+                    log::info(
+                            cat,
+                            "{} unreachable for '{}'; trying another member.",
+                            node.remote_pubkey.hex(),
+                            op->endpoint);
+                    op->prefer.reset();
+                    op->spent.push_back(node);
+                    return _swarm_attempt(std::move(op));
+                }
+
+                op->on_done({timeout, status, std::move(body), node});
+            });
+}
+
+void Core::_poll() {
+    if (!_network) {
         log::debug(cat, "Not polling: no network attached");
         return;
     }
 
     log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
-
-    net->get_swarm(globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
-        if (swarm.empty()) {
-            log::warning(cat, "Cannot poll: no swarm nodes available");
-            return;
-        }
-
-        _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
-    });
+    _send_poll({POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0, std::nullopt);
 }
 
 void Core::_send_poll(
-        network::Network* net,
-        network::service_node node,
         std::vector<config::Namespace> namespaces,
-        int round) {
+        int round,
+        std::optional<network::service_node> node) {
+    _swarm_request(
+            globals.pubkey_x25519(),
+            "batch",
+            [this, namespaces](const network::service_node& n) {
+                return _build_poll_body(n, namespaces);
+            },
+            [this, namespaces, round](SwarmResponse res) mutable {
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Swarm poll request failed: {}",
+                            res.timeout       ? "timed out"
+                            : res.body        ? *res.body
+                                              : "request failed");
+                    return;
+                }
 
+                // The member that actually answered, which is not necessarily the one the attempt
+                // started with.  Everything below records against it -- the retrieve cursors, and
+                // the subscription that a drained poll goes on to make.
+                _swarm_node = res.node;
+
+                _handle_poll_response(
+                        res.node, std::move(namespaces), std::move(*res.body), round);
+            },
+            std::move(node));
+}
+
+std::vector<std::byte> Core::_build_poll_body(
+        const network::service_node& node, const std::vector<config::Namespace>& namespaces) {
     auto now_ms = epoch_ms(clock_now_ms());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
 
@@ -245,33 +536,12 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
 
     log::debug(
             cat,
-            "Retrieving {} namespaces from {} (round {}): {}",
+            "Retrieving {} namespaces from {}: {}",
             namespaces.size(),
             node.remote_pubkey.hex(),
-            round,
             body_str);
 
-    net->send_request(
-            swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
-            [this, node, namespaces = std::move(namespaces), round](
-                    bool success,
-                    bool timeout,
-                    int16_t /*status_code*/,
-                    std::vector<std::pair<std::string, std::string>> /*headers*/,
-                    std::optional<std::string> body) mutable {
-                if (!success || !body) {
-                    log::warning(
-                            cat,
-                            "Swarm poll request failed: {}",
-                            timeout ? "timed out"
-                            : body  ? *body
-                                    : "request failed");
-                    return;
-                }
-
-                _handle_poll_response(
-                        std::move(node), std::move(namespaces), std::move(*body), round);
-            });
+    return to_vector(body_str);
 }
 
 void Core::_handle_poll_response(
@@ -427,8 +697,13 @@ DELETE FROM swarm_hashes
         return;
     }
 
-    if (unfinished.empty())
+    // Nothing reports more, so this node's namespaces are drained and its cursors are current --
+    // which is exactly the state a subscription has to start from, or the gap between the last
+    // retrieve and the subscription taking effect would be lost.
+    if (unfinished.empty()) {
+        _maybe_subscribe(node);
         return;
+    }
 
     if (round + 1 >= POLL_MAX_ROUNDS) {
         log::warning(
@@ -440,10 +715,307 @@ DELETE FROM swarm_hashes
         return;
     }
 
-    // Deliberately not re-fetching the swarm: the cursor these resume from is this node's, so the
-    // continuation has to go back to the same one.
+    // Named rather than chosen afresh: the cursor these resume from is this node's, so the
+    // continuation has to go back to the same one.  If it has since become unusable the swarm
+    // request falls back to choosing normally, and the round starts over from that member's
+    // cursor rather than resuming from one it never issued.
+    _send_poll(std::move(unfinished), round + 1, std::move(node));
+}
+
+std::optional<network::PathInfo> Core::current_swarm_path() const {
+    if (!_swarm_node || !_network)
+        return std::nullopt;
+
+    return _network->get_path_to(*_swarm_node);
+}
+
+void Core::_maybe_subscribe(const network::service_node& node) {
+    // Hopped onto the loop because the poll response that calls this runs on the *network's*
+    // loop, and everything below -- the tickers especially -- is Core's loop state.
+    _loop.call([this, node] {
+        // Already have one, or are waiting on one: a subscription is with a single node, and
+        // there is no reason to move while it works.
+        if (_sub_node)
+            return;
+
+        auto* net = _network.get();
+        if (!net)
+            return;
+
+        if (!net->supports_server_push()) {
+            log::debug(cat, "Not subscribing: this routing mode cannot receive pushes");
+            return;
+        }
+
+        _sub_node = node;
+        _send_subscribe(net, node);
+    });
+}
+
+void Core::_send_subscribe(network::Network* net, network::service_node node) {
+    auto now_s = epoch_ms(clock_now_ms()) / 1000;
+
+    // Mirrors the storage server's sig_msg in handle_monitor_message_single: the literal
+    // "MONITOR", the 33-byte account pubkey in hex, the timestamp in *seconds*, the want-data
+    // flag as 0/1, and the namespaces comma-joined in the same order they are sent.
+    auto to_sign = "MONITOR{}{}{}{}"_format(
+            globals.session_id_hex(), now_s, 1, fmt::join(SUBSCRIBE_NAMESPACES, ","));
+
+    b64 sig;
+    {
+        auto seed = globals.account_seed();
+        ed25519::sign(sig, seed.ed25519_secret(), to_span(to_sign));
+    }
+
+    // bt dict keys have to be appended in sorted order: P < d < n < s < t.
+    oxenc::bt_dict_producer d;
+    d.append("P", to_string_view(globals.pubkey_ed25519().view()));
+    // Ask for the message body, not just its metadata.  These are the same bytes a retrieve would
+    // have returned, so carrying them costs nothing over fetching them and saves the round trip:
+    // a notification is then self-sufficient.
+    d.append("d", 1);
+    {
+        auto ns_list = d.append_list("n");
+        for (auto ns : SUBSCRIBE_NAMESPACES)
+            ns_list.append(ns);
+    }
+    d.append("s", to_string_view(sig));
+    d.append("t", now_s);
+
+    log::debug(cat, "Subscribing to {} for {}", node.remote_pubkey.hex(), globals.session_id_hex());
+
+    net->send_request(
+            swarm_request(node, globals.pubkey_x25519(), "monitor", to_vector(std::move(d).str())),
+            [this, node](
+                    bool success,
+                    bool timeout,
+                    int16_t /*status_code*/,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) {
+                _loop.call([this,
+                            node,
+                            success,
+                            timeout,
+                            body = std::move(body)] {
+                    // We gave this subscription up while the request was in flight.
+                    if (!_sub_node || _sub_node->remote_pubkey != node.remote_pubkey)
+                        return;
+
+                    if (!success || !body)
+                        return _drop_subscription(
+                                timeout ? "subscribe timed out" : "subscribe request failed");
+
+                    // The reply is bt, not the JSON every other storage server endpoint answers
+                    // with: `monitor` is handled outside the RPC dispatch and replies with what
+                    // handle_monitor built.
+                    try {
+                        oxenc::bt_dict_consumer d{*body};
+
+                        if (d.skip_until("errcode")) {
+                            auto code = d.consume_integer<int>();
+                            std::string err;
+                            if (d.skip_until("error"))
+                                err = d.consume_string();
+                            return _drop_subscription(
+                                    "subscribe rejected (code {}): {}"_format(code, err));
+                        }
+
+                        if (!d.skip_until("success") || d.consume_integer<int>() != 1)
+                            return _drop_subscription("subscribe reply did not report success");
+                    } catch (const std::exception& e) {
+                        return _drop_subscription(
+                                "could not parse subscribe reply: {}"_format(e.what()));
+                    }
+
+                    if (!_subscribed) {
+                        _subscribed = true;
+
+                        // Stop polling: from here the node pushes what arrives, and the only
+                        // requests we make are the renew tick's.
+                        if (_poll_ticker) {
+                            _poll_ticker->stop();
+                            _poll_ticker.reset();
+                        }
+                        _sub_ticker = _loop.call_every(
+                                SUBSCRIPTION_RENEW_INTERVAL, [this] { _subscription_renew(); });
+                        _probe_ticker = _loop.call_every(
+                                SUBSCRIPTION_PROBE_INTERVAL, [this] { _subscription_probe(); });
+
+                        log::info(
+                                cat,
+                                "Subscribed to {}; polling stopped",
+                                node.remote_pubkey.hex());
+
+                        // One last poll, against the member we just subscribed with.
+                        //
+                        // Draining ran before the subscription existed, so a message stored
+                        // between the last retrieve's snapshot and the subscription taking effect
+                        // was in neither: too late for the retrieve, too early to be pushed.  This
+                        // is the only thing that closes that window -- the renew sends no
+                        // retrieve, and the probe asks about a namespace that is empty by design.
+                        _send_poll({POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0, node);
+                    }
+                });
+            });
+}
+
+void Core::_subscription_renew() {
+    if (!_sub_node)
+        return;
+
     if (auto* net = _network.get())
-        _send_poll(net, std::move(node), std::move(unfinished), round + 1);
+        _send_subscribe(net, *_sub_node);
+}
+
+// Asks the subscribed node to retrieve a namespace that is always empty, purely for the 421 we get
+// back if it has stopped holding our swarm.
+//
+// This exists because a subscription that has stopped applying is *silent*.  The storage server
+// runs no swarm check when subscribing and none when a swarm changes underneath one: `get_notifiers`
+// simply stops matching, so a client that has given up polling cannot tell "nothing has been sent
+// to me" from "I am subscribed to a node that no longer holds my messages".
+//
+// It is deliberately the cheapest question that still produces a 421.  The storage server decides
+// that from the pubkey alone, on the first two lines of its retrieve handler -- before the
+// signature-required check and before verifying anything -- so the request needs no signature, no
+// ed25519 pubkey and no timestamp, and PROBE_NAMESPACE has nothing in it so it needs no cursor
+// either.  97 bytes out, 57 back.
+//
+// Two things this leans on, neither of them a promised contract:
+//
+// - that the swarm check precedes the auth check.  If the server ever reorders them this stops
+//   working *silently*, answering 200-with-nothing where it used to answer 421.
+// - that no swarm_pubkey is set on the request, which is what stops the network layer from
+//   quietly retrying a 421 on some other swarm member and reporting success.  We are asking about
+//   this node specifically; an answer from a different one would defeat the point.
+//
+// Temporary.  The storage server is gaining a notification that tells a subscriber outright when
+// its subscription has stopped applying, and carries the replacement swarm with it.  Once that has
+// been deployed widely enough this can go, though it has to outlive the last un-upgraded node.
+void Core::_subscription_probe() {
+    if (!_sub_node)
+        return;
+
+    auto* net = _network.get();
+    if (!net)
+        return _drop_subscription("network detached");
+
+    // Logged even though it is uneventful: this and the renewal are the only traffic a subscribed
+    // client makes, so their absence from a log is the first thing worth checking when pushes
+    // stop arriving -- and a subscription that has quietly stopped applying looks exactly like a
+    // conversation nobody is talking in.
+    log::debug(cat, "Probing {} for a swarm change", _sub_node->remote_pubkey.hex());
+
+    auto body = nlohmann::json{
+            {"pubkey", globals.session_id_hex()},
+            {"namespace", PROBE_NAMESPACE},
+    }.dump();
+
+    auto node = *_sub_node;
+    network::Request req{
+            node,
+            "retrieve",
+            to_vector(body),
+            network::RequestCategory::standard_small,
+            PROBE_TIMEOUT};
+
+    net->send_request(
+            std::move(req),
+            [this, node](
+                    bool success,
+                    bool /*timeout*/,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> /*body*/) {
+                if (success)
+                    return;
+
+                _loop.call([this, node, status_code] {
+                    if (!_sub_node || _sub_node->remote_pubkey != node.remote_pubkey)
+                        return;
+
+                    if (status_code == network::ERROR_MISDIRECTED_REQUEST)
+                        return _drop_subscription("node no longer holds our swarm");
+
+                    // Anything else is the node being unreachable or unwell.  A dead connection
+                    // reaches us through on_connection_lost instead, so getting here means it is
+                    // notionally up but not answering, which is no better for a client that has
+                    // nothing else to fall back on.
+                    _drop_subscription("probe failed (status {})"_format(status_code));
+                });
+            });
+}
+
+void Core::_drop_subscription(std::string_view why) {
+    if (!_sub_node)
+        return;
+
+    log::info(cat, "Dropping subscription with {}: {}", _sub_node->remote_pubkey.hex(), why);
+
+    _sub_node.reset();
+    _subscribed = false;
+
+    // Stopped now, but released on a later turn of the loop.  This is reachable from inside one of
+    // these tickers' own callbacks, and a Ticker's deleter runs inline once we are already on the
+    // loop (Loop::call_every hands out a shared_ptr whose deleter is a `call_get` of the delete,
+    // and call_get runs inline when inside) -- so dropping the last reference here would free the
+    // std::function we are currently executing.  Stopping is safe from within; freeing is not.
+    for (auto* ticker : {&_sub_ticker, &_probe_ticker}) {
+        if (*ticker) {
+            (*ticker)->stop();
+            _loop.reset_soon(std::move(*ticker));
+        }
+    }
+
+    // Back to polling, which is also what picks the next node: the swarm member a fresh
+    // `get_swarm` happens to hand back first.
+    _update_polling();
+}
+
+void Core::_handle_server_push(std::string_view endpoint, std::span<const std::byte> body) {
+    if (endpoint != NOTIFY_ENDPOINT) {
+        log::debug(cat, "Ignoring pushed '{}': not a notification", endpoint);
+        return;
+    }
+
+    std::string hash;
+    int16_t ns_val;
+    int64_t timestamp, expiry;
+    std::string_view data;
+
+    // Keys in the order the server writes them, which is also sorted: @ h n t z ~.  `@` (the
+    // account the message is for) is skipped: we subscribed for one account only.
+    try {
+        oxenc::bt_dict_consumer d{to_string_view(body)};
+
+        hash = d.require<std::string>("h");
+        ns_val = d.require<int16_t>("n");
+        timestamp = d.require<int64_t>("t");
+        expiry = d.require<int64_t>("z");
+
+        if (!d.skip_until("~")) {
+            // We subscribe with d=1, so a notification without a body is the server disagreeing
+            // with us about what we asked for rather than something to go and fetch.
+            log::warning(cat, "Pushed notification for {} carried no message data", hash);
+            return;
+        }
+        data = d.consume_string_view();
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not parse pushed notification: {}", e.what());
+        return;
+    }
+
+    log::debug(cat, "Pushed message {} in namespace {}", hash, ns_val);
+
+    // No cursor is written for a pushed message.  The retrieve cursor is per (namespace, node) and
+    // means "the newest hash that node handed us"; a push did not come from a retrieve, and
+    // recording it would move the cursor past messages an interrupted retrieve had not yet
+    // reached.  Re-fetching a pushed message after a reconnect is harmless -- delivery is
+    // at-least-once and Client dedups on the hash -- whereas skipping one is not.
+    SwarmMessage msg{
+            to_span(data), std::move(hash), from_epoch_ms(timestamp), from_epoch_ms(expiry)};
+
+    receive_messages({&msg, 1}, static_cast<config::Namespace>(ns_val), true);
 }
 
 PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) {
@@ -515,39 +1087,24 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
             {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
-    net->get_swarm(
+    _swarm_request(
             x25519_pub,
-            false,
-            [this, net, sid = std::move(sid), params, x25519_pub](auto, auto swarm) {
-                if (swarm.empty()) {
-                    log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+            "retrieve",
+            [body = params.dump()](const network::service_node&) { return to_vector(body); },
+            [this, sid = std::move(sid)](SwarmResponse res) {
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Failed to fetch PFS keys for {}: {}",
+                            sid,
+                            res.timeout ? "timed out"
+                            : res.body  ? *res.body
+                                        : "request failed");
                     _pfs_fetch_done(sid, PfsKeyFetch::failed);
                     return;
                 }
 
-                auto body_str = params.dump();
-                net->send_request(
-                        swarm_request(swarm.front(), x25519_pub, "retrieve", to_vector(body_str)),
-                        [this, sid = std::move(sid)](
-                                bool success,
-                                bool timeout,
-                                int16_t /*status_code*/,
-                                std::vector<std::pair<std::string, std::string>> /*headers*/,
-                                std::optional<std::string> body) {
-                            if (!success || !body) {
-                                log::warning(
-                                        cat,
-                                        "Failed to fetch PFS keys for {}: {}",
-                                        sid,
-                                        timeout ? "timed out"
-                                        : body  ? *body
-                                                : "request failed");
-                                _pfs_fetch_done(sid, PfsKeyFetch::failed);
-                                return;
-                            }
-
-                            return _handle_pfs_response(sid, std::move(*body));
-                        });
+                return _handle_pfs_response(sid, std::move(*res.body));
             });
     return status;
 }
@@ -703,52 +1260,34 @@ void Core::delete_from_swarm(
     };
     auto body = to_vector<std::byte>(params.dump());
 
-    net->get_swarm(
+    _swarm_request(
             globals.pubkey_x25519(),
-            false,
-            [this, net, hashes = std::move(hashes), body = std::move(body), on_complete](
-                    auto, auto swarm) mutable {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot delete from swarm: no swarm nodes available");
+            "delete",
+            [body = std::move(body)](const network::service_node&) { return body; },
+            [this, hashes = std::move(hashes), on_complete](SwarmResponse res) {
+                if (!res.ok()) {
+                    log::warning(
+                            cat,
+                            "Swarm delete failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
                     if (on_complete)
                         on_complete(false);
                     return;
                 }
 
-                net->send_request(
-                        swarm_request(
-                                swarm.front(), globals.pubkey_x25519(), "delete", std::move(body)),
-                        [this, hashes = std::move(hashes), on_complete](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) {
-                            if (!success) {
-                                log::warning(
-                                        cat,
-                                        "Swarm delete failed ({}): {}",
-                                        timeout ? "timed out" : "status {}"_format(status),
-                                        resp.value_or("no response body"));
-                                if (on_complete)
-                                    on_complete(false);
-                                return;
-                            }
+                // Forget the cursors naming what we just deleted, so the next retrieve measures
+                // from the newest hash the node still holds.  Done on success only: a failed
+                // delete leaves the messages there, and dropping the cursor would replay the
+                // retention window for nothing.
+                {
+                    auto conn = db.conn();
+                    for (const auto& h : hashes)
+                        conn.prepared_exec("DELETE FROM swarm_hashes WHERE hash = ?", h);
+                }
 
-                            // Forget the cursors naming what we just deleted, so the next retrieve
-                            // measures from the newest hash the node still holds.  Done on success
-                            // only: a failed delete leaves the messages there, and dropping the
-                            // cursor would replay the retention window for nothing.
-                            {
-                                auto conn = db.conn();
-                                for (const auto& h : hashes)
-                                    conn.prepared_exec(
-                                            "DELETE FROM swarm_hashes WHERE hash = ?", h);
-                            }
-
-                            if (on_complete)
-                                on_complete(true);
-                        });
+                if (on_complete)
+                    on_complete(true);
             });
 }
 
@@ -817,62 +1356,38 @@ void Core::_send_to_swarm(
     network::x25519_pubkey x25519_pub;
     std::memcpy(x25519_pub.data(), dest_pubkey.data() + 1, 32);
 
-    net->get_swarm(
+    _swarm_request(
             x25519_pub,
-            false,
-            [net, body = std::move(body), on_complete = std::move(on_complete), x25519_pub](
-                    auto, auto swarm) mutable {
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot store: no swarm nodes available");
-                    if (on_complete)
-                        on_complete(false, std::nullopt);
+            "store",
+            [body = std::move(body), x25519_pub](const network::service_node& node) {
+                // Read this against the "Storing ... of <pubkey>" line above: a store rejected as
+                // misdirected means the pubkey in the body and the swarm we resolved are not the
+                // same account, which no amount of trying other members will fix.
+                log::debug(cat, "Storing to swarm of {} via {}", x25519_pub.hex(), node.to_string());
+                return body;
+            },
+            [on_complete = std::move(on_complete)](SwarmResponse res) {
+                if (!res.ok())
+                    log::warning(
+                            cat,
+                            "Store request failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
+                if (!on_complete)
                     return;
+
+                std::optional<std::string> hash;
+                if (res.ok() && res.body) {
+                    try {
+                        auto json = nlohmann::json::parse(*res.body);
+                        if (auto h = json.find("hash"); h != json.end() && h->is_string())
+                            hash = h->get<std::string>();
+                    } catch (const std::exception& e) {
+                        log::warning(cat, "Could not read stored message hash: {}", e.what());
+                    }
                 }
-                // The two values a 421 turns on: which swarm we resolved, and which of its nodes we
-                // picked.  Read this against the "Storing ... of <pubkey>" line above -- a store
-                // rejected as misdirected means those two pubkeys are not the same account.
-                log::debug(
-                        cat,
-                        "Storing to swarm of {} via {} ({} nodes)",
-                        x25519_pub.hex(),
-                        swarm.front().to_string(),
-                        swarm.size());
-
-                net->send_request(
-                        swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
-                        [on_complete = std::move(on_complete)](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) {
-                            if (!success)
-                                log::warning(
-                                        cat,
-                                        "Store request failed ({}): {}",
-                                        timeout ? "timed out" : "status {}"_format(status),
-                                        resp.value_or("no response body"));
-                            if (!on_complete)
-                                return;
-
-                            std::optional<std::string> hash;
-                            if (success && resp) {
-                                try {
-                                    auto json = nlohmann::json::parse(*resp);
-                                    if (auto h = json.find("hash");
-                                        h != json.end() && h->is_string())
-                                        hash = h->get<std::string>();
-                                } catch (const std::exception& e) {
-                                    log::warning(
-                                            cat,
-                                            "Could not read stored message hash: {}",
-                                            e.what());
-                                }
-                            }
-                            on_complete(
-                                    success,
-                                    hash ? std::optional<std::string_view>{*hash} : std::nullopt);
-                        });
+                on_complete(
+                        res.ok(), hash ? std::optional<std::string_view>{*hash} : std::nullopt);
             });
 }
 

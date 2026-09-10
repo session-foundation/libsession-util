@@ -161,7 +161,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void clear_cache() override;
 
     ConnectionStatus get_status() const override { return _status.load(); };
-    std::vector<PathInfo> get_active_paths() override;
+    std::optional<PathInfo> get_path_to(const service_node& node) override;
     std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
     void upload(UploadRequest request) override;  // deprecated: use upload_file()
@@ -212,6 +212,15 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
             std::optional<uint64_t> error_code);
 
     OnionPath* _find_valid_path(const Request& request);
+
+    // The path a request with these properties would go down, without needing a request to ask.
+    // `target_node` is not merely informational: a path containing the destination is skipped, so
+    // the answer genuinely depends on where the request is going.
+    OnionPath* _find_valid_path(
+            const service_node* target_node,
+            RequestCategory category,
+            std::optional<uint8_t> desired_path_index,
+            std::string_view request_id);
 
     void _send_on_path(OnionPath& path, Request request, network_response_callback_t callback);
     void _handle_transport_response(

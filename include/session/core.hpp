@@ -19,6 +19,7 @@
 #include "core/schema/schema_registry.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
+#include "session/network/session_network_types.hpp"
 
 /// The "Core" class holds a Session account's own state, in an encrypted sqlite database: its keys,
 /// its device group, its configs, and the bookkeeping needed to talk to the network on its behalf.
@@ -205,6 +206,15 @@ namespace detail {
     }
 }  // namespace detail
 
+/// Thrown by `set_network` when a Network is already attached.  See the TODO on that method for
+/// what a replacement would have to do first.
+struct network_already_attached : std::logic_error {
+    network_already_attached() :
+            std::logic_error{
+                    "This Core already has a Network attached; replacing it is not yet "
+                    "supported"} {}
+};
+
 /// Wraps a predefined 32-byte account seed to pass to the Core constructor, overriding any seed
 /// already stored in the database.  Used when restoring an existing account from a seed.
 struct predefined_seed {
@@ -309,6 +319,10 @@ class Core {
     sqlite::Database db;
     friend class detail::CoreComponent;
 
+    // Friendship does not reach a component through its base, and Configs pushes to the swarm, so
+    // it needs `_swarm_request` by name.
+    friend class Configs;
+
     core::callbacks callbacks;
 
     // Called during the constructor: the database is opened and all members are constructed, but
@@ -332,21 +346,120 @@ class Core {
     void _update_polling();
     void _poll();
 
+    /// The outcome of a swarm request.
+    struct SwarmResponse {
+        bool timeout;
+
+        /// The storage server's status, or one of the negative ERROR_ values when the request did
+        /// not get far enough to have one.  A batch whose subrequests all failed identically
+        /// reports that failure rather than the 200 the batch itself returned.
+        int16_t status_code;
+        std::optional<std::string> body;
+
+        /// Which member this came from: the one that answered, or the last one tried.  Not
+        /// necessarily the one the operation started with -- a request can be re-aimed at another
+        /// member several times before it succeeds, and anything recorded per-node has to be
+        /// recorded against *this* one.
+        network::service_node node;
+
+        /// Whether the storage server answered, and answered with a 2xx.
+        bool ok() const { return !timeout && status_code >= 200 && status_code <= 299; }
+        explicit operator bool() const { return ok(); }
+    };
+
+    // Sends `endpoint` to a member of `swarm_pubkey`'s swarm, re-aiming it as needed, and reports
+    // which member finally answered.
+    //
+    // Re-aiming is here rather than in Network because it is a decision, not a mechanism: only the
+    // caller knows whether a substitution matters to it, and a substitution made below Core is
+    // invisible to the bookkeeping that depends on it.  Two things move a request:
+    //
+    // - a 421, meaning this member does not hold the account.  Network will have taken the
+    //   corrected swarm out of the rejection by the time we see it, so re-resolving gets the new
+    //   membership rather than the stale one that misdirected us.  Bounded by
+    //   SWARM_REDIRECT_LIMIT, since a server that keeps saying no is not going to stop.
+    // - an unreachable member, which says nothing about the swarm.  Keep the swarm and walk to a
+    //   member not already spent, until they are exhausted.
+    //
+    // `make_body` is given the member the attempt will use, because a body can depend on it: a
+    // retrieve carries that node's cursor, and sending one node's cursor to another asks the wrong
+    // question.
+    // `prefer` names a member to go back to rather than choosing afresh, for an operation that
+    // has to continue against the one it started with; it is dropped as soon as that member turns
+    // out to be wrong or unreachable.
+    void _swarm_request(
+            network::x25519_pubkey swarm_pubkey,
+            std::string endpoint,
+            std::function<std::vector<std::byte>(const network::service_node&)> make_body,
+            std::function<void(SwarmResponse)> on_done,
+            std::optional<network::service_node> prefer = std::nullopt);
+
+    struct SwarmOp;
+    void _swarm_attempt(std::shared_ptr<SwarmOp> op);
+    void _swarm_send(std::shared_ptr<SwarmOp> op, network::service_node node);
+
     // Sends one round of retrieves to `node` for `namespaces`.  A retrieve is capped by the storage
     // server, so one round may not exhaust a namespace; `round` counts continuations and bounds
     // them.  Every round goes to the same node: the retrieve cursor is stored per (namespace,
     // node), so continuing against a different swarm member would resume from that member's
     // position.
     void _send_poll(
-            network::Network* net,
-            network::service_node node,
             std::vector<config::Namespace> namespaces,
-            int round);
+            int round,
+            std::optional<network::service_node> node);
+
+    // The batch of retrieves to send `node`, carrying that node's cursor for each namespace.
+    std::vector<std::byte> _build_poll_body(
+            const network::service_node& node,
+            const std::vector<config::Namespace>& namespaces);
     void _handle_poll_response(
             network::service_node node,
             std::vector<config::Namespace> namespaces,
             std::string body,
             int round);
+
+    // Swarm push subscription.  All of this is touched only on the loop.
+    //
+    // Having subscribed with a swarm member, that member pushes each new message to us instead of
+    // our asking for them, and the poll ticker stops.  The subscription belongs to the connection,
+    // so it does not survive one being rebuilt and there is no notice from the far end when it
+    // lapses -- it simply stops pushing.  Hence: renew on a timer well inside the server's expiry,
+    // and treat losing the connection as having lost the subscription.
+    //
+    // `_sub_node` is not a preference to be restored.  It is only the member we happen to be
+    // talking to, held for as long as its connection lasts because there is no reason to move; a
+    // fresh one is chosen the ordinary way -- a new `get_swarm`, whatever it hands back first --
+    // once this one is gone.
+    // The swarm member currently carrying our messages: the one being polled, or the one a
+    // subscription is held with.  Not a preference -- each poll re-picks at random, and this only
+    // stops moving because a subscription stops the polling.
+    std::optional<network::service_node> _swarm_node;
+
+    std::optional<network::service_node> _sub_node;
+    bool _subscribed = false;
+    std::shared_ptr<oxen::quic::Ticker> _sub_ticker;
+    std::shared_ptr<oxen::quic::Ticker> _probe_ticker;
+
+    // Subscribes to `node` if a subscription is possible and we do not already have one.  Called
+    // when a poll of `node` drains, which is what makes it the node we subscribe with: it has an
+    // established connection and its cursors are current.
+    void _maybe_subscribe(const network::service_node& node);
+    void _send_subscribe(network::Network* net, network::service_node node);
+
+    // Re-sends the subscribe, so that the server's expiry never elapses on a connection that is
+    // still up.
+    void _subscription_renew();
+
+    // Asks the subscribed node a question whose only purpose is the 421 we get if it has stopped
+    // holding our swarm.  Nothing else would notice: a subscription that has stopped applying is
+    // silent, not an error.  Temporary -- see the comment on the definition.
+    void _subscription_probe();
+
+    // Gives up the subscription and returns to polling.
+    void _drop_subscription(std::string_view why);
+
+    // Feeds one pushed message in as though it had been retrieved.
+    void _handle_server_push(std::string_view endpoint, std::span<const std::byte> body);
 
     // Decrypts and dispatches one-to-one messages from Namespace::Default.
     void _handle_direct_messages(std::span<const SwarmMessage> messages);
@@ -466,8 +579,28 @@ class Core {
         init();
     }
 
+    /// Detaches from the Network before letting anything be destroyed; see the definition.
+    ~Core();
+
     /// Set an optional network interface that can be used to make network requests to swarm
     /// members.  Ownership is taken: nothing else may hold on to the Network.
+    ///
+    /// May only be called once, and only from a thread that is not Core's loop; replacing an
+    /// already-attached Network (including with nullptr) throws `network_already_attached`.
+    ///
+    /// TODO: allow the Network to be replaced.  A client that lets the user choose a routing mode
+    /// needs it, and so does anything that has to re-establish swarm state across the swap.  Two
+    /// things block it today:
+    ///
+    /// - This calls `_update_polling()` on the caller's thread, which creates and stops the
+    ///   libevent poll ticker.  `set_poll_interval` marshals onto the loop for exactly that reason.
+    /// - Tearing down a Network *invokes* the callbacks it is holding: failing the requests queued
+    ///   in its router and transport is part of `~Network`.  Those callbacks are Core's, they hold
+    ///   a raw `Network*` (see `_poll`), and a poll continuation among them will call back into a
+    ///   Network whose router has already been destroyed.
+    ///
+    /// So a fix is not a `_loop.call` around this body: polling has to be stopped and in-flight
+    /// swarm work quiesced before the old Network is dropped.
     void set_network(std::unique_ptr<network::Network> network);
 
     /// Constructs the network in place and attaches it, forwarding the arguments to its
@@ -588,6 +721,21 @@ class Core {
     /// Returns the optional network interface, or nullptr if none is set.  Non-owning: a caller
     /// must not keep this beyond the point where the network could be replaced or dropped.
     network::Network* network() const { return _network.get(); }
+
+    /// The swarm member currently carrying our messages -- the one being polled, or the one a
+    /// subscription is held with -- or nullopt before there is one.
+    ///
+    /// Which member that is changes on its own: each poll picks a fresh one at random, and a
+    /// subscription holds one only for as long as its connection lasts.  Read it to show what is
+    /// happening now, not to depend on it.
+    std::optional<network::service_node> swarm_node() const { return _swarm_node; }
+
+    /// The route our traffic to `swarm_node()` is taking right now, for showing a user where it
+    /// goes.  Nullopt when there is no member yet, no network attached, or no route to report.
+    ///
+    /// A snapshot rather than a commitment: paths rotate and subscriptions move, so asking again
+    /// later can legitimately give a different answer.
+    std::optional<network::PathInfo> current_swarm_path() const;
 
     /// The event loop this account's work runs on.
     ///
