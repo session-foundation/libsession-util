@@ -393,55 +393,79 @@ void Configs::_send_push() {
 
     _push_in_flight = true;
 
-    net->get_swarm(
+    core._swarm_request(
             core.globals.pubkey_x25519(),
-            false,
-            [this,
-             net,
-             alive = std::weak_ptr<int>{_alive},
-             pending = std::move(pending),
-             body = std::move(body)](auto, auto swarm) mutable {
+            "sequence",
+            [body = std::move(body)](const network::service_node&) { return body; },
+            [this, alive = std::weak_ptr<int>{_alive}, pending = std::move(pending)](
+                    Core::SwarmResponse res) {
                 if (alive.expired())
                     return;
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot push configs: no swarm nodes available");
-                    // Onto Core's queue like everything else here: this handler runs on the
-                    // Network's own loop, which is a different thread, and the flag is ours.
-                    jq().call([this] { _push_in_flight = false; });
+                _push_in_flight = false;
+
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Config push failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
                     return;
                 }
 
-                net->send_request(
-                        swarm_request(
-                                swarm.front(),
-                                core.globals.pubkey_x25519(),
-                                "sequence",
-                                std::move(body)),
-                        [this, alive, pending = std::move(pending)](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) mutable {
-                            // The canary first, because reaching `jq()` at all means touching
-                            // this: the Network owns this callback, so it can outlive Core, and
-                            // cancelling the queue cannot reach something that was never on it.
-                            if (alive.expired())
-                                return;
-                            jq().call([this,
-                                       pending = std::move(pending),
-                                       success,
-                                       timeout,
-                                       status,
-                                       resp = std::move(resp)]() mutable {
-                                _handle_push_response(
-                                        std::move(pending),
-                                        success,
-                                        timeout,
-                                        status,
-                                        std::move(resp));
-                            });
-                        });
+                // A config is confirmed only if *every* message it split into was stored.
+                // Confirming a partial push would drop the parts that did land from the obsolete
+                // list while leaving the config believing it is clean, so the missing part would
+                // never be sent again.
+                try {
+                    auto json = nlohmann::json::parse(*res.body);
+                    auto results = json.find("results");
+                    if (results == json.end() || !results->is_array()) {
+                        log::warning(cat, "Config push response carried no results");
+                        return;
+                    }
+
+                    for (const auto& p : pending) {
+                        std::unordered_set<std::string> hashes;
+                        bool stored = true;
+                        for (size_t i = p.first; stored && i < p.first + p.count; i++) {
+                            if (i >= results->size()) {
+                                stored = false;
+                                break;
+                            }
+                            const auto& r = (*results)[i];
+                            auto code = r.find("code");
+                            auto b = r.find("body");
+                            if (code == r.end() || code->get<int>() != 200 || b == r.end()) {
+                                stored = false;
+                                break;
+                            }
+                            auto h = b->find("hash");
+                            if (h == b->end() || !h->is_string()) {
+                                stored = false;
+                                break;
+                            }
+                            hashes.insert(h->get<std::string>());
+                        }
+
+                        if (!stored) {
+                            log::warning(
+                                    cat,
+                                    "Config push: {} was not stored, leaving it dirty",
+                                    p.conf->encryption_domain());
+                            continue;
+                        }
+                        p.conf->confirm_pushed(p.seqno, std::move(hashes));
+                    }
+                } catch (const std::exception& e) {
+                    log::warning(cat, "Could not read config push response: {}", e.what());
+                    return;
+                }
+
+                // Confirming changes the configs' state, and a change that arrived while this was
+                // in flight has re-dirtied them.
+                store_dumps();
+                if (needs_push())
+                    _schedule_push();
             });
 }
 
