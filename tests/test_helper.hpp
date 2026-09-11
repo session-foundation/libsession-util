@@ -58,17 +58,42 @@ class MockNetwork : public network::Network {
     using Reply = std::tuple<bool, bool, int16_t, std::optional<std::string>>;
     std::function<std::optional<Reply>(const network::Request&)> auto_reply;
 
+    /// The Core this is attached to, set by attach_mock_network, so that a response driven by hand
+    /// can be delivered on Core's loop as a real one is.  Null only for a MockNetwork built
+    /// directly, which is what the Network-level tests do.
+    core::Core* core = nullptr;
+
     void send_request(
             network::Request request, network::network_response_callback_t callback) override {
         std::optional<Reply> scripted;
         if (auto_reply)
             scripted = auto_reply(request);
 
-        sent_requests.push_back({std::move(request), callback});
+        // Wrapped so that answering lands on Core's loop, which is where a real response is
+        // handled: the Network delivers on its own thread and Core marshals it across.  Done here
+        // rather than at each answering helper because a test may fire `sent_requests[i].callback`
+        // itself, and what that prompts -- continuing a swarm walk, writing a cache entry -- would
+        // otherwise sit on the queue until something else happened to run it.  `call_get` is inline
+        // once already on the loop, so scripted replies, which are sent from there, cost nothing.
+        network::network_response_callback_t on_loop =
+                [this, callback = std::move(callback)](
+                        bool ok,
+                        bool timeout,
+                        int16_t status,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> body) {
+                    if (!core)
+                        return callback(ok, timeout, status, std::move(headers), std::move(body));
+                    core->call_get([&] {
+                        callback(ok, timeout, status, std::move(headers), std::move(body));
+                    });
+                };
+
+        sent_requests.push_back({std::move(request), on_loop});
 
         if (scripted) {
             auto [ok, timeout, status, body] = std::move(*scripted);
-            callback(ok, timeout, status, {}, std::move(body));
+            on_loop(ok, timeout, status, {}, std::move(body));
         }
     }
 
@@ -124,7 +149,9 @@ class MockNetwork : public network::Network {
 /// Network outright -- nothing else may hold it alive -- so a test that goes on poking at the mock
 /// keeps a raw pointer rather than a second reference.
 inline MockNetwork* attach_mock_network(core::Core& core) {
-    return &core.make_network<MockNetwork>();
+    auto& net = core.make_network<MockNetwork>();
+    net.core = &core;
+    return &net;
 }
 
 /// Answers every captured download with `data`, delivered in chunks as a transport would rather
@@ -340,7 +367,15 @@ class FakeRouter : public network::IRouter {
 
 class TestHelper {
   public:
-    static void poll(core::Core& core) { core._poll(); }
+    /// Polls the way the ticker does: on the loop.
+    ///
+    /// Not `core._poll()` on the caller's thread.  A poll reaches component state, which is the
+    /// loop's alone, and everything the walk does afterwards keys off being there already --
+    /// `JobQueue::call` runs inline inside the loop and defers outside it, so a poll driven from a
+    /// test's own thread would answer its first member and leave the rest of the walk queued.
+    static void poll(core::Core& core) {
+        core.call_get([&core] { core._poll(); });
+    }
 
     /// Runs `f` on Core's loop and hands back what it returned.
     ///
