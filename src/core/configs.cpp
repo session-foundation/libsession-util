@@ -89,28 +89,43 @@ std::vector<config::ConfigBase*> Configs::all() {
             _local.get()};
 }
 
+// Each of these schedules a settle, because handing out the reference is the last thing that
+// happens before a caller may change what it points at, and it is the only thing this layer sees.
+// A config is mutated through that reference; nothing tells us afterwards, and asking the config to
+// tell us does not work either -- its own "needs dump" flag is set *before* the assignment that
+// follows, so anything acting on it would serialise a change that has not happened yet.
+//
+// Reads schedule one too, since a reader and a writer ask the same question.  That costs a job that
+// finds every config clean and does nothing: `store_dumps` skips what has not changed and
+// `needs_push` is five state reads.
+
 config::UserProfile& Configs::user_profile() {
     _load();
+    _schedule_settle();
     return *_user_profile;
 }
 
 config::Contacts& Configs::contacts() {
     _load();
+    _schedule_settle();
     return *_contacts;
 }
 
 config::ConvoInfoVolatile& Configs::convo_info_volatile() {
     _load();
+    _schedule_settle();
     return *_convo_info_volatile;
 }
 
 config::UserGroups& Configs::user_groups() {
     _load();
+    _schedule_settle();
     return *_user_groups;
 }
 
 config::Local& Configs::local() {
     _load();
+    _schedule_settle();
     return *_local;
 }
 
@@ -149,8 +164,17 @@ Configs::Batch::Batch(Configs& configs) : _configs{configs} {
 }
 
 Configs::Batch::~Batch() {
-    if (--_configs._batch_depth == 0)
+    if (--_configs._batch_depth != 0)
+        return;
+
+    // `_flush` writes to the database, so it can throw -- and this runs during unwinding whenever
+    // the work inside the batch threw, where a second exception is a call to std::terminate.  The
+    // changes stay dirty, so the next thing to settle writes them.
+    try {
         _configs._flush();
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not flush configs at the end of a batch: {}", e.what());
+    }
 }
 
 void Configs::_flush() {
@@ -159,8 +183,9 @@ void Configs::_flush() {
 
     store_dumps();
 
-    // Unconditional rather than only after a merge, so that the batch a poll holds doubles as a
-    // sweep: a config changed locally without one gets noticed here rather than sitting unpushed.
+    // Unconditional rather than only after a merge, so that this is the one place that decides a
+    // push is owed: a settle scheduled by an accessor lands here knowing only that someone held a
+    // config, and whether that left anything to publish is this check's to answer.
     if (needs_push())
         _schedule_push();
 
@@ -256,6 +281,27 @@ bool Configs::needs_push() {
 // rather than a chosen figure: a config is what a device that has been away comes back to, so there
 // is nothing to be gained by expiring it sooner.
 static constexpr auto CONFIG_TTL = 30 * 24h;
+
+void Configs::_schedule_settle() {
+    // Once per turn of the loop, however many configs were handed out and however many fields were
+    // touched in each.
+    if (_settle_scheduled)
+        return;
+    _settle_scheduled = true;
+
+    // `call_soon` rather than running it here, and that is the whole of why this works: the caller
+    // is holding a reference it has not written through yet -- `dirty()` bumps the seqno and marks
+    // the config before the assignment that follows it -- so there is no moment during the accessor
+    // at which the config is whole.  Once the job that took the reference has returned, there is.
+    jq().call_soon([this] {
+        _settle_scheduled = false;
+        try {
+            _flush();
+        } catch (const std::exception& e) {
+            log::warning(cat, "Could not settle config changes: {}", e.what());
+        }
+    });
+}
 
 void Configs::_schedule_push() {
     auto now = std::chrono::steady_clock::now();
