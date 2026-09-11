@@ -422,8 +422,7 @@ class Core {
 
     // The batch of retrieves to send `node`, carrying that node's cursor for each namespace.
     std::vector<std::byte> _build_poll_body(
-            const network::service_node& node,
-            const std::vector<config::Namespace>& namespaces);
+            const network::service_node& node, const std::vector<config::Namespace>& namespaces);
     void _handle_poll_response(
             network::service_node node,
             std::vector<config::Namespace> namespaces,
