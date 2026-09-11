@@ -633,6 +633,104 @@ TEST_CASE("Configs: a change schedules a push rather than sending one", "[core][
     });
 }
 
+TEST_CASE(
+        "Configs: a change nobody announced is still written and pushed", "[core][configs][push]") {
+    TempCore c;
+
+    // An account's own creation writes the defaults, which is a change like any other.  Let that
+    // reach disk first, so the only thing left to dump is what this test does.
+    TestHelper::drain(*c);
+
+    // All in one job, because nothing may run between clearing the pending push and making the
+    // change: with no network attached the defaults can never be confirmed, so `needs_push()` stays
+    // true and any settle in between would arm the timer again.
+    TestHelper::on_loop(*c, [&] {
+        TestHelper::backdate_push_state(c->configs, 3s, 4s);
+        TestHelper::push_if_due(c->configs);
+        REQUIRE_FALSE(TestHelper::push_scheduled(c->configs));
+        REQUIRE_FALSE(c->configs.user_profile().needs_dump());
+
+        // A bare change: no batch around it, nothing merged, nothing polling.  That is the shape
+        // every Client setter makes, and it used to reach neither disk nor the swarm -- the only
+        // thing that armed the timer was a caller announcing a run of changes was over, and no
+        // local caller ever did.  It survived because a poll held a batch every few seconds and
+        // swept it up.
+        c->configs.user_profile().set_name("Leia");
+
+        // Still nothing: the settle is queued rather than run, because this job is still holding
+        // the reference it changed through and the config is mid-change until it returns.
+        CHECK(c->configs.user_profile().needs_dump());
+        CHECK_FALSE(TestHelper::push_scheduled(c->configs));
+    });
+
+    // One turn of the loop, with nothing else prompting it.
+    TestHelper::drain(*c);
+
+    TestHelper::on_loop(*c, [&] {
+        CHECK_FALSE(c->configs.user_profile().needs_dump());
+        CHECK(TestHelper::push_scheduled(c->configs));
+    });
+}
+
+TEST_CASE("Configs: a locally made change survives a restart", "[core][configs]") {
+    TempCore c;
+
+    TestHelper::on_loop(*c, [&] { c->configs.user_profile().set_name("Leia"); });
+    TestHelper::drain(*c);
+
+    reopen(c);
+
+    CHECK(TestHelper::on_loop(*c, [&] {
+              return std::string{c->configs.user_profile().get_name().value_or("")};
+          }) == "Leia");
+}
+
+TEST_CASE(
+        "Configs: changes in quick succession make one push, not several",
+        "[core][configs][push]") {
+    PushableCore c;
+    c->configs.push_debounce = 2s;
+    c->configs.push_max_delay = 10s;
+
+    // Three changes, each in its own job, the way three calls from an application arrive.  Each one
+    // settles separately; what must not happen is three pushes, or three timers racing each other.
+    for (std::string_view name : {"Leia", "Leia Organa", "General Organa"})
+        TestHelper::on_loop(*c.core, [&] { c->configs.user_profile().set_name(name); });
+    TestHelper::drain(*c.core);
+
+    TestHelper::on_loop(*c.core, [&] {
+        REQUIRE(TestHelper::push_scheduled(c->configs));
+        REQUIRE(c.net->sent_requests.empty());
+    });
+
+    SECTION("a further change pushes the deadline out again") {
+        TestHelper::on_loop(*c.core, [&] {
+            // Quiet long enough that it would go out right now -- and then touched again, which is
+            // what has to move the deadline.  Backdated past the threshold deliberately: at 1.9s it
+            // would be held back whether or not the change reset anything, and the test would pass
+            // without testing.
+            TestHelper::backdate_push_state(c->configs, 3s, 4s);
+            c->configs.user_profile().set_name("Leia Skywalker");
+        });
+        TestHelper::drain(*c.core);
+
+        TestHelper::on_loop(*c.core, [&] {
+            TestHelper::push_if_due(c->configs);
+            CHECK(c.net->sent_requests.empty());
+            CHECK(TestHelper::push_scheduled(c->configs));
+        });
+    }
+
+    SECTION("quiet for long enough sends one request carrying all of them") {
+        TestHelper::on_loop(*c.core, [&] {
+            TestHelper::backdate_push_state(c->configs, 3s, 4s);
+            TestHelper::push_if_due(c->configs);
+            CHECK(c.net->sent_requests.size() == 1);
+            CHECK(c->configs.user_profile().get_name() == "General Organa");
+        });
+    }
+}
+
 TEST_CASE("Configs: the debounce waits for quiet, up to a limit", "[core][configs][push]") {
     PushableCore c;
     c->configs.push_debounce = 2s;
