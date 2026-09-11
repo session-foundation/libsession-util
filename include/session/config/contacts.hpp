@@ -132,19 +132,67 @@ struct contact_info {
 
     /// API: contacts/contact_info::set_name
     ///
-    /// Sets a name or nickname; this is exactly the same as assigning to .name/.nickname directly,
-    /// except that we throw an exception if the given name is longer than MAX_NAME_LENGTH.
+    /// Sets the contact's own name, as assigning to .name does, except that an over-long one is
+    /// put through `fixup_contact_name` rather than rejected: this is their name, arriving in their
+    /// profile, and refusing it would leave us unable to hold the contact at all.
     ///
     /// Inputs:
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
+
+    /// API: contacts/contact_info::set_nickname
+    ///
+    /// Sets our own name for the contact, as assigning to .nickname does, except that it throws if
+    /// the nickname is longer than MAX_NAME_LENGTH.  It throws rather than truncating because a
+    /// nickname is something a person here typed, and storing a prefix of what they wrote changes
+    /// what they said.  Check it with `validate_contact_name` before calling this -- or as it is
+    /// typed -- and put the refusal in front of them.
+    ///
+    /// Inputs:
+    /// - `nickname` -- Nickname to assign to the contact
     void set_nickname(std::string nickname);
+
+    /// API: contacts/contact_info::set_nickname_truncated
+    ///
+    /// As `set_nickname`, but truncating rather than throwing.  Only for a caller that has already
+    /// decided truncation is acceptable for what it holds.
+    ///
+    /// Inputs:
+    /// - `nickname` -- Nickname to assign to the contact
     void set_nickname_truncated(std::string nickname);
 
   private:
     friend class Contacts;
     void load(const dict& info_dict);
 };
+
+/// API: contacts/validate_contact_name
+///
+/// Reports what is wrong with `name` as a contact name, nickname or profile name, or nullopt when
+/// nothing is.  The same limits apply to all three, so one check serves them.
+///
+/// A free function needing no account or config, so an application can call it on each keystroke
+/// while a name is being typed, rather than finding out when it tries to store one.  That is the
+/// intended use: anything a person typed should be refused here and corrected by them, because the
+/// alternative -- keeping a prefix of what they wrote -- changes what they said.
+///
+/// Inputs:
+/// - `name` -- the candidate name
+///
+/// Outputs:
+/// - `std::optional<std::string>` -- what is wrong with it, or nullopt if nothing is
+std::optional<std::string> validate_contact_name(std::string_view name);
+
+/// API: contacts/fixup_contact_name
+///
+/// Makes `name` storable as a contact name, changing as little as it can -- today that is
+/// truncating it to MAX_NAME_LENGTH on a utf8 boundary, but it is the place for whatever else
+/// storing a name comes to require.
+///
+/// For names we are *given* rather than told: a peer's profile name has to be stored whatever they
+/// set it to, and refusing it would leave us unable to hold their contact at all.  Never use it on
+/// something a person typed here -- see `validate_contact_name`.
+void fixup_contact_name(std::string& name);
 
 struct blinded_contact_info {
     const std::string session_id() const;  // in hex
