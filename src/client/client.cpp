@@ -1728,6 +1728,17 @@ void Client::_set_auto_download(const ConversationId& id, AutoDownload mode) {
 }
 
 void Client::_set_nickname(const ConversationId& id, std::string_view nickname) {
+    // Before the row is written rather than after.  The config refuses a nickname this long, and
+    // the row is what the config is rebuilt from -- so a committed over-long one could never be
+    // carried, and because a sync rebuilds the whole entry it would take every later change to that
+    // contact down with it: a block, an approval, a priority, a delete-before instruction.
+    //
+    // Reported rather than corrected: `_async` turns this into the error the caller's handler is
+    // given, which is what an application wants to put in front of whoever typed it.  Quietly
+    // keeping the first hundred bytes would change what they wrote.
+    if (auto problem = config::validate_contact_name(nickname))
+        throw std::invalid_argument{"set_nickname: {}"_format(*problem)};
+
     bool changed = false;
     {
         auto c = core.database().conn();
