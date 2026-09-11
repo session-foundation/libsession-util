@@ -355,6 +355,11 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
     _loop->call([this, request_id_opt] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
+
+            // Anything queued against a refresh we are declining to start has nothing left to wait
+            // for, unless one is already in flight and still owns it
+            if (!_current_snode_cache_refresh_id)
+                _run_pending_refresh_callbacks(false);
             return;
         }
 
@@ -432,6 +437,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
                     (use_seed_nodes ? "No seed nodes are configured!"
                                     : "Found no nodes and decided not to use seed nodes!"));
             _current_snode_cache_refresh_id.reset();
+            _run_pending_refresh_callbacks(false);
             return;
         }
 
@@ -586,6 +592,7 @@ void SnodePool::_launch_next_refresh_request(
                     cat, "[Request {}] No fetcher available, aborting refresh.", target_request_id);
             _current_snode_cache_refresh_id.reset();
             _refresh_candidate_nodes.clear();
+            _run_pending_refresh_callbacks(false);
             return;
         }
 
@@ -910,28 +917,35 @@ void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> 
             SnodePool::_perform_cache_write(path, cache);
         });
 
-        // Trigger any callbacks
-        //
-        // These must be moved out of the member before being run: a callback can re-enter the pool
-        // and register another post-refresh callback (`get_swarm` does exactly that if the cache is
-        // still empty), which would reallocate the vector we're iterating and leave us calling
-        // through a freed `std::function`. Anything registered while we're here accumulates in the
-        // now-empty member and runs after the next refresh instead of being silently discarded.
-        if (!_after_snode_cache_refresh.empty()) {
-            auto callbacks = std::move(_after_snode_cache_refresh);
-            _after_snode_cache_refresh.clear();  // A moved-from vector is valid but unspecified
-
-            log::debug(cat, "Executing {} post-refresh callbacks.", callbacks.size());
-
-            for (const auto& cb : callbacks) {
-                try {
-                    cb();
-                } catch (const std::exception& e) {
-                    log::error(cat, "Exception thrown in a post-refresh callback: {}", e.what());
-                }
-            }
-        }
+        _run_pending_refresh_callbacks(true);
     });
+}
+
+void SnodePool::_run_pending_refresh_callbacks(bool refreshed) {
+    if (_after_snode_cache_refresh.empty())
+        return;
+
+    // These must be moved out of the member before being run: a callback can re-enter the pool and
+    // register another post-refresh callback (`get_swarm` does exactly that if the cache is still
+    // empty), which would reallocate the vector we're iterating and leave us calling through a
+    // freed `std::function`. Anything registered while we're here accumulates in the now-empty
+    // member and runs after the next refresh instead of being silently discarded.
+    auto callbacks = std::move(_after_snode_cache_refresh);
+    _after_snode_cache_refresh.clear();  // A moved-from vector is valid but unspecified
+
+    log::debug(
+            cat,
+            "Executing {} post-refresh callbacks ({}).",
+            callbacks.size(),
+            (refreshed ? "refreshed" : "refresh did not happen"));
+
+    for (const auto& cb : callbacks) {
+        try {
+            cb(refreshed);
+        } catch (const std::exception& e) {
+            log::error(cat, "Exception thrown in a post-refresh callback: {}", e.what());
+        }
+    }
 }
 
 // MARK: Public Functions
@@ -1074,10 +1088,13 @@ void SnodePool::clear_node_strikes() {
 }
 
 void SnodePool::refresh_if_needed(
-        const std::vector<service_node>& in_use_nodes, std::function<void()> on_refresh_complete) {
+        const std::vector<service_node>& in_use_nodes, refresh_callback_t on_refresh_complete) {
     _loop->call([this, in_use_nodes, cb = std::move(on_refresh_complete)] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
+
+            if (cb)
+                cb(false);
             return;
         }
 
@@ -1141,17 +1158,19 @@ void SnodePool::refresh_if_needed(
             } else
                 _refresh_snode_cache();
         else if (!already_running && cb)
-            cb();
+            // Nothing needed refreshing, which is the answer the caller wanted rather than a
+            // failure to get one
+            cb(true);
     });
 }
 
-void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, std::function<void()> on_complete) {
+void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, refresh_callback_t on_complete) {
     _loop->call([this, swarm_pubkey, cb = std::move(on_complete)]() mutable {
         if (_suspended) {
             log::info(cat, "Ignoring swarm invalidation as pool is suspended.");
 
             if (cb)
-                cb();
+                cb(false);
             return;
         }
 
@@ -1209,7 +1228,8 @@ void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, std::function<void(
         if (_current_snode_cache_refresh_id)
             _after_snode_cache_refresh.push_back(std::move(cb));
         else
-            cb();
+            // No refresh started, so the caller is holding the same swarm answer it came in with
+            cb(false);
     });
 }
 
@@ -1419,7 +1439,12 @@ void SnodePool::get_swarm(
 
             // Queue this entire function call to be re-run after the refresh.
             _after_snode_cache_refresh.push_back(
-                    [this, swarm_pubkey, ignore_strike_count, cb = std::move(cb)]() {
+                    [this, swarm_pubkey, ignore_strike_count, cb = std::move(cb)](bool refreshed) {
+                        // Re-deferring when the refresh never happened would just queue against the
+                        // next one that doesn't either; there is no swarm to give back
+                        if (!refreshed)
+                            return cb(swarm::INVALID_SWARM_ID, {});
+
                         this->get_swarm(swarm_pubkey, ignore_strike_count, std::move(cb));
                     });
 
