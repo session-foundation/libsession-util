@@ -595,9 +595,37 @@ void OnionRequestRouter::_finish_setup() {
     }
 }
 
+// A cached edge node is handed to `_build_path` as a forced first hop, so it is the one node in a
+// path that never passes the strike filter `get_unused_nodes` applies to the rest, and the only
+// thing that dropped it was `edge_node_cache_duration` (10 days).
+//
+// Being struck out costs it the cached-edge-node role, not its place in the pool: it stays a node
+// like any other and `get_unused_nodes` can pick it again once its strikes expire.  Keeping the
+// entry and merely skipping it would hand the role back at that expiry, by which point we have been
+// running on a different edge node for two days - that is a second change of first hop, not a
+// return to a stable one.
+void OnionRequestRouter::_drop_struck_cached_edge_nodes() {
+    auto snode_pool = _snode_pool.lock();
+
+    if (!snode_pool)
+        return;
+
+    std::erase_if(_cached_edge_nodes, [&snode_pool](const auto& cached) {
+        if (!snode_pool->node_struck_out(cached.node))
+            return false;
+
+        log::debug(
+                cat,
+                "Dropping cached edge node {}, it has been struck out.",
+                cached.node.to_string());
+        return true;
+    });
+}
+
 void OnionRequestRouter::_pre_build_paths_if_needed() {
     if (!_config.disable_pre_build_paths) {
         log::info(cat, "Pre-building initial paths.");
+        _drop_struck_cached_edge_nodes();
         std::vector<cached_edge_node> edge_nodes = _cached_edge_nodes;
 
         if (_config.single_path_mode) {
@@ -2128,13 +2156,14 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     }
 
     // Get enough nodes for the path (if the edge node has been used for longer than the cache
-    // duration then we should create an entirely new path, otherwise we should try to reuse the
-    // edge node)
+    // duration, or has been struck out since we connected to it, then we should create an entirely
+    // new path, otherwise we should try to reuse the edge node)
     auto now = std::chrono::system_clock::now();
     auto rotate_at = (std::chrono::steady_clock::now() + _config.path_rotation_frequency);
     std::vector<service_node> rotated_path_nodes;
 
-    if (now > path.edge_first_connected_at + _config.edge_node_cache_duration)
+    if (now > path.edge_first_connected_at + _config.edge_node_cache_duration ||
+        snode_pool->node_struck_out(edge_node))
         rotated_path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
     else {
         rotated_path_nodes =

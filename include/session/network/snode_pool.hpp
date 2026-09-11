@@ -69,6 +69,13 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     virtual void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
     uint16_t node_strike_count(const service_node& node);
     uint16_t node_strike_count(const ed25519_pubkey& key);
+
+    // Whether the node has collected enough unexpired strikes to be kept out of node selection.
+    // Callers that pick a node by some other route - a cached one, say - need this to apply the
+    // same bar `get_unused_nodes` does, rather than comparing a raw count to a threshold they'd
+    // have to know about.
+    virtual bool node_struck_out(const service_node& node);
+    virtual bool node_struck_out(const ed25519_pubkey& key);
     void clear_node_strikes();
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
