@@ -26,6 +26,10 @@ namespace {
             case RequestCategory::standard_small: return true;
             case RequestCategory::file: return false;
             case RequestCategory::file_small: return true;
+            // Small enough to qualify for the reserved stream, and deliberately kept off it: a
+            // config push is the one swarm request that can be large, and stream 0 also carries
+            // the polls, the stores and the server's pushes back to us.
+            case RequestCategory::config: return false;
         }
         return false;  // Shouldn't happen
     }
@@ -386,8 +390,7 @@ void QuicTransport::_establish_connection(
                     // `_active_connection_ids` by the time it does.
                     if (on_connection_established) {
                         try {
-                            on_connection_established(
-                                    ed25519_pubkey::from_hex(address_pubkey_hex));
+                            on_connection_established(ed25519_pubkey::from_hex(address_pubkey_hex));
                         } catch (const std::exception& e) {
                             log::error(
                                     cat,
@@ -667,10 +670,7 @@ void QuicTransport::_fail_connection(
             on_connection_lost(ed25519_pubkey::from_hex(address_pubkey_hex));
         } catch (const std::exception& e) {
             log::error(
-                    cat,
-                    "Connection-lost listener for {} threw: {}",
-                    address_pubkey_hex,
-                    e.what());
+                    cat, "Connection-lost listener for {} threw: {}", address_pubkey_hex, e.what());
         }
     }
 
