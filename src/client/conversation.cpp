@@ -60,7 +60,7 @@ std::vector<Message> Conversation::messages(
 }
 std::vector<Message> Conversation::messages(
         int limit, std::optional<MessageCursor> before, bool include_deleted, await_t) const {
-    return _client->loop.call_get([this, limit, before, include_deleted] {
+    return _client->call_get([this, limit, before, include_deleted] {
         return _client->_messages(id, limit, before, include_deleted);
     });
 }
@@ -71,7 +71,7 @@ void Conversation::purge_deleted(failable_function<void(size_t)> cb) {
 }
 size_t Conversation::purge_deleted(await_t) {
     _client->_require_dm("purge_deleted", id);
-    return _client->loop.call_get([this] { return _client->_purge_deleted(id); });
+    return _client->call_get([this] { return _client->_purge_deleted(id); });
 }
 
 // -- Read state ---------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ void Conversation::mark_read(await_t) {
     mark_read(std::nullopt, await);
 }
 void Conversation::mark_read(std::optional<sys_ms> up_to, await_t) {
-    _client->loop.call_get([this, up_to] { _client->_mark_read(id, up_to); });
+    _client->call_get([this, up_to] { _client->_mark_read(id, up_to); });
 }
 
 void Conversation::set_marked_unread(bool unread, failable_function<void()> cb) {
@@ -94,7 +94,7 @@ void Conversation::set_marked_unread(bool unread, failable_function<void()> cb) 
             [c = _client, id = id, unread] { c->_set_marked_unread(id, unread); }, std::move(cb));
 }
 void Conversation::set_marked_unread(bool unread, await_t) {
-    _client->loop.call_get([this, unread] { _client->_set_marked_unread(id, unread); });
+    _client->call_get([this, unread] { _client->_set_marked_unread(id, unread); });
 }
 
 // -- Settings -----------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ void Conversation::set_priority(int priority, failable_function<void()> cb) {
             [c = _client, id = id, priority] { c->_set_priority(id, priority); }, std::move(cb));
 }
 void Conversation::set_priority(int priority, await_t) {
-    _client->loop.call_get([this, priority] { _client->_set_priority(id, priority); });
+    _client->call_get([this, priority] { _client->_set_priority(id, priority); });
 }
 
 void Conversation::set_notifications(config::notify_mode mode, failable_function<void()> cb) {
@@ -112,7 +112,7 @@ void Conversation::set_notifications(config::notify_mode mode, failable_function
             [c = _client, id = id, mode] { c->_set_notifications(id, mode); }, std::move(cb));
 }
 void Conversation::set_notifications(config::notify_mode mode, await_t) {
-    _client->loop.call_get([this, mode] { _client->_set_notifications(id, mode); });
+    _client->call_get([this, mode] { _client->_set_notifications(id, mode); });
 }
 
 void Conversation::set_mute_until(std::chrono::sys_seconds until, failable_function<void()> cb) {
@@ -120,7 +120,7 @@ void Conversation::set_mute_until(std::chrono::sys_seconds until, failable_funct
             [c = _client, id = id, until] { c->_set_mute_until(id, until); }, std::move(cb));
 }
 void Conversation::set_mute_until(std::chrono::sys_seconds until, await_t) {
-    _client->loop.call_get([this, until] { _client->_set_mute_until(id, until); });
+    _client->call_get([this, until] { _client->_set_mute_until(id, until); });
 }
 
 void Conversation::set_expiry(
@@ -130,7 +130,7 @@ void Conversation::set_expiry(
             std::move(cb));
 }
 void Conversation::set_expiry(config::expiration_mode mode, std::chrono::seconds timer, await_t) {
-    _client->loop.call_get([this, mode, timer] { _client->_set_expiry(id, mode, timer); });
+    _client->call_get([this, mode, timer] { _client->_set_expiry(id, mode, timer); });
 }
 
 void Conversation::set_auto_download(AutoDownload mode, failable_function<void()> cb) {
@@ -138,7 +138,7 @@ void Conversation::set_auto_download(AutoDownload mode, failable_function<void()
             [c = _client, id = id, mode] { c->_set_auto_download(id, mode); }, std::move(cb));
 }
 void Conversation::set_auto_download(AutoDownload mode, await_t) {
-    _client->loop.call_get([this, mode] { _client->_set_auto_download(id, mode); });
+    _client->call_get([this, mode] { _client->_set_auto_download(id, mode); });
 }
 
 // -- Sending ------------------------------------------------------------------------------------
@@ -163,7 +163,7 @@ int64_t Conversation::send_message(OutgoingMessage msg, await_t) {
 }
 int64_t Conversation::send_message(OutgoingMessage msg, upload_progress on_upload, await_t) {
     _client->_require_sendable("send_message", id, msg);
-    return _client->loop.call_get(
+    return _client->call_get(
             [&] { return _client->_send_message(id, msg, std::move(on_upload)); });
 }
 
@@ -175,7 +175,7 @@ void Conversation::clear_messages(failable_function<void()> cb) {
 }
 void Conversation::clear_messages(await_t) {
     _client->_require_dm("clear_messages", id);
-    _client->loop.call_get([this] { _client->_clear_messages(id); });
+    _client->call_get([this] { _client->_clear_messages(id); });
 }
 
 void Conversation::delete_conversation(failable_function<void()> cb) {
@@ -192,7 +192,7 @@ void Conversation::delete_conversation(await_t) {
 }
 void Conversation::delete_conversation(bool keep_messages, await_t) {
     _client->_require_dm("delete_conversation", id);
-    _client->loop.call_get(
+    _client->call_get(
             [this, keep_messages] { _client->_delete_conversation(id, keep_messages); });
 }
 
@@ -205,7 +205,7 @@ void DM::set_blocked(bool blocked, failable_function<void()> cb) {
 }
 void DM::set_blocked(bool blocked, await_t) {
     _client->_require_contact("set_blocked", id);
-    _client->loop.call_get([this, blocked] { _client->_set_blocked(id, blocked); });
+    _client->call_get([this, blocked] { _client->_set_blocked(id, blocked); });
 }
 
 void DM::set_nickname(std::string_view nickname, failable_function<void()> cb) {
@@ -218,7 +218,7 @@ void DM::set_nickname(std::string_view nickname, failable_function<void()> cb) {
 }
 void DM::set_nickname(std::string_view nickname, await_t) {
     _client->_require_contact("set_nickname", id);
-    _client->loop.call_get([this, nickname] { _client->_set_nickname(id, nickname); });
+    _client->call_get([this, nickname] { _client->_set_nickname(id, nickname); });
 }
 
 void DM::delete_contact(failable_function<void()> cb) {
@@ -227,7 +227,7 @@ void DM::delete_contact(failable_function<void()> cb) {
 }
 void DM::delete_contact(await_t) {
     _client->_require_contact("delete_contact", id);
-    _client->loop.call_get([this] { _client->_delete_contact(id); });
+    _client->call_get([this] { _client->_delete_contact(id); });
 }
 
 }  // namespace session::client

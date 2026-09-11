@@ -326,9 +326,9 @@ class Core {
     // migrations, and then calls init() on each sub-component.
     void init();
 
-    // Polling-related members and methods
+    // Polling-related members and methods.  The ticker itself is declared at the bottom of the
+    // class, with the rest of what has to be torn down before the components it reaches.
     std::chrono::milliseconds _poll_interval = 20s;
-    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
     void _update_polling();
     void _poll();
 
@@ -592,13 +592,55 @@ class Core {
     /// The event loop this account's work runs on.
     ///
     /// Everything Core does off the caller's thread — polling, send completion, and therefore every
-    /// callback it fires — happens here.  A layer above Core dispatches its own database work onto
-    /// it with `loop().call(...)` so that all access is serialised onto one thread, rather than
-    /// relying on the database being safe to touch from several.
+    /// callback it fires — happens here.
+    ///
+    /// The database itself does not need this: `sqlite::Database` is a pool that hands each thread
+    /// its own connection, so a self-contained query is safe from anywhere.  What needs the loop is
+    /// everything a component holds *beside* its tables — the cached account keys, the config
+    /// objects, and the lazy construction of both — none of which is synchronised and all of which
+    /// polling touches.  `detail::CoreComponent` says which methods that covers, and they assert it
+    /// in a debug build.
+    ///
+    /// A layer above Core that keeps its own tables dispatches its own work here for the same
+    /// reason it would anywhere else: to serialise its own state, not the database's.
     ///
     /// `call()` runs the job inline when the caller is already on this thread, so a single-threaded
     /// application pays nothing for the indirection.
+    ///
+    /// Prefer the `call*` methods below to scheduling on this directly: a job left on the loop's
+    /// own queue is not discarded until `~Loop`, which is the last thing `~Core` does, so it can
+    /// still be run against components that have already been destroyed.  This is the escape hatch
+    /// for the cases that genuinely want the loop itself.
     quic::Loop& loop();
+
+    /// Schedules work on Core's job queue, which is where anything reaching into Core from another
+    /// thread belongs.
+    ///
+    /// `call` runs `f` inline when the caller is already the loop thread and queues it otherwise;
+    /// `call_soon` queues it either way; `call_later` queues it after a delay; and `call_get`
+    /// blocks the calling thread until `f` has run, handing back whatever it returned.
+    ///
+    /// Unlike `loop()`, work put here is *cancelled* when Core goes away, so a job still
+    /// outstanding is dropped rather than run against half-destroyed components.  Queueing onto a
+    /// stopped queue throws rather than doing so silently.
+    template <typename F>
+    void call(F&& f) {
+        _jq.call(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_soon(F&& f) {
+        _jq.call_soon(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_later(std::chrono::microseconds delay, F&& f) {
+        _jq.call_later(delay, std::forward<F>(f));
+    }
+    /// Returns by value, deliberately: a reference handed back here would have outlived the job
+    /// that produced it, which is the whole hazard this queue exists to close.
+    template <typename F>
+    auto call_get(F&& f) {
+        return _jq.call_get(std::forward<F>(f));
+    }
 
     /// The account database, for a layer built on top of Core that keeps its own tables alongside
     /// Core's — the same layer that supplies a schema_extension to create them.
@@ -618,6 +660,10 @@ class Core {
 
     // Global value storage.  This are used by some components, but can also be used by the
     // application to persist settings.
+    //
+    // `get_*`/`set`/`erase` are self-contained queries and are safe to call from any thread; the
+    // rest of Globals is not.  See the threading note on `detail::CoreComponent`, which applies
+    // to every component below as well.
     Globals globals{*this};
 
     // Session Pro-related capabilities
@@ -637,6 +683,30 @@ class Core {
     // is_final=true to flush any actions that are deferred until the end of a fetch.
     void receive_messages(
             std::span<const SwarmMessage> messages, config::Namespace ns, bool is_final);
+
+  private:
+    // Set at the end of init(), i.e. once construction is complete and another thread could
+    // reach a component.  Read by CoreComponent::on_loop() so that the components' `init()`,
+    // which necessarily runs on the constructing thread, is not treated as misuse.
+    bool _constructed = false;
+
+    // Where component work runs.  A queue of our own rather than the loop's shared one so that
+    // whatever is still outstanding is *cancelled* when Core goes away instead of running against
+    // components that are already destroyed -- the same reason Client keeps its own.
+    //
+    // Declared near the bottom so it is destroyed early, before the components its jobs reach.  It
+    // has to be destroyed while `_loop` is still alive, which it is: `_loop` is declared first and
+    // so is destroyed last.
+    quic::JobQueue _jq{_loop};
+
+    // Last of all, so it is the *first* thing destroyed: a ticker still running is a poll still
+    // arriving, and a poll reaches every component.  Stopping it before `_jq` rather than after
+    // also means no poll can try to queue its response onto a queue that has already stopped,
+    // which throws.
+    //
+    // (It lives here rather than beside `_poll_interval` for that reason alone; everything that
+    // uses it is up there with the rest of the polling machinery.)
+    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
 };
 
 }  // namespace session::core

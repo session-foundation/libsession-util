@@ -56,7 +56,7 @@ TEST_CASE("Devices - initial state", "[core][devices]") {
     auto c = restored_core();
 
     SECTION("device_info defaults") {
-        auto [info, is_registered] = c->devices.device_info();
+        auto [info, is_registered] = c->devices.device_info(await);
         // seqno == 0 is the sentinel meaning no row exists yet
         CHECK(info.seqno == 0);
         CHECK_FALSE(is_registered);
@@ -82,9 +82,9 @@ TEST_CASE("Devices - update_info and same_user_fields", "[core][devices]") {
         info.description = "test phone";
         info.version = {1, 2, 3};
 
-        c->devices.update_info(info);
+        c->devices.update_info(info, await);
 
-        auto [got, is_registered] = c->devices.device_info();
+        auto [got, is_registered] = c->devices.device_info(await);
         CHECK(got.seqno == 1);
         CHECK(got.type == device::Type::Session_iOS);
         CHECK(got.description == "test phone");
@@ -99,64 +99,64 @@ TEST_CASE("Devices - update_info and same_user_fields", "[core][devices]") {
         info.description = "desktop";
         info.version = {0, 1, 0};
 
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 1);
 
-        c->devices.update_info(info);  // identical — should not bump
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);  // identical — should not bump
+        CHECK(c->devices.device_info(await).first.seqno == 1);
     }
 
     SECTION("changed description bumps seqno") {
         device::Info info{};
         info.description = "first";
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 1);
 
         info.description = "second";
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 2);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 2);
     }
 
     SECTION("changed type bumps seqno") {
         device::Info info{};
         info.type = device::Type::Session_Android;
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 1);
 
         info.type = device::Type::Session_Desktop;
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 2);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 2);
     }
 
     SECTION("changed version bumps seqno") {
         device::Info info{};
         info.version = {1, 0, 0};
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 1);
 
         info.version = {2, 0, 0};
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 2);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 2);
     }
 
     SECTION("extra fields round-trip and participate in comparison") {
         device::Info info{};
         info.extra["custom_key"] = std::string{"hello"};
-        c->devices.update_info(info);
+        c->devices.update_info(info, await);
 
-        auto [got, _] = c->devices.device_info();
+        auto [got, _] = c->devices.device_info(await);
         CHECK(got.seqno == 1);
         REQUIRE(got.extra.count("custom_key"));
         CHECK(std::get<std::string>(got.extra.at("custom_key")) == "hello");
 
         // Same extra — no bump
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 1);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 1);
 
         // Changed extra — bump
         info.extra["custom_key"] = std::string{"world"};
-        c->devices.update_info(info);
-        CHECK(c->devices.device_info().first.seqno == 2);
+        c->devices.update_info(info, await);
+        CHECK(c->devices.device_info(await).first.seqno == 2);
     }
 
     SECTION("same_user_fields ignores state/seqno/pk_*") {
@@ -181,7 +181,7 @@ TEST_CASE("Devices - update_info and same_user_fields", "[core][devices]") {
     SECTION("update_info device appears in devices(include_unregistered=true)") {
         device::Info info{};
         info.description = "my device";
-        c->devices.update_info(info);
+        c->devices.update_info(info, await);
 
         auto devs = c->devices.devices(false, false, true);
         CHECK(devs.size() == 1);
@@ -432,7 +432,7 @@ TEST_CASE("Devices - build_link_request", "[core][devices]") {
     auto c = restored_core();
 
     SECTION("returns non-empty message and 21-entry SAS") {
-        auto result = c->devices.build_link_request();
+        auto result = c->devices.build_link_request(await);
         CHECK_FALSE(result.message.empty());
         CHECK(result.sas.size() == 21);
         for (const auto& s : result.sas)
@@ -440,8 +440,8 @@ TEST_CASE("Devices - build_link_request", "[core][devices]") {
     }
 
     SECTION("consecutive calls produce different messages") {
-        auto r1 = c->devices.build_link_request();
-        auto r2 = c->devices.build_link_request();
+        auto r1 = c->devices.build_link_request(await);
+        auto r2 = c->devices.build_link_request(await);
         CHECK(r1.message != r2.message);
     }
 }
@@ -504,10 +504,10 @@ TEST_CASE("Devices - establishing the group", "[core][devices]") {
     SECTION("a generated account establishes a group with itself") {
         TempCore c;
 
-        auto [info, registered] = c->devices.device_info();
+        auto [info, registered] = c->devices.device_info(await);
         CHECK(registered);
         CHECK(info.state == device::State::Registered);
-        CHECK(info.id == c->devices.device_info().first.id);
+        CHECK(info.id == c->devices.device_info(await).first.id);
 
         // Exactly one device, and it is us.
         auto devs = c->devices.devices(true, true, true);
@@ -528,7 +528,7 @@ TEST_CASE("Devices - establishing the group", "[core][devices]") {
     SECTION("a restored account does not") {
         auto c = restored_core();
 
-        auto [info, registered] = c->devices.device_info();
+        auto [info, registered] = c->devices.device_info(await);
         CHECK_FALSE(registered);
         CHECK(c->devices.devices(true, true, true).empty());
         CHECK_FALSE(c->devices.needs_push().device_group);
@@ -541,7 +541,7 @@ TEST_CASE("Devices - establishing the group", "[core][devices]") {
                     fmt::format("{}.db", random::unique_id("test_estab", 7));
         {
             Core c{path};
-            auto [info, registered] = c.devices.device_info();
+            auto [info, registered] = c.devices.device_info(await);
             REQUIRE(registered);
             first_id = info.id;
             first_seqno = info.seqno;
@@ -550,7 +550,7 @@ TEST_CASE("Devices - establishing the group", "[core][devices]") {
             // Reopened: the flag was cleared the first time, so this must not re-register or
             // re-mint anything -- a second establish would bump the seqno and mint a second key.
             Core c{path};
-            auto [info, registered] = c.devices.device_info();
+            auto [info, registered] = c.devices.device_info(await);
             CHECK(registered);
             CHECK(info.id == *first_id);
             CHECK(info.seqno == first_seqno);
@@ -577,7 +577,7 @@ TEST_CASE("Devices - a removal cannot be undone by a message", "[core][devices]"
     other.pk_x25519 = k.x25519_pub;
     other.pk_mlkem768 = k.mlkem768_pub;
 
-    auto [self, registered] = c->devices.device_info();
+    auto [self, registered] = c->devices.device_info(await);
     REQUIRE(registered);
 
     auto deliver = [&](const device::map& m) {
@@ -633,7 +633,7 @@ TEST_CASE("Devices - a tombstone for an unknown device is kept", "[core][devices
     // below is a usable recipient.
     auto k = c->devices.rotate_device_keys();
 
-    auto [self, registered] = c->devices.device_info();
+    auto [self, registered] = c->devices.device_info(await);
     REQUIRE(registered);
 
     auto deliver = [&](const device::map& m) {
@@ -687,7 +687,7 @@ TEST_CASE("Devices - a single-recipient group is readable", "[core][devices]") {
     // The common case: an account with one device, which is what establishing a group produces.
     // With one recipient every other slot in the message is padding, so nothing else can stand in
     // for a real entry that was overwritten.
-    auto [self, registered] = c->devices.device_info();
+    auto [self, registered] = c->devices.device_info(await);
     REQUIRE(registered);
 
     auto enc = TestHelper::encrypt_device_data(c->devices, device::map{{self.id, self}});

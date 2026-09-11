@@ -440,7 +440,7 @@ void Client::_init() {
     // already running by the time a Client is built: the first `_touch` schedules `_flush_pending`,
     // which steals `_dirty` out from under the reconcile still filling it.
     if (core.globals.have_account())
-        loop.call_get([this] { _reconcile_all(); });
+        call_get([this] { _reconcile_all(); });
 }
 
 // -- Change notification ----------------------------------------------------------------------
@@ -450,11 +450,11 @@ void Client::_emit(std::function<void(const callbacks&)> invoke) {
 }
 
 void Client::set_dispatcher(dispatcher d) {
-    loop.call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
+    call([this, d = std::move(d)]() mutable { _dispatcher = std::move(d); });
 }
 
 void Client::set_high_freq_dispatch_interval(std::chrono::milliseconds interval) {
-    loop.call([this, interval] { _high_freq_dispatch_interval = interval; });
+    call([this, interval] { _high_freq_dispatch_interval = interval; });
 }
 
 void Client::_dispatch_out(std::function<void()> job) {
@@ -592,7 +592,7 @@ void Client::_require_sendable(
     // alternative is to accept the send, discover inside the loop that the target is not there, and
     // have only a callback to say so.  A caller naming a message that does not exist has made a
     // mistake at the call site, and that is where it should be reported.
-    auto found = loop.call_get([this, id, target = *msg.reply_to] {
+    auto found = call_get([this, id, target = *msg.reply_to] {
         auto c = core.database().conn();
         return c.prepared_maybe_get<int64_t>(
                 R"(
@@ -653,7 +653,7 @@ void Client::retry_send(
 }
 
 bool Client::retry_send(int64_t message_id, Conversation::upload_progress on_upload, await_t) {
-    return loop.call_get([this, message_id, on_upload = std::move(on_upload)] {
+    return call_get([this, message_id, on_upload = std::move(on_upload)] {
         return _retry_send(message_id, on_upload);
     });
 }
@@ -668,7 +668,7 @@ void Client::message_debug(
 }
 
 std::optional<std::string> Client::message_debug(int64_t message_id, await_t) {
-    return loop.call_get([this, message_id] { return _message_debug(message_id); });
+    return call_get([this, message_id] { return _message_debug(message_id); });
 }
 
 void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb) {
@@ -677,7 +677,7 @@ void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb
 }
 
 bool Client::delete_message(int64_t message_id, await_t) {
-    return loop.call_get(
+    return call_get(
             [this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
@@ -710,7 +710,7 @@ void Client::_sweep_cache() {
 
         // `call_get`, not `call`: the destructor joins this thread to know the sweep is over, and a
         // thread that had only posted the job would finish while the job was still queued.
-        loop.call_get([this, &attachments, &pictures] {
+        call_get([this, &attachments, &pictures] {
             try {
                 _reconcile_cache(std::move(attachments), std::move(pictures));
             } catch (const std::exception& e) {
@@ -794,7 +794,7 @@ void Client::profile_picture(
         const ConversationId& id,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
         failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
-    loop.call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
+    call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
         try {
             _profile_picture(id, std::move(on_progress), std::move(cb));
         } catch (const std::exception& e) {
@@ -890,13 +890,13 @@ void Client::set_attachment_cache_limit(
     _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
 }
 void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, await_t) {
-    loop.call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
+    call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
 }
 void Client::attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb) {
     _async([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); }, std::move(cb));
 }
 std::optional<int64_t> Client::attachment_cache_limit(await_t) {
-    return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
+    return call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
 void Client::set_auto_download_max_size(
@@ -904,13 +904,13 @@ void Client::set_auto_download_max_size(
     _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
 }
 void Client::set_auto_download_max_size(std::optional<int64_t> bytes, await_t) {
-    loop.call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
+    call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
 }
 void Client::auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb) {
     _async([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); }, std::move(cb));
 }
 std::optional<int64_t> Client::auto_download_max_size(await_t) {
-    return loop.call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
+    return call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
 }
 
 void Client::display_name(failable_function<void(std::string)> cb) {
@@ -919,7 +919,7 @@ void Client::display_name(failable_function<void(std::string)> cb) {
 }
 
 std::string Client::display_name(await_t) {
-    return loop.call_get(
+    return call_get(
             [this] { return std::string{core.configs.user_profile().get_name().value_or("")}; });
 }
 
@@ -929,7 +929,7 @@ void Client::set_display_name(std::string_view name, failable_function<void()> c
 }
 
 void Client::set_display_name(std::string_view name, await_t) {
-    loop.call_get([this, name] { core.configs.user_profile().set_name(name); });
+    call_get([this, name] { core.configs.user_profile().set_name(name); });
 }
 
 void Client::notify_media_saved(failable_function<void(bool)> cb) {
@@ -937,7 +937,7 @@ void Client::notify_media_saved(failable_function<void(bool)> cb) {
 }
 
 bool Client::notify_media_saved(await_t) {
-    return loop.call_get([this] { return core.configs.user_profile().get_notify_media_saved(); });
+    return call_get([this] { return core.configs.user_profile().get_notify_media_saved(); });
 }
 
 void Client::set_notify_media_saved(bool notify, failable_function<void()> cb) {
@@ -946,7 +946,7 @@ void Client::set_notify_media_saved(bool notify, failable_function<void()> cb) {
 }
 
 void Client::set_notify_media_saved(bool notify, await_t) {
-    loop.call_get([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); });
+    call_get([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); });
 }
 
 void Client::delete_message_everywhere(int64_t message_id, failable_function<void(bool)> cb) {
@@ -954,7 +954,7 @@ void Client::delete_message_everywhere(int64_t message_id, failable_function<voi
 }
 
 bool Client::delete_message_everywhere(int64_t message_id, await_t) {
-    return loop.call_get([this, message_id] { return _delete_message_everywhere(message_id); });
+    return call_get([this, message_id] { return _delete_message_everywhere(message_id); });
 }
 
 void Client::attachment_data(
@@ -962,7 +962,7 @@ void Client::attachment_data(
         size_t index,
         std::function<void(const AttachmentProgress&)> on_progress,
         failable_function<void(std::vector<std::byte>)> cb) {
-    loop.call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
+    call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
         try {
             _attachment_data(message_id, index, std::move(on_progress), cb);
         } catch (const std::exception& e) {
@@ -1061,7 +1061,7 @@ void Client::_fetch_cached(
             // Onto the loop before touching the registry -- this arrives on the network thread, and
             // `_in_flight` is ours.
             [this, name](int64_t done, int64_t total, std::optional<int> r) {
-                loop.call([this, name, done, total, r] {
+                call([this, name, done, total, r] {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1072,7 +1072,7 @@ void Client::_fetch_cached(
                 });
             },
             [this, name, store = std::move(store)](std::optional<std::string> error) {
-                loop.call([this, name, store, error = std::move(error)]() mutable {
+                call([this, name, store, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1101,7 +1101,7 @@ void Client::set_gallery(int64_t message_id, bool gallery, failable_function<voi
 }
 
 bool Client::set_gallery(int64_t message_id, bool gallery, await_t) {
-    return loop.call_get([this, message_id, gallery] { return _set_gallery(message_id, gallery); });
+    return call_get([this, message_id, gallery] { return _set_gallery(message_id, gallery); });
 }
 
 void Client::purge_deleted_message(int64_t message_id, failable_function<void(bool)> cb) {
@@ -1109,7 +1109,7 @@ void Client::purge_deleted_message(int64_t message_id, failable_function<void(bo
 }
 
 bool Client::purge_deleted_message(int64_t message_id, await_t) {
-    return loop.call_get([this, message_id] { return _purge_deleted_message(message_id); });
+    return call_get([this, message_id] { return _purge_deleted_message(message_id); });
 }
 
 void Client::send_message(
@@ -1155,23 +1155,23 @@ void Client::set_blocked(
 
 void Client::set_blocked(const ConversationId& id, bool blocked, await_t) {
     _require_contact("set_blocked", id);
-    loop.call_get([this, id, blocked] { _set_blocked(id, blocked); });
+    call_get([this, id, blocked] { _set_blocked(id, blocked); });
 }
 
 std::vector<AnyConversation> Client::conversations(await_t) {
-    return loop.call_get([this] { return _conversations(); });
+    return call_get([this] { return _conversations(); });
 }
 
 std::vector<AnyConversation> Client::message_requests(await_t) {
-    return loop.call_get([this] { return _message_requests(); });
+    return call_get([this] { return _message_requests(); });
 }
 
 std::optional<AnyConversation> Client::conversation(const ConversationId& id, await_t) {
-    return loop.call_get([this, id] { return _conversation(id); });
+    return call_get([this, id] { return _conversation(id); });
 }
 
 std::optional<Message> Client::message(int64_t id, await_t) {
-    return loop.call_get([this, id] { return _message(id); });
+    return call_get([this, id] { return _message(id); });
 }
 
 int64_t Client::send_message(const ConversationId& id, OutgoingMessage msg, await_t) {
@@ -1184,7 +1184,7 @@ int64_t Client::send_message(
         Conversation::upload_progress on_upload,
         await_t) {
     _require_sendable("send_message", id, msg);
-    return loop.call_get([&] { return _send_message(id, msg, std::move(on_upload)); });
+    return call_get([&] { return _send_message(id, msg, std::move(on_upload)); });
 }
 
 void Client::conversation(
@@ -1212,7 +1212,7 @@ void Client::dm(
 
 std::optional<DM> Client::dm(const ConversationId& id, await_t) {
     _require_dm("dm", id);
-    return loop.call_get([this, id] { return as_dm(_conversation(id)); });
+    return call_get([this, id] { return as_dm(_conversation(id)); });
 }
 
 void Client::open_dm(
@@ -1225,7 +1225,7 @@ void Client::open_dm(
 
 DM Client::open_dm(const ConversationId& id, await_t) {
     _require_dm("open_dm", id);
-    return loop.call_get([this, id] {
+    return call_get([this, id] {
         return *as_dm(std::optional<AnyConversation>{_create_conversation(id)});
     });
 }
@@ -1254,7 +1254,7 @@ void Client::save_attachment(
     // Not _async: what that reports is the *start* of the transfer, and the answer a caller wants
     // is whether the file arrived, which is minutes away.  So the callback is carried down to the
     // download's own completion, and only the failures that happen before it starts come back here.
-    loop.call([this,
+    call([this,
                message_id,
                index,
                dest = std::move(dest),
@@ -2403,7 +2403,7 @@ void Client::_prefetch_picture(sqlite::Connection& c, int64_t account, const std
 
         auto& [sid, key] = *row;
 
-        loop.call_soon([this,
+        call_soon([this,
                         id = ConversationId::dm(sid),
                         url,
                         key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
@@ -3788,7 +3788,7 @@ void Client::_upload_next(
         // Core's loop's alone.  Nobody is waiting on a callback here -- this is Client's
         // own continuation -- so a failure has to be turned into the message failing, which
         // is what the application is watching.
-        loop.call([this, client_id, index, on_upload, plaintext_size, result = std::move(result)] {
+        call([this, client_id, index, on_upload, plaintext_size, result = std::move(result)] {
             try {
                 if (auto* err = std::get_if<int16_t>(&result)) {
                     log::warning(
@@ -4400,7 +4400,7 @@ void Client::_save_attachment(
         // we sent would claim they have a file they may never have opened.  A note to self
         // is exempt: there the recipient is us, so saving it really is the recipient
         // saving it.
-        loop.call([this, message_id, index, notify_sender] {
+        call([this, message_id, index, notify_sender] {
             if (_saved_by_recipient(message_id))
                 _record_saved(message_id, index, clock_now_ms());
 

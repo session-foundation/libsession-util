@@ -90,12 +90,12 @@ TEST_CASE("Globals: defer_account leaves the account unresolved", "[core][global
         {
             Core core{path, defer_account{}};
             REQUIRE_FALSE(core.globals.have_account());
-            core.globals.create_account();
+            core.globals.create_account(await);
             CHECK(core.globals.have_account());
             id = core.globals.session_id_hex();
             CHECK(id.starts_with("05"));
             // Adopting a second identity would orphan everything stored against the first.
-            CHECK_THROWS_AS(core.globals.create_account(), std::logic_error);
+            CHECK_THROWS_AS(core.globals.create_account(await), std::logic_error);
         }
         // Reopening finds the stored seed, so defer_account is a no-op on an existing account.
         Core core{path, defer_account{}};
@@ -107,7 +107,7 @@ TEST_CASE("Globals: defer_account leaves the account unresolved", "[core][global
         std::string restored;
         {
             Core core{path, defer_account{}};
-            core.globals.restore_account(predefined_seed{seed});
+            core.globals.restore_account(predefined_seed{seed}, await);
             CHECK(core.globals.have_account());
             restored = core.globals.session_id_hex();
         }

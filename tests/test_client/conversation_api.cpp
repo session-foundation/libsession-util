@@ -34,7 +34,7 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
 
     // All of it reaches the Contacts config, which is what makes it follow the account rather than
     // the device.
-    auto entry = c->core.configs.contacts().get(them);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); });
     REQUIRE(entry);
     CHECK(entry->notifications == config::notify_mode::disabled);
     CHECK(entry->mute_until == 1700000000);
@@ -46,7 +46,9 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     // Clearing the nickname falls back to what they call themselves.
     c->dm(id, await)->set_nickname("", await);
     CHECK(convo().dm()->nickname.empty());
-    CHECK_FALSE(c->core.configs.contacts().get(them)->nickname == "Bilbo");
+    CHECK_FALSE(
+            in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
+            "Bilbo");
 
     // A timer without a mode expires nothing, so it is not stored as though it were a setting.
     c->conversation(id, await)->set_expiry(config::expiration_mode::none, 3600s, await);
@@ -180,12 +182,16 @@ TEST_CASE("Client: auto-download is per conversation and stays here", "[client][
     // Device-local: nothing about it reaches the config that follows the account.  Checked by
     // deriving the contact outward and finding the config unchanged -- if this were synced, the
     // setting above would have dirtied it.
-    auto& contacts = c->core.configs.contacts();
+    // Read each time rather than binding the config: a reference to one is only ours for as long
+    // as the excursion onto the loop lasts.
+    auto contacts_dirty = [&] {
+        return in_configs(*c, [](auto& cfg) { return cfg.contacts().needs_push(); });
+    };
     TestHelper::sync_contact(*c.client, id);
-    auto before_push = contacts.needs_push();
+    auto before_push = contacts_dirty();
     c->conversation(id, await)->set_auto_download(AutoDownload::all, await);
     TestHelper::sync_contact(*c.client, id);
-    CHECK(contacts.needs_push() == before_push);
+    CHECK(contacts_dirty() == before_push);
 
     // And it survives a restart, being a stored property rather than a session's opinion.
     c.reopen();

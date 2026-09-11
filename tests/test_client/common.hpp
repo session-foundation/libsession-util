@@ -241,6 +241,20 @@ inline std::string preview_body(const AnyConversation& c) {
     return p ? p->body : "";
 }
 
+/// Reads something out of the account's configs, on Core's loop where they belong.
+///
+/// The configs are the loop's -- see `core::detail::CoreComponent` -- and a test is on its own
+/// thread like any other application.  `Client` wraps the parts an application actually wants;
+/// this is for the tests that reach past it to check what was written underneath.
+///
+/// **Return a value.**  Anything pointing into a config -- a reference, or the `string_view` that
+/// getters like `get_name()` hand back -- is dangling the moment this returns, since the config is
+/// only ours for as long as the excursion lasts.  Copy it inside the lambda.
+template <typename F>
+auto in_configs(Client& c, F&& f) {
+    return TestHelper::on_loop(c.core, [&] { return f(c.core.configs); });
+}
+
 }  // namespace client_test
 
 using namespace client_test;
