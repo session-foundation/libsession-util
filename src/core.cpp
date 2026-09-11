@@ -123,9 +123,22 @@ Core::~Core() {
         if (*ticker)
             (*ticker)->stop();
 
-    // A change settles a turn of the loop after it is made, so one made just before this is still
-    // queued.  Going through the queue rather than calling directly both runs whatever is pending
-    // and puts the dump on the thread that is allowed to do it.
+    // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
+    // destroyed by whoever owns it.  Before the queue is stopped rather than after: tearing the
+    // Network down fails whatever it still holds, and those completions marshal onto our queue,
+    // which throws if it has already been stopped.  Queued here they are simply cancelled below.
+    _network.reset();
+
+    // One job that settles and then shuts the queue down from inside itself, which is what
+    // `process_job_queue` is written for -- it re-checks the running flag between jobs, so nothing
+    // else in the batch runs once this returns.  `stop()` clears the queue and deletes every armed
+    // `call_later`, so by the time the members below are destroyed there is no job, no timer and no
+    // deferred deleter left that could reach one of them.  None of what a component holds is
+    // thread-safe, so that guarantee is the point rather than a tidiness.
+    //
+    // The dump goes first because a change settles a turn of the loop after it is made, and one
+    // made just before this is still queued ahead of us -- so it runs, and then this writes what it
+    // could not.
     //
     // Swallowed rather than propagated: this is a destructor, and a database that cannot be written
     // is not something the caller tearing Core down can act on.
@@ -133,14 +146,11 @@ Core::~Core() {
         call_get([this] {
             if (globals.have_account())
                 configs.store_dumps();
+            _jq.stop();
         });
     } catch (const std::exception& e) {
-        log::warning(cat, "Could not write config dumps during shutdown: {}", e.what());
+        log::warning(cat, "Could not shut Core's queue down cleanly: {}", e.what());
     }
-
-    // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
-    // destroyed by whoever owns it.
-    _network.reset();
 }
 
 void Core::set_network(std::unique_ptr<network::Network> network) {
