@@ -283,6 +283,13 @@ bool Configs::needs_push() {
 static constexpr auto CONFIG_TTL = 30 * 24h;
 
 void Configs::_schedule_settle() {
+    // Not while Core is still being built.  The loop thread is already running by then, but the
+    // constructing thread is legitimately off it -- that is what `on_loop()` allows for -- so a job
+    // posted here would serialise a config on the loop while construction is still writing to it.
+    // Nothing is owed: construction flushes what it changes itself.
+    if (!core._constructed)
+        return;
+
     // Once per turn of the loop, however many configs were handed out and however many fields were
     // touched in each.
     if (_settle_scheduled)

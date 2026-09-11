@@ -124,6 +124,21 @@ Core::~Core() {
         if (*ticker)
             (*ticker)->stop();
 
+    // A change settles a turn of the loop after it is made, so one made just before this is still
+    // queued.  Going through the queue rather than calling directly both runs whatever is pending
+    // and puts the dump on the thread that is allowed to do it.
+    //
+    // Swallowed rather than propagated: this is a destructor, and a database that cannot be written
+    // is not something the caller tearing Core down can act on.
+    try {
+        call_get([this] {
+            if (globals.have_account())
+                configs.store_dumps();
+        });
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not write config dumps during shutdown: {}", e.what());
+    }
+
     // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
     // destroyed by whoever owns it.
     _network.reset();
