@@ -963,6 +963,25 @@ void SnodePool::clear_cache() {
     });
 }
 
+size_t SnodePool::_active_strike_count(const ed25519_pubkey& key) const {
+    auto it = _snode_strikes.find(key);
+
+    if (it == _snode_strikes.end())
+        return 0;
+
+    auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
+
+    return std::ranges::count_if(it->second, [threshold](auto t) { return t > threshold; });
+}
+
+bool SnodePool::_node_struck_out(const ed25519_pubkey& key) const {
+    auto strikes = _active_strike_count(key);
+
+    // The `strikes > 0` is what keeps a threshold of 0 meaning "drop a node on its first strike";
+    // comparing straight against 0 also drops every node that has never failed at all
+    return (strikes > 0 && strikes >= _config.cache_node_strike_threshold);
+}
+
 void SnodePool::record_node_failure(const service_node& node, bool permanent) {
     record_node_failure(node.remote_pubkey, permanent);
 }
@@ -970,18 +989,17 @@ void SnodePool::record_node_failure(const service_node& node, bool permanent) {
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     _loop->call([this, key, permanent] {
         auto now = sysclock_now_s();
+        auto& stamps = _snode_strikes[key];
+        std::erase_if(stamps, [threshold = now - STRIKE_EXPIRY](auto t) { return t <= threshold; });
 
-        if (permanent)
-            for (int i = 0; i < _config.cache_node_strike_threshold; ++i)
-                _snode_strikes[key].push_back(now);
-        else
-            _snode_strikes[key].push_back(now);
+        // A permanent failure has to strike the node out whatever the threshold is - looping up to
+        // a threshold of 0 records nothing and leaves the node in rotation
+        auto strikes = (permanent ? std::max<uint16_t>(1, _config.cache_node_strike_threshold) : 1);
 
-        log::trace(
-                cat,
-                "Recorded strike for node {}, total: {}",
-                key.hex(),
-                _snode_strikes[key].size());
+        for (uint16_t i = 0; i < strikes; ++i)
+            stamps.push_back(now);
+
+        log::trace(cat, "Recorded strike for node {}, total: {}", key.hex(), stamps.size());
 
         // Throttle persisting the strikes to disk to at most every X minutes
         if (!_strikes_flush_scheduled && !_suspended) {
@@ -1009,22 +1027,16 @@ uint16_t SnodePool::node_strike_count(const service_node& node) {
 }
 
 uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
-    return _loop->call_get([this, &key] {
-        auto it = _snode_strikes.find(key);
-        if (it == _snode_strikes.end())
-            return uint16_t{0};
+    return _loop->call_get(
+            [this, &key] { return static_cast<uint16_t>(_active_strike_count(key)); });
+}
 
-        const auto& stamps = it->second;
+bool SnodePool::node_struck_out(const service_node& node) {
+    return node_struck_out(node.remote_pubkey);
+}
 
-        const auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
-
-        uint16_t count = 0;
-        for (auto t : stamps)
-            if (t > threshold)
-                count++;
-
-        return count;
-    });
+bool SnodePool::node_struck_out(const ed25519_pubkey& key) {
+    return _loop->call_get([this, &key] { return _node_struck_out(key); });
 }
 
 void SnodePool::clear_node_strikes() {
@@ -1068,9 +1080,7 @@ void SnodePool::refresh_if_needed(
                     in_use_keys.insert(node.remote_pubkey);
 
                 for (const auto& node : _snode_cache) {
-                    auto it = _snode_strikes.find(node.remote_pubkey);
-                    if (it != _snode_strikes.end() &&
-                        it->second.size() >= _config.cache_node_strike_threshold)
+                    if (_node_struck_out(node.remote_pubkey))
                         continue;
 
                     // If the caller considers the node as already in use then it wouldn't be
@@ -1158,9 +1168,7 @@ std::vector<service_node> SnodePool::get_unused_nodes(
                 continue;
 
             // Skip nodes with too many failures
-            auto it = _snode_strikes.find(node.remote_pubkey);
-            if (it != _snode_strikes.end() &&
-                it->second.size() >= _config.cache_node_strike_threshold)
+            if (_node_struck_out(node.remote_pubkey))
                 continue;
 
             // Skip nodes whos IP addresses are in the exclusion list
@@ -1196,8 +1204,7 @@ void SnodePool::get_swarm(
             std::ranges::shuffle(nodes, csrng);
 
             auto get_strike_count = [this](const service_node& node) -> size_t {
-                auto it = _snode_strikes.find(node.remote_pubkey);
-                return (it != _snode_strikes.end() ? it->second.size() : 0);
+                return _active_strike_count(node.remote_pubkey);
             };
 
             // Partition into below-threshold and above-thresold.  This keeps the shuffled order of
