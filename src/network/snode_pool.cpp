@@ -1031,6 +1031,14 @@ uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
             [this, &key] { return static_cast<uint16_t>(_active_strike_count(key)); });
 }
 
+bool SnodePool::node_struck_out(const service_node& node) {
+    return node_struck_out(node.remote_pubkey);
+}
+
+bool SnodePool::node_struck_out(const ed25519_pubkey& key) {
+    return _loop->call_get([this, &key] { return _node_struck_out(key); });
+}
+
 void SnodePool::clear_node_strikes() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {

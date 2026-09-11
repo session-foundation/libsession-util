@@ -50,6 +50,20 @@ class TestOnionRequestRouter {
         return 0;
     }
 
+    static void set_cached_edge_nodes(
+            std::shared_ptr<OnionRequestRouter> router, std::vector<cached_edge_node> nodes) {
+        router->_cached_edge_nodes = std::move(nodes);
+    }
+
+    static std::vector<cached_edge_node> cached_edge_nodes(
+            std::shared_ptr<OnionRequestRouter> router) {
+        return router->_cached_edge_nodes;
+    }
+
+    static void drop_struck_cached_edge_nodes(std::shared_ptr<OnionRequestRouter> router) {
+        router->_drop_struck_cached_edge_nodes();
+    }
+
     static void build_path(
             std::shared_ptr<OnionRequestRouter> router,
             PathCategory category,
@@ -832,4 +846,82 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
     CHECK(result.timeout);
 }
 
+TEST_CASE("Network", "[network][onion_request_router][cached_edge_nodes]") {
+    const auto node_strike_threshold = 3;
+    config::SnodePool pool_config = {
+            .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = node_strike_threshold};
+    config::OnionRequestRouter config = {
+            file_server::DEFAULT_CONFIG,
+            std::nullopt,
+            std::chrono::days{10},
+            opt::netid::Target::testnet,
+            {},
+            network::opt::retry_delay{50ms, 200ms},
+            3,
+            3,
+            10,
+            10min,
+            node_strike_threshold,
+            true,
+            true,
+            {{PathCategory::standard, 1}}};
+
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
+    auto healthy = service_node{
+            ed25519_pubkey::from_bytes(ed_pk),
+            oxen::quic::ipv4{"127.0.0.1"},
+            20001,
+            30001,
+            {2, 11, 0},
+            0};
+    auto struck = service_node{
+            ed25519_pubkey::from_bytes(ed_pk2),
+            oxen::quic::ipv4{"127.0.0.2"},
+            20002,
+            30002,
+            {2, 11, 0},
+            0};
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto transport = std::make_shared<TestTransport>();
+    auto router =
+            std::make_shared<OnionRequestRouter>(config, loop, disk_loop, snode_pool, transport);
+
+    auto now = std::chrono::system_clock::now();
+    TestOnionRequestRouter::set_cached_edge_nodes(
+            router, {cached_edge_node{healthy, now}, cached_edge_node{struck, now}});
+
+    // Both are well inside `edge_node_cache_duration`, which is the only thing that used to matter
+    TestOnionRequestRouter::drop_struck_cached_edge_nodes(router);
+    CHECK(TestOnionRequestRouter::cached_edge_nodes(router).size() == 2);
+
+    // A cached edge node is forced as a path's first hop without going through `get_unused_nodes`,
+    // so nothing else would apply the strike filter to it.  Striking it out has to cost it the
+    // cached-edge role outright - skipping it while keeping the entry would hand the role back when
+    // the strikes expire, long after we moved to another edge node.
+    snode_pool->SnodePool::record_node_failure(struck, true);
+    REQUIRE(snode_pool->node_struck_out(struck));
+
+    // Only the cached-edge role is lost; nothing here touches `_snode_cache`, so it stays a node
+    // like any other and `get_unused_nodes` can pick it again when its strikes expire
+    TestOnionRequestRouter::drop_struck_cached_edge_nodes(router);
+    auto remaining = TestOnionRequestRouter::cached_edge_nodes(router);
+    REQUIRE(remaining.size() == 1);
+    CHECK(remaining.front().node == healthy);
+}
 }  // namespace session::network
