@@ -70,11 +70,32 @@ enum class ConnectionStatus {
     disconnected = CONNECTION_STATUS_DISCONNECTED,
 };
 
+/// What a request is for, which decides how it is carried.
+///
+/// The `_small` distinction is a QUIC stream choice: a small request goes on the connection's
+/// reserved stream 0, sharing it with everything else small, while the rest take a stream of their
+/// own from the connection's pool.  Ordering is per-stream, so what shares a stream waits for what
+/// is ahead of it.
+///
+/// Two of these are meaningful only under one routing mode, because the thing they distinguish does
+/// not exist under the other.
 enum class RequestCategory {
     standard = SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
     standard_small = SESSION_NETWORK_REQUEST_CATEGORY_STANDARD_SMALL,
+
+    /// A file transfer.  Only means anything under `onion_requests`, where a file goes to the file
+    /// server through a storage node like everything else and so shares that node's connection.
+    /// Session Router reaches the file server directly rather than through a snode, so there is no
+    /// shared connection for a file to be separated from.
     file = SESSION_NETWORK_REQUEST_CATEGORY_FILE,
     file_small = SESSION_NETWORK_REQUEST_CATEGORY_FILE_SMALL,
+
+    /// A config push.  Only means anything under Session Router, which holds a real QUIC connection
+    /// per storage node and can therefore put this on a stream of its own -- so a large config does
+    /// not delay a small store queued behind it on the reserved stream.  Under `onion_requests`
+    /// there is no such connection to open a second stream on, and this behaves as
+    /// `standard_small`.
+    config = SESSION_NETWORK_REQUEST_CATEGORY_CONFIG,
 };
 
 enum class PathCategory {
@@ -88,6 +109,7 @@ inline std::string to_string(RequestCategory category) {
         case RequestCategory::standard_small: return "standard_small";
         case RequestCategory::file: return "file";
         case RequestCategory::file_small: return "file_small";
+        case RequestCategory::config: return "config";
     }
     return "unknown";  // Should not be reached
 }

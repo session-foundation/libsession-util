@@ -96,6 +96,9 @@ inline PathCategory to_path_category(RequestCategory category) {
         case RequestCategory::standard_small: return PathCategory::standard;
         case RequestCategory::file: return PathCategory::file;
         case RequestCategory::file_small: return PathCategory::file;
+        // Nothing to distinguish here: the stream a config would get is a Session Router notion,
+        // and an onion path carries it like any other standard request.
+        case RequestCategory::config: return PathCategory::standard;
     }
     return PathCategory::standard;  // Should not be reached
 }

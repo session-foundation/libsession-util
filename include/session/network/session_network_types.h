@@ -22,6 +22,7 @@ typedef enum {
     SESSION_NETWORK_REQUEST_CATEGORY_STANDARD_SMALL,
     SESSION_NETWORK_REQUEST_CATEGORY_FILE,
     SESSION_NETWORK_REQUEST_CATEGORY_FILE_SMALL,
+    SESSION_NETWORK_REQUEST_CATEGORY_CONFIG,
 } SESSION_NETWORK_REQUEST_CATEGORY;
 
 typedef enum {
@@ -74,7 +75,6 @@ typedef struct {
     const char* swarm_pubkey_hex;
 
 } session_request_params;
-
 
 #ifdef __cplusplus
 }
