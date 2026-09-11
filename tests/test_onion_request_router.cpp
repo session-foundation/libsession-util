@@ -154,7 +154,7 @@ namespace {
 
         void refresh_if_needed(
                 const std::vector<service_node>& /*in_use_nodes*/,
-                std::function<void()> /*on_refresh_complete*/ = nullptr) override {
+                refresh_callback_t /*on_refresh_complete*/ = nullptr) override {
             func_called("refresh_if_needed");
             // Do nothing (don't want to trigger a cache refresh)
         }

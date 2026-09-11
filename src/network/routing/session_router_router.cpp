@@ -131,10 +131,18 @@ void SessionRouter::_init() {
                         return;
 
                     if (snode_pool->size() == 0)
-                        snode_pool->refresh_if_needed({}, [weak_self, this] {
+                        snode_pool->refresh_if_needed({}, [weak_self, this](bool refreshed) {
                             auto self = weak_self.lock();
                             if (!self)
                                 return;
+
+                            // Setup finishes either way: not finishing leaves the router
+                            // permanently unusable, where finishing with an empty pool just means
+                            // the first request refreshes again
+                            if (!refreshed)
+                                log::warning(
+                                        cat,
+                                        "Finishing router setup without a refreshed snode pool.");
 
                             _loop->call([weak_self] {
                                 if (auto self = weak_self.lock())
@@ -458,10 +466,18 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                 [weak_self = weak_from_this(),
                  this,
                  req = std::move(request),
-                 cb = std::move(callback)]() {
+                 cb = std::move(callback)](bool refreshed) {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
+
+                    if (!refreshed)
+                        return cb(
+                                false,
+                                false,
+                                -1,
+                                {content_type_plain_text},
+                                "Failed to refresh the snode pool to find a proxy.");
 
                     auto snode_pool = _snode_pool.lock();
                     if (!snode_pool)
