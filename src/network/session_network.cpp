@@ -821,24 +821,26 @@ void Network::_handle_421_retry(
                 "421 Misdirected Request for a request with no swarm");
     }
 
-    // If we got a 421 it means our snode cache is outdated (because the swarm the destination node
-    // belongs to doesn't match our cache anymore)
     log::info(
             cat,
-            "Request {} received 421 from node {}, refreshing swarm if stale.",
+            "Request {} received 421 from node {}, re-resolving its swarm.",
             original_request.request_id,
             original_dest_node->to_string());
 
     auto failed_node_copy = *original_dest_node;
-    std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
-    _snode_pool->refresh_if_needed(
-            std::move(nodes_to_exclude),
+    auto swarm_pubkey = *original_request.swarm_pubkey;
+
+    // A node in the swarm we resolved has told us the account isn't in its swarm, which is proof
+    // the mapping is wrong now rather than a reason to suspect it might be; asking for a refresh
+    // by age (`refresh_if_needed`) would decline for as long as `cache_expiration`, leaving every
+    // request for this account failing until then.
+    _snode_pool->invalidate_swarm(
+            swarm_pubkey,
             [this,
+             swarm_pubkey,
              req_to_retry = std::move(original_request),
              cb = std::move(final_callback),
              failed_node = failed_node_copy] {
-                auto swarm_pubkey = *req_to_retry.swarm_pubkey;
-
                 _snode_pool->get_swarm(
                         swarm_pubkey,
                         false,

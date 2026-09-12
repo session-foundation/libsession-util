@@ -42,6 +42,18 @@ namespace {
 
     const std::chrono::seconds STRIKE_EXPIRY = 48h;
     const std::chrono::seconds SAVE_THROTTLE = 5min;
+
+    // A swarm rejection is evidence against the pool snapshot the swarm was derived from, so it is
+    // only worth acting on once that snapshot is old enough for a refresh to plausibly return
+    // something different.
+    const std::chrono::seconds EVIDENCE_REFRESH_MIN_POOL_AGE = 1min;
+
+    // A rejection arriving *after* we already refreshed on one is the refresh telling us it didn't
+    // help - the network hasn't settled, or the node is lying - so each successive one waits twice
+    // as long, up to `cache_expiration`.  A single 3-node refresh per minute sustained indefinitely
+    // is not an acceptable resting state for a client on a bad connection, and without this it is
+    // exactly what a persistent rejection source would produce.
+    const std::chrono::seconds EVIDENCE_REFRESH_BASE_BACKOFF = 1min;
 }  // namespace
 
 SnodePool::SnodePool(
@@ -1109,6 +1121,74 @@ void SnodePool::refresh_if_needed(
             } else
                 _refresh_snode_cache();
         else if (!already_running && cb)
+            cb();
+    });
+}
+
+void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, std::function<void()> on_complete) {
+    _loop->call([this, swarm_pubkey, cb = std::move(on_complete)]() mutable {
+        if (_suspended) {
+            log::info(cat, "Ignoring swarm invalidation as pool is suspended.");
+
+            if (cb)
+                cb();
+            return;
+        }
+
+        // The swarm cache only ever memoises `swarm::get_swarm(pubkey, _all_swarms)`, and
+        // `_all_swarms` is generated from the pool, so dropping the single entry would recompute
+        // the same rejected answer.  What the rejection actually disproves is the pool snapshot,
+        // and a refresh is the only thing that replaces it - clearing the swarm cache as it goes.
+        auto now = std::chrono::system_clock::now();
+
+        if (!_current_snode_cache_refresh_id) {
+            // The backoff is deliberately global rather than per-swarm: a refresh replaces the pool
+            // every swarm is derived from, so a rejection for one swarm is exactly as unhelpful to
+            // act on right after a refresh as a second rejection for the swarm that prompted it
+            auto pool_age = now - _last_snode_cache_update;
+            auto since_last = now - _last_evidence_refresh;
+
+            // Quiet for twice the interval we were holding means whatever caused the last run is
+            // over, so the next incident starts from the base delay rather than inheriting it
+            if (since_last > 2 * _evidence_refresh_backoff)
+                _evidence_refresh_backoff = 0s;
+
+            if (pool_age < EVIDENCE_REFRESH_MIN_POOL_AGE || since_last < _evidence_refresh_backoff)
+                log::info(
+                        cat,
+                        "Swarm {} was rejected, but the pool is {}s old and the last refresh on a "
+                        "rejection was {}s ago (backoff {}s); leaving it alone.",
+                        swarm_pubkey.hex(),
+                        std::chrono::duration_cast<std::chrono::seconds>(pool_age).count(),
+                        std::chrono::duration_cast<std::chrono::seconds>(since_last).count(),
+                        _evidence_refresh_backoff.count());
+            else {
+                _evidence_refresh_backoff = std::min(
+                        std::chrono::seconds{_config.cache_expiration},
+                        (_evidence_refresh_backoff == 0s ? EVIDENCE_REFRESH_BASE_BACKOFF
+                                                         : _evidence_refresh_backoff * 2));
+                _last_evidence_refresh = now;
+
+                log::info(
+                        cat,
+                        "Swarm {} was rejected by a node we had in it, refreshing the pool (next "
+                        "rejection-driven refresh no sooner than {}s from now).",
+                        swarm_pubkey.hex(),
+                        _evidence_refresh_backoff.count());
+                _refresh_snode_cache();
+            }
+        }
+
+        if (!cb)
+            return;
+
+        // `_refresh_snode_cache` runs inline here (we are on the loop thread) and can decline to
+        // start, so it is the refresh id - not the call above - that says whether there is anything
+        // to wait for.  A callback queued against a refresh that never started never runs, and on
+        // this path that would strand the request that triggered the rejection.
+        if (_current_snode_cache_refresh_id)
+            _after_snode_cache_refresh.push_back(std::move(cb));
+        else
             cb();
     });
 }
