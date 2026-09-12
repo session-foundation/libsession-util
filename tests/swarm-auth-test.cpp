@@ -26,16 +26,16 @@ static constexpr int64_t created_ts = 1680064059;
 
 using namespace session::config;
 
-static std::array<unsigned char, 64> sk_from_seed(std::span<const unsigned char> seed) {
-    std::array<unsigned char, 32> ignore;
-    std::array<unsigned char, 64> sk;
+static b64 sk_from_seed(std::span<const std::byte> seed) {
+    b32 ignore;
+    b64 sk;
     crypto_sign_ed25519_seed_keypair(ignore.data(), sk.data(), seed.data());
     return sk;
 }
 
-static std::string session_id_from_ed(std::span<const unsigned char> ed_pk) {
+static std::string session_id_from_ed(std::span<const std::byte> ed_pk) {
     std::string sid;
-    std::array<unsigned char, 32> xpk;
+    b32 xpk;
     int rc = crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed_pk.data());
     assert(rc == 0);
     sid.reserve(66);
@@ -45,8 +45,8 @@ static std::string session_id_from_ed(std::span<const unsigned char> ed_pk) {
 }
 
 struct pseudo_client {
-    std::array<unsigned char, 64> secret_key;
-    const std::span<const unsigned char> public_key{secret_key.data() + 32, 32};
+    b64 secret_key;
+    const std::span<const std::byte> public_key{secret_key.data() + 32, 32};
     std::string session_id{session_id_from_ed(public_key)};
 
     groups::Info info;
@@ -54,23 +54,21 @@ struct pseudo_client {
     groups::Keys keys;
 
     pseudo_client(
-            std::span<const unsigned char> seed,
+            std::span<const std::byte> seed,
             bool admin,
             const unsigned char* gpk,
             std::optional<const unsigned char*> gsk) :
             secret_key{sk_from_seed(seed)},
-            info{std::span<const unsigned char>{gpk, 32},
-                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
-                       : std::nullopt,
+            info{std::span<const std::byte>{gpk, 32},
+                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64}) : std::nullopt,
                  std::nullopt},
-            members{std::span<const unsigned char>{gpk, 32},
-                    admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
+            members{std::span<const std::byte>{gpk, 32},
+                    admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64})
                           : std::nullopt,
                     std::nullopt},
             keys{to_usv(secret_key),
-                 std::span<const unsigned char>{gpk, 32},
-                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
-                       : std::nullopt,
+                 std::span<const std::byte>{gpk, 32},
+                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64}) : std::nullopt,
                  std::nullopt,
                  info,
                  members} {}
@@ -78,15 +76,15 @@ struct pseudo_client {
 
 int main() {
 
-    const std::vector<unsigned char> group_seed =
-            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin_seed =
-            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> member_seed =
-            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
+    const std::vector<std::byte> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hex_b;
+    const std::vector<std::byte> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    const std::vector<std::byte> member_seed =
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hex_b;
 
-    std::array<unsigned char, 32> group_pk;
-    std::array<unsigned char, 64> group_sk;
+    b32 group_pk;
+    b64 group_sk;
 
     crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
 
@@ -104,7 +102,7 @@ int main() {
     session::config::UserGroups member_gr2{member_seed, std::nullopt};
     auto [seqno, push, obs] = member_groups.push();
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> gr_conf;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> gr_conf;
     gr_conf.emplace_back("fakehash1", push);
 
     member_gr2.merge(gr_conf);
@@ -114,8 +112,8 @@ int main() {
                        .count();
 
     auto msg = to_usv("hello world");
-    std::array<unsigned char, 64> store_sig;
-    std::vector<unsigned char> store_to_sign;
+    b64 store_sig;
+    std::vector<std::byte> store_to_sign;
     auto store_vec = session::str_to_vec("store999{}"_format(now));
     store_to_sign.insert(store_to_sign.end(), store_vec.begin(), store_vec.end());
 
@@ -134,7 +132,7 @@ int main() {
 
     std::cout << "STORE:\n\n" << store.dump() << "\n\n";
 
-    std::vector<unsigned char> retrieve_to_sign;
+    std::vector<std::byte> retrieve_to_sign;
     auto retrieve_vec = session::str_to_vec("retrieve999{}"_format(now));
     retrieve_to_sign.insert(retrieve_to_sign.end(), retrieve_vec.begin(), retrieve_vec.end());
     auto subauth = member.keys.swarm_subaccount_sign(retrieve_to_sign, auth_data);

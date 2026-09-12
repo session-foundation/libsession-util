@@ -10,7 +10,7 @@ using namespace session;
 using namespace session::network;
 using namespace session::network::swarm;
 
-swarm_id_t get_swarm_id(
+static swarm_id_t get_swarm_id(
         std::string swarm_pubkey_hex,
         std::vector<std::pair<swarm_id_t, std::vector<service_node>>> swarms) {
     if (swarm_pubkey_hex.size() == 66)

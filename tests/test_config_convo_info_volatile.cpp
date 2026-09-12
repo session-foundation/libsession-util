@@ -1,6 +1,5 @@
 #include <oxenc/hex.h>
 #include <session/config/convo_info_volatile.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -13,13 +12,9 @@
 
 TEST_CASE("Conversations", "[config][conversations]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -28,7 +23,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{seed, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -72,7 +67,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(convos.needs_dump());
 
     const auto community_pubkey =
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     auto og = convos.get_or_construct_community(
             "http://Example.ORG:5678", "SudokuRoom", community_pubkey);
@@ -190,7 +185,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(seqno == 2);
 
     REQUIRE(to_push.size() == 1);
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("hash2", to_push[0]);
     convos.merge(merge_configs);
     convos2.confirm_pushed(seqno, {"hash2"});
@@ -296,13 +291,9 @@ TEST_CASE("Conversations", "[config][conversations]") {
 }
 
 TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -312,7 +303,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     config_object* conf;
-    REQUIRE(0 == convo_info_volatile_init(&conf, ed_sk.data(), NULL, 0, NULL));
+    REQUIRE(0 == convo_info_volatile_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, NULL));
 
     const char* const definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000";
@@ -354,7 +345,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     CHECK(config_needs_dump(conf));
 
     const auto community_pubkey =
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     convo_info_volatile_community og;
 
@@ -363,18 +354,22 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
             &og,
             "bad-url",
             "room",
-            "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes.data()));
+            "0000000000000000000000000000000000000000000000000000000000000000"_hex_u.data()));
     CHECK(conf->last_error == "Invalid URL: invalid/missing protocol://"sv);
     CHECK_FALSE(convo_info_volatile_get_or_construct_community(
             conf,
             &og,
             "https://example.com",
             "bad room name",
-            "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes.data()));
+            "0000000000000000000000000000000000000000000000000000000000000000"_hex_u.data()));
     CHECK(conf->last_error == "Invalid community URL: room token contains invalid characters"sv);
 
     CHECK(convo_info_volatile_get_or_construct_community(
-            conf, &og, "http://Example.ORG:5678", "SudokuRoom", community_pubkey.data()));
+            conf,
+            &og,
+            "http://Example.ORG:5678",
+            "SudokuRoom",
+            to_unsigned(community_pubkey.data())));
     CHECK(conf->last_error == nullptr);
     CHECK(og.base_url == "http://example.org:5678"sv);  // Note: lower-case
     CHECK(og.room == "sudokuroom"sv);                   // Note: lower-case
@@ -414,7 +409,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     config_dump(conf, &dump, &dumplen);
 
     config_object* conf2;
-    REQUIRE(convo_info_volatile_init(&conf2, ed_sk.data(), dump, dumplen, NULL) == 0);
+    REQUIRE(convo_info_volatile_init(&conf2, to_unsigned(ed_sk.data()), dump, dumplen, NULL) == 0);
     free(dump);
 
     CHECK_FALSE(config_needs_push(conf2));
@@ -496,19 +491,14 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         }
         convo_info_volatile_iterator_free(it);
 
-        CHECK(seen == std::vector<std::string>{
-                              "1-to-1: "
-                              "051111111111111111111111111111111111111111111111111111111111111111",
-                              "1-to-1: "
-                              "055000000000000000000000000000000000000000000000000000000000000000",
-                              "comm: http://example.org:5678/r/sudokuroom",
-                              "lgr: "
-                              "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                              "b: "
-                              "150000000000000000000000000000000000101010111010000110100001210000",
-                              "b: "
-                              "2512345cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                              "c"});
+        CHECK(seen ==
+              std::vector<std::string>{
+                      "1-to-1: 051111111111111111111111111111111111111111111111111111111111111111",
+                      "1-to-1: 055000000000000000000000000000000000000000000000000000000000000000",
+                      "comm: http://example.org:5678/r/sudokuroom",
+                      "lgr: 05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                      "b: 150000000000000000000000000000000000101010111010000110100001210000",
+                      "b: 2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"});
     }
 
     CHECK_FALSE(config_needs_push(conf));
@@ -581,13 +571,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
 
 TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -596,12 +582,12 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{seed, std::nullopt};
 
-    auto some_pubkey = [](unsigned char x) -> std::vector<unsigned char> {
-        std::vector<unsigned char> s =
-                "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
-        s[31] = x;
+    auto some_pubkey = [](unsigned char x) -> std::vector<std::byte> {
+        std::vector<std::byte> s;
+        s.resize(32);
+        s[31] = static_cast<std::byte>(x);
         return s;
     };
     auto some_session_id = [&](unsigned char x) -> std::string {
@@ -627,9 +613,8 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                         std::chrono::sys_seconds{std::chrono::duration_cast<std::chrono::seconds>(
                                 std::chrono::milliseconds{unix_timestamp(i)})};
 
-                session::array_uc32 hash{};
-                std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
-                c.pro_revocation_tag = hash;
+                auto& hash = c.pro_revocation_tag.emplace();
+                std::fill(hash.begin(), hash.end(), static_cast<std::byte>(i % 256));
             }
 
             convos.set(c);
@@ -700,13 +685,9 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
 
 TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -716,7 +697,7 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     config_object* conf;
-    REQUIRE(0 == convo_info_volatile_init(&conf, ed_sk.data(), NULL, 0, NULL));
+    REQUIRE(0 == convo_info_volatile_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, NULL));
 
     convo_info_volatile_1to1 c;
     CHECK(convo_info_volatile_get_or_construct_1to1(
@@ -745,7 +726,7 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
 
     // Load the dump:
     config_object* conf2;
-    REQUIRE(0 == convo_info_volatile_init(&conf2, ed_sk.data(), dump, dumplen, NULL));
+    REQUIRE(0 == convo_info_volatile_init(&conf2, to_unsigned(ed_sk.data()), dump, dumplen, NULL));
 
     free(dump);
 
@@ -811,13 +792,9 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
 
 TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -827,7 +804,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     config_object* conf;
-    REQUIRE(0 == convo_info_volatile_init(&conf, ed_sk.data(), NULL, 0, NULL));
+    REQUIRE(0 == convo_info_volatile_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, NULL));
 
     convo_info_volatile_1to1 c;
     CHECK(convo_info_volatile_get_or_construct_1to1(
@@ -837,9 +814,10 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
                           .count();
     c.pro_expiry_ts = 10000;
 
-    session::array_uc32 hash{};
-    std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(3));
-    std::memcpy(c.pro_revocation_tag.data, hash.data(), hash.size());
+    std::fill(
+            c.pro_revocation_tag.data,
+            c.pro_revocation_tag.data + 32,
+            static_cast<unsigned char>(3));
     c.has_pro_revocation_tag = true;
     convo_info_volatile_set_1to1(conf, &c);
 
@@ -862,7 +840,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
 
     // Load the dump:
     config_object* conf2;
-    REQUIRE(0 == convo_info_volatile_init(&conf2, ed_sk.data(), dump, dumplen, NULL));
+    REQUIRE(0 == convo_info_volatile_init(&conf2, to_unsigned(ed_sk.data()), dump, dumplen, NULL));
 
     free(dump);
 

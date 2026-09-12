@@ -310,9 +310,9 @@ class Members : public ConfigBase {
     ///   push config changes.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
-    Members(std::span<const unsigned char> ed25519_pubkey,
-            std::optional<std::span<const unsigned char>> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+    Members(std::span<const std::byte, 32> ed25519_pubkey,
+            const ed25519::OptionalPrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: groups/Members::storage_namespace
     ///

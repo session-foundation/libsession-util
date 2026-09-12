@@ -1,7 +1,8 @@
 #include "session/config/user_profile.h"
 
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
+
+#include <bit>
 
 #include "internal.hpp"
 #include "session/config/contacts.hpp"
@@ -15,8 +16,8 @@
 using namespace session::config;
 
 UserProfile::UserProfile(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -38,7 +39,7 @@ void UserProfile::set_name(std::string_view new_name) {
     set_nonempty_str(data["n"], new_name);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    data[target_timestamp] = clock_now_s();
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -55,12 +56,12 @@ profile_pic UserProfile::get_profile_pic() const {
         pic.url = *url;
     if (auto* key = data[key_key].string(); key && key->size() == 32)
         pic.key.assign(
-                reinterpret_cast<const unsigned char*>(key->data()),
-                reinterpret_cast<const unsigned char*>(key->data()) + 32);
+                reinterpret_cast<const std::byte*>(key->data()),
+                reinterpret_cast<const std::byte*>(key->data()) + 32);
     return pic;
 }
 
-void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+void UserProfile::set_profile_pic(std::string_view url, std::span<const std::byte> key) {
     auto current_url = data["p"].string_view_or("");
     auto current_key_str = data["q"].string_view_or("");
     std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
@@ -75,15 +76,14 @@ void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned
     if (url.empty() || key.size() != 32)
         set_reupload_profile_pic({});
 
-    data["t"] = ts_now();
+    data["t"] = clock_now_s();
 }
 
 void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
-void UserProfile::set_reupload_profile_pic(
-        std::string_view url, std::span<const unsigned char> key) {
+void UserProfile::set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key) {
     auto current_url = data["P"].string_view_or("");
     auto current_key_str = data["Q"].string_view_or("");
     std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
@@ -93,7 +93,7 @@ void UserProfile::set_reupload_profile_pic(
         return;
 
     set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
-    data["T"] = ts_now();
+    data["T"] = clock_now_s();
 }
 
 void UserProfile::set_reupload_profile_pic(profile_pic pic) {
@@ -118,6 +118,33 @@ std::optional<std::chrono::seconds> UserProfile::get_nts_expiry() const {
     return std::nullopt;
 }
 
+void UserProfile::set_nts_delete_before(std::chrono::sys_seconds before) {
+    set_ts(data["d"], before);
+
+    // Deleting the messages takes their attachments with them, so an attachment instruction at or
+    // before this point no longer says anything and is cleared rather than left to linger.
+    if (get_nts_delete_attach_before() <= before)
+        set_ts(data["D"], std::chrono::sys_seconds{});
+}
+
+std::chrono::sys_seconds UserProfile::get_nts_delete_before() const {
+    if (auto* d = data["d"].integer(); d && *d > 0)
+        return as_sys_seconds(*d);
+    return {};
+}
+
+void UserProfile::set_nts_delete_attach_before(std::chrono::sys_seconds before) {
+    // The same redundancy from the other side: an attachment instruction already covered by the
+    // message one adds nothing, so it is not recorded.
+    set_ts(data["D"], before <= get_nts_delete_before() ? std::chrono::sys_seconds{} : before);
+}
+
+std::chrono::sys_seconds UserProfile::get_nts_delete_attach_before() const {
+    if (auto* d = data["D"].integer(); d && *d > 0)
+        return as_sys_seconds(*d);
+    return {};
+}
+
 void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
     std::optional<bool> current_value;
     if (data["M"].exists())
@@ -132,13 +159,23 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
         data["M"] = static_cast<int>(*value);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    data[target_timestamp] = clock_now_s();
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
     if (auto* M = data["M"].integer())
         return static_cast<bool>(*M);
     return std::nullopt;
+}
+
+// `x` is inverted -- it means *do not* notify -- so that the default is an absent key rather than a
+// value in every push.
+bool UserProfile::get_notify_media_saved() const {
+    return data["x"].integer_or(0) == 0;
+}
+
+void UserProfile::set_notify_media_saved(bool notify) {
+    set_flag(data["x"], !notify);
 }
 
 std::chrono::sys_seconds UserProfile::get_profile_updated() const {
@@ -170,11 +207,11 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
 
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 
     // A live proof means any in-flight purchase has resolved: clear the prepaid marker.
-    if (pro.proof.expiry_at > ts_now() && data["I"].exists())
+    if (pro.proof.expiry_at > clock_now_s() && data["I"].exists())
         data["I"].erase();
 }
 
@@ -184,31 +221,31 @@ bool UserProfile::remove_pro_config() {
     return result;
 }
 
-session::ProProfileBitset UserProfile::get_profile_bitset() const {
-    ProProfileBitset result = {};
+session::ProProfileFlags UserProfile::get_profile_flags() const {
+    ProProfileFlags result = ProProfileFlags::None;
     if (const config::set* set = data["f"].set())
-        result.data = bitset_from_set_of_int64_or_0(*set);
+        result = to_flags<ProProfileFlags>(*set);
     return result;
 }
 
-void UserProfile::set_pro_badge(bool enabled) {
-    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE;
-    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
+void UserProfile::set_profile_feature(ProProfileFlags flag, bool enabled) {
+    // The "f" set stores feature bit *positions*, so deflate the single-bit mask to its position.
+    assert(std::has_single_bit(static_cast<uint64_t>(flag)));
+    auto position = std::countr_zero(static_cast<uint64_t>(flag));
+    bool dirtied = enabled ? data["f"].set_insert(position) : data["f"].set_erase(position);
     if (dirtied) {
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 }
 
+void UserProfile::set_pro_badge(bool enabled) {
+    set_profile_feature(ProProfileFlags::ProBadge, enabled);
+}
+
 void UserProfile::set_animated_avatar(bool enabled) {
-    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR;
-    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
-    if (dirtied) {
-        const auto target_timestamp =
-                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
-    }
+    set_profile_feature(ProProfileFlags::AnimatedAvatar, enabled);
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
@@ -251,11 +288,11 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
 
     // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
     // refund request is moot -- opportunistically clear both (we're already writing E anyway).
-    if (access_expiry_ts && *access_expiry_ts > ts_now()) {
+    if (access_expiry_ts && *access_expiry_ts > clock_now_s()) {
         if (data["I"].exists())
             data["I"].erase();
         if (auto* R = data["R"].integer(); R && std::chrono::sys_seconds{std::chrono::seconds{*R}} <
-                                                        ts_now() - std::chrono::weeks{1})
+                                                        clock_now_s() - std::chrono::weeks{1})
             data["R"].erase();
     }
 }
@@ -287,7 +324,7 @@ std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() cons
         std::chrono::sys_seconds when{std::chrono::seconds{*R}};
         // Ignore stale values: a request more than a week old is treated as absent, so a flag some
         // client forgot to clear cannot linger indefinitely across the account's devices.
-        if (when >= ts_now() - std::chrono::weeks{1})
+        if (when >= clock_now_s() - std::chrono::weeks{1})
             return when;
     }
     return std::nullopt;
@@ -301,14 +338,14 @@ void UserProfile::set_refund_requested(std::optional<std::chrono::sys_seconds> w
 
     // Stamp the profile-updated timestamp so the change is time-ordered across devices.
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    data[target_timestamp] = clock_now_s();
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_prepaid() const {
     if (auto* I = data["I"].integer()) {
         std::chrono::sys_seconds when{std::chrono::seconds{*I}};
         // Ignore a stale marker (a purchase that never propagated) so devices don't poll forever.
-        if (when >= ts_now() - std::chrono::weeks{1})
+        if (when >= clock_now_s() - std::chrono::weeks{1})
             return when;
     }
     return std::nullopt;
@@ -326,7 +363,7 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
         // or a still-future access expiry); otherwise there's nothing to poll for.
         bool already_pro = get_pro_config().has_value();
         if (!already_pro)
-            if (auto e = get_pro_access_expiry(); e && *e > ts_now())
+            if (auto e = get_pro_access_expiry(); e && *e > clock_now_s())
                 already_pro = true;
         if (!already_pro) {
             data["I"] = epoch_seconds(*when);
@@ -336,7 +373,7 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
     if (changed) {
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 }
 
@@ -378,6 +415,14 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
     // The nudges below are best-effort: they only make it *less likely* that two devices near a
     // rotating-seed period boundary race on the same renewal. A genuine collision is still resolved
     // by config resolution, so none of this needs to be airtight.
+    //
+    // TODO: investigate adding renewal-time jitter here, skewed per device using the account's
+    // device count (the same multi-device-account information that drives PFS key rotation) so that
+    // the first-order statistic -- the earliest device's renewal time, which is what an observer
+    // actually sees -- is uniformly distributed regardless of N. Naive per-device i.i.d. jitter
+    // would instead publicly leak N, since the min of N jitters has an N-dependent distribution.
+    // dev cannot do this (device count unknown there) and deliberately accepts the lesser,
+    // backend-only leak instead of a public one.
     auto near_boundary = [](std::chrono::sys_seconds t) {
         auto off = t.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
         return off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s;
@@ -445,9 +490,9 @@ LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf
 
 LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    std::span<const unsigned char> key;
+    std::span<const std::byte> key;
     if (!url.empty())
-        key = {pic.key, 32};
+        key = {reinterpret_cast<const std::byte*>(pic.key), 32};
 
     return wrap_exceptions(
             conf,
@@ -460,9 +505,9 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
 
 LIBSESSION_C_API int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    std::span<const unsigned char> key;
+    std::span<const std::byte> key;
     if (!url.empty())
-        key = {pic.key, 32};
+        key = {reinterpret_cast<const std::byte*>(pic.key), 32};
 
     return wrap_exceptions(
             conf,
@@ -489,6 +534,23 @@ LIBSESSION_C_API void user_profile_set_nts_expiry(config_object* conf, int expir
     unbox<UserProfile>(conf)->set_nts_expiry(std::max(0, expiry) * 1s);
 }
 
+LIBSESSION_C_API int64_t user_profile_get_nts_delete_before(const config_object* conf) {
+    return epoch_seconds(unbox<UserProfile>(conf)->get_nts_delete_before());
+}
+
+LIBSESSION_C_API void user_profile_set_nts_delete_before(config_object* conf, int64_t before) {
+    unbox<UserProfile>(conf)->set_nts_delete_before(to_sys_seconds(before));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_nts_delete_attach_before(const config_object* conf) {
+    return epoch_seconds(unbox<UserProfile>(conf)->get_nts_delete_attach_before());
+}
+
+LIBSESSION_C_API void user_profile_set_nts_delete_attach_before(
+        config_object* conf, int64_t before) {
+    unbox<UserProfile>(conf)->set_nts_delete_attach_before(to_sys_seconds(before));
+}
+
 LIBSESSION_C_API int user_profile_get_blinded_msgreqs(const config_object* conf) {
     if (auto opt = unbox<UserProfile>(conf)->get_blinded_msgreqs())
         return static_cast<int>(*opt);
@@ -500,6 +562,14 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
     if (enabled >= 0)
         val = static_cast<bool>(enabled);
     unbox<UserProfile>(conf)->set_blinded_msgreqs(std::move(val));
+}
+
+LIBSESSION_C_API bool user_profile_get_notify_media_saved(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_notify_media_saved();
+}
+
+LIBSESSION_C_API void user_profile_set_notify_media_saved(config_object* conf, bool notify) {
+    unbox<UserProfile>(conf)->set_notify_media_saved(notify);
 }
 
 LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
@@ -551,11 +621,8 @@ LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
     return unbox<UserProfile>(conf)->remove_pro_config();
 }
 
-LIBSESSION_C_API session_protocol_pro_profile_bitset
-user_profile_get_pro_features(const config_object* conf) {
-    session_protocol_pro_profile_bitset result = {};
-    result.data = unbox<UserProfile>(conf)->get_profile_bitset().data;
-    return result;
+LIBSESSION_C_API uint64_t user_profile_get_pro_features(const config_object* conf) {
+    return static_cast<uint64_t>(unbox<UserProfile>(conf)->get_profile_flags());
 }
 
 LIBSESSION_C_API void user_profile_set_pro_badge(config_object* conf, bool enabled) {

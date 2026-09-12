@@ -50,8 +50,8 @@ namespace detail {
 
 namespace {
 
-    std::vector<unsigned char> encode_size(uint32_t s) {
-        std::vector<unsigned char> result;
+    std::vector<std::byte> encode_size(uint32_t s) {
+        std::vector<std::byte> result;
         result.resize(4);
         oxenc::write_host_as_little(s, result.data());
         return result;
@@ -63,7 +63,7 @@ EncryptType parse_enc_type(std::string_view enc_type) {
         return EncryptType::xchacha20;
     if (enc_type == "aes-gcm" || enc_type == "gcm")
         return EncryptType::aes_gcm;
-    throw std::runtime_error{"Invalid encryption type " + std::string{enc_type}};
+    throw std::runtime_error{"Invalid encryption type {}"_format(enc_type)};
 }
 
 Builder Builder::make(
@@ -88,7 +88,7 @@ Builder::Builder(
         add_hop(n.remote_pubkey);
 }
 
-void Builder::add_hop(std::span<const unsigned char> remote_key) {
+void Builder::add_hop(std::span<const std::byte, 32> remote_key) {
     hops_.push_back(
             {network::ed25519_pubkey::from_bytes(remote_key),
              network::compute_x25519_pubkey(remote_key)});
@@ -121,13 +121,13 @@ void Builder::set_destination(network_destination destination) {
         throw std::invalid_argument{"Invalid destination type."};
 }
 
-std::vector<unsigned char> Builder::generate_onion_blob(
-        const std::optional<std::vector<unsigned char>>& plaintext_body) {
+std::vector<std::byte> Builder::generate_onion_blob(
+        const std::optional<std::vector<std::byte>>& plaintext_body) {
     return build(_generate_payload(plaintext_body));
 }
 
-std::vector<unsigned char> Builder::_generate_payload(
-        std::optional<std::vector<unsigned char>> body) const {
+std::vector<std::byte> Builder::_generate_payload(
+        std::optional<std::vector<std::byte>> body) const {
     // If we don't have the data required for a server request, then assume it's targeting a
     // service node which has a different structure (`method` is the endpoint and the body is
     // `params`)
@@ -135,14 +135,15 @@ std::vector<unsigned char> Builder::_generate_payload(
         nlohmann::json params_json;
 
         if (body && !body->empty())
-            params_json = nlohmann::json::parse(*body);
+            // Parse as a char view: libc++'s std::char_traits has no std::byte specialization.
+            params_json = nlohmann::json::parse(to_string_view(*body));
         else
             params_json = nlohmann::json::object();
 
         nlohmann::json wrapped_payload = {{"method", endpoint_}, {"params", params_json}};
 
         std::string payload_str = wrapped_payload.dump();
-        return {payload_str.begin(), payload_str.end()};
+        return to_vector(payload_str);
     }
 
     // Otherwise generate the payload for a server request
@@ -174,11 +175,11 @@ std::vector<unsigned char> Builder::_generate_payload(
         payload.emplace_back(session::to_string(*body));
 
     auto result = oxenc::bt_serialize(payload);
-    return to_vector(result);
+    return to_vector<std::byte>(result);
 }
 
-std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
-    std::vector<unsigned char> blob;
+std::vector<std::byte> Builder::build(std::vector<std::byte> payload) {
+    std::vector<std::byte> blob;
 
     // First hop:
     //
@@ -223,7 +224,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
     nlohmann::json final_route;
 
     {
-        crypto_box_keypair(A.data(), a.data());
+        crypto_box_keypair(to_unsigned(A.data()), to_unsigned(a.data()));
         HopEncryption e{a, A, false};
 
         // The data we send to the destination differs depending on whether the destination is a
@@ -251,7 +252,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
             };
 
             auto control_dump = control.dump();
-            auto control_span = to_span(control_dump);
+            auto control_span = to_span<std::byte>(control_dump);
             auto data = encode_size(payload.size());
             data.insert(data.end(), payload.begin(), payload.end());
             data.insert(data.end(), control_span.begin(), control_span.end());
@@ -293,7 +294,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
         data.insert(data.end(), routing_span.begin(), routing_span.end());
 
         // Generate eph key for *this* request and encrypt it:
-        crypto_box_keypair(A.data(), a.data());
+        crypto_box_keypair(to_unsigned(A.data()), to_unsigned(a.data()));
         HopEncryption e{a, A, false};
         blob = e.encrypt(enc_type, data, it->second);
     }
@@ -357,12 +358,8 @@ LIBSESSION_C_API void onion_request_builder_set_snode_destination(
         const char* ed25519_pubkey) {
     assert(builder && ip && ed25519_pubkey);
 
-    std::vector<unsigned char> pubkey;
-    pubkey.reserve(32);
-    oxenc::from_hex(ed25519_pubkey, ed25519_pubkey + 64, std::back_inserter(pubkey));
-
     unbox(builder).set_destination(session::network::service_node{
-            session::network::ed25519_pubkey::from_bytes(pubkey),
+            session::network::ed25519_pubkey::from_hex({ed25519_pubkey, 64}),
             oxen::quic::ipv4{std::span<const uint8_t, 4>(ip, 4)},
             0,
             quic_port,
@@ -411,7 +408,8 @@ LIBSESSION_C_API bool onion_request_builder_build(
 
     try {
         auto& unboxed_builder = unbox(builder);
-        auto payload = unboxed_builder.build({payload_in, payload_in + payload_in_len});
+        auto payload =
+                unboxed_builder.build(session::to_vector(std::span{payload_in, payload_in_len}));
 
         if (unboxed_builder.final_hop_x25519_keypair) {
             auto key_pair = unboxed_builder.final_hop_x25519_keypair.value();

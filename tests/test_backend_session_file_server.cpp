@@ -2,7 +2,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/network/backends/session_file_server.hpp>
-#include <session/util.hpp>
 
 #include "utils.hpp"
 
@@ -111,21 +110,21 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
              "example.com",
              123,
              "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
-             12345,
-             true});
+             12345},
+            true);
     CHECK(url ==
           "http://example.com:123/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d");
 
-    // Omits the stream encryption fragment when disabled
+    // Omits the stream encryption fragment for a file encrypted the legacy way
     url = file_server::generate_download_url(
             "abc123"sv,
             {"http",
              "example.com",
              123,
              "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
-             12345,
-             false});
+             12345},
+            false);
     CHECK(url ==
           "http://example.com:123/file/"
           "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000");
@@ -133,36 +132,116 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
     // Omits the pubkey when it matches the default pubkey
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, true});
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            true);
     CHECK(url == "http://example.com:123/file/abc123#d");
 
-    // Omits all fragments when stream encryption is disabled and the default pubkey is used
+    // Omits all fragments for a legacy-encrypted file on the default server
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
     CHECK(url == "http://example.com:123/file/abc123");
 
     // Works with other values
     url = file_server::generate_download_url(
             "12345678"sv,
-            {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321, false});
+            {"https", "example2.com", 321, file_server::DEFAULT_CONFIG.pubkey_hex, 54321},
+            false);
     CHECK(url == "https://example2.com:321/file/12345678");
 
     // Omits the port when the scheme already implies it, so urls for a default-port server are
     // unchanged from every previous version
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"http", "example.com", 80, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            {"http", "example.com", 80, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
     CHECK(url == "http://example.com/file/abc123");
 
     url = file_server::generate_download_url(
             "abc123"sv,
-            {"https", "example.com", 443, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, false});
+            {"https", "example.com", 443, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
     CHECK(url == "https://example.com/file/abc123");
 
     // The default file server is unaffected
-    url = file_server::generate_download_url("abc123"sv, file_server::DEFAULT_CONFIG);
+    url = file_server::generate_download_url("abc123"sv, file_server::DEFAULT_CONFIG, false);
     CHECK(url == fmt::format("http://{}/file/abc123", file_server::DEFAULT_CONFIG.host));
+
+    // Names a custom server's session router endpoint, leaving out the port when it is the default
+    // one that whoever parses this will assume anyway
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             file_server::DEFAULT_CONFIG.pubkey_hex,
+             12345,
+             file_server::SRouterTarget{"somewhere.sesh"}},
+            false);
+    CHECK(url == "http://example.com:123/file/abc123#sr=somewhere.sesh");
+
+    // ... but includes it when it isn't
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             file_server::DEFAULT_CONFIG.pubkey_hex,
+             12345,
+             file_server::SRouterTarget{"somewhere.sesh", 4567}},
+            false);
+    CHECK(url == "http://example.com:123/file/abc123#sr=somewhere.sesh:4567");
+
+    // Joins with the other fragments rather than replacing them
+    url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http",
+             "example.com",
+             123,
+             "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
+             12345,
+             file_server::SRouterTarget{"somewhere.sesh", 4567}},
+            true);
+    CHECK(url ==
+          "http://example.com:123/file/"
+          "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d"
+          "&sr=somewhere.sesh:4567");
+}
+
+TEST_CASE("Download url session router round trip", "[backend][session_file_server]") {
+    // What we generate has to be what we parse: the generating side had no way to name a session
+    // router endpoint at all until now, while the parsing side has always understood one, so
+    // nothing checked that the two agreed.
+    auto check_round_trip = [](file_server::SRouterTarget target, uint16_t expected_port) {
+        auto url = file_server::generate_download_url(
+                "abc123"sv,
+                {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345, target},
+                true);
+
+        auto parsed = file_server::parse_download_url(url);
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->file_id == "abc123");
+        CHECK(parsed->wants_stream_decryption);
+        REQUIRE(parsed->srouter_target.has_value());
+        CHECK(parsed->srouter_target->address == target.address);
+        CHECK(parsed->srouter_target->port == expected_port);
+    };
+
+    check_round_trip({"somewhere.sesh"}, file_server::QUIC_DEFAULT_PORT);
+    check_round_trip(
+            {"somewhere.sesh", file_server::QUIC_DEFAULT_PORT}, file_server::QUIC_DEFAULT_PORT);
+    check_round_trip({"somewhere.sesh", 4567}, 4567);
+    check_round_trip({"name.loki", 1}, 1);
+
+    // Without a target there is no fragment, and nothing to parse back
+    auto url = file_server::generate_download_url(
+            "abc123"sv,
+            {"http", "example.com", 123, file_server::DEFAULT_CONFIG.pubkey_hex, 12345},
+            false);
+    auto parsed = file_server::parse_download_url(url);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(parsed->srouter_target.has_value());
 }
 
 TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
@@ -172,7 +251,7 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     constexpr auto custom_pubkey =
             "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv;
     auto url = file_server::generate_download_url(
-            "abc123"sv, {"http", "192.168.1.2", 8000, std::string{custom_pubkey}, 12345, false});
+            "abc123"sv, {"http", "192.168.1.2", 8000, std::string{custom_pubkey}, 12345}, false);
     CHECK(url == fmt::format("http://192.168.1.2:8000/file/abc123#p={}", custom_pubkey));
 
     auto parsed = file_server::parse_download_url(url);
@@ -213,8 +292,8 @@ TEST_CASE("Default file server onion pubkey", "[backend][session_file_server]") 
     // form, so every request derives one from the other. Pinned here because the two forms are 32
     // bytes either way: using the wrong one produces a perfectly well-formed key that simply never
     // decrypts, and the only symptom is the file server rejecting the request without naming a key.
-    const auto derived = compute_x25519_pubkey(session::to_span<unsigned char>(
-            oxenc::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex)));
+    const auto derived =
+            compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex));
 
     CHECK(derived.hex() == "09324794aa9c11948189762d198c618148e9136ac9582068180661208927ef34");
 }

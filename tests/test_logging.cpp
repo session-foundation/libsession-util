@@ -3,14 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <oxen/quic/network.hpp>
 #include <regex>
 #include <session/logging.hpp>
 
 #include "utils.hpp"
-
-#ifndef DISABLE_NETWORKING
-#include <oxen/quic/network.hpp>
-#endif
 
 using namespace session;
 using namespace oxen;
@@ -18,7 +15,7 @@ using namespace oxen::log::literals;
 
 std::regex timestamp_re{R"(\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\] \[\+[\d.hms]+\])"};
 // Clears timestamps out of a log statement for testing reproducibility
-std::string fixup_log(std::string_view log) {
+static std::string fixup_log(std::string_view log) {
     std::string fixed;
     std::regex_replace(
             std::back_inserter(fixed),
@@ -89,7 +86,6 @@ TEST_CASE("Logging callbacks", "[logging]") {
                   line1));
 }
 
-#ifndef DISABLE_NETWORKING
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
@@ -108,4 +104,3 @@ TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
         return s.find("[quic:") != std::string::npos;
     }));
 }
-#endif

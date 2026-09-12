@@ -1,0 +1,3 @@
+CREATE TABLE ext_thing (
+    id INTEGER PRIMARY KEY NOT NULL
+) STRICT;

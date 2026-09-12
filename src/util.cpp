@@ -1,10 +1,12 @@
 #include <assert.h>
+#include <fmt/format.h>
 #include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
 
 #include <charconv>
 #include <memory>
+#include <session/format.hpp>
 #include <session/util.hpp>
 #include <system_error>
 
@@ -37,6 +39,19 @@ std::vector<std::string_view> split(std::string_view str, const std::string_view
         while (!results.empty() && results.back().empty())
             results.pop_back();
     return results;
+}
+
+std::string format_as(human_size s) {
+    if (s.bytes < 1000)
+        return fmt::format("{} B", s.bytes);
+    constexpr std::array prefixes = {'k', 'M', 'G', 'T'};
+    double b = s.bytes;
+    for (auto prefix : prefixes) {
+        b /= 1000.;
+        if (b < 1000.)
+            return fmt::format("{:.{}f} {}B", b, b < 10. ? 2 : b < 100. ? 1 : 0, prefix);
+    }
+    return fmt::format("{:.0f} {}B", b, prefixes.back());
 }
 
 std::tuple<std::string, std::string, std::optional<uint16_t>, std::optional<std::string>> parse_url(
@@ -112,9 +127,9 @@ namespace {
     using zstd_decomp_ptr = std::unique_ptr<ZSTD_DStream, zstd_decomp_freer>;
 }  // namespace
 
-std::vector<unsigned char> zstd_compress(
-        std::span<const unsigned char> data, int level, std::span<const unsigned char> prefix) {
-    std::vector<unsigned char> compressed;
+std::vector<std::byte> zstd_compress(
+        std::span<const std::byte> data, int level, std::span<const std::byte> prefix) {
+    std::vector<std::byte> compressed;
     if (prefix.empty())
         compressed.resize(ZSTD_compressBound(data.size()));
     else {
@@ -128,14 +143,14 @@ std::vector<unsigned char> zstd_compress(
             data.size(),
             level);
     if (ZSTD_isError(size))
-        throw std::runtime_error{"Compression failed: " + std::string{ZSTD_getErrorName(size)}};
+        throw std::runtime_error{"Compression failed: {}"_format(ZSTD_getErrorName(size))};
 
     compressed.resize(prefix.size() + size);
     return compressed;
 }
 
-std::optional<std::vector<unsigned char>> zstd_decompress(
-        std::span<const unsigned char> data, size_t max_size) {
+std::optional<std::vector<std::byte>> zstd_decompress(
+        std::span<const std::byte> data, size_t max_size) {
     zstd_decomp_ptr z_decompressor{ZSTD_createDStream()};
     auto* zds = z_decompressor.get();
 
@@ -144,7 +159,7 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
     std::array<unsigned char, 4096> out_buf;
     ZSTD_outBuffer output{/*.dst=*/out_buf.data(), /*.size=*/out_buf.size(), /*.pos=*/0};
 
-    std::vector<unsigned char> decompressed;
+    std::vector<std::byte> decompressed;
 
     size_t ret;
     do {
@@ -155,7 +170,10 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
         if (max_size > 0 && decompressed.size() + output.pos > max_size)
             return std::nullopt;
 
-        decompressed.insert(decompressed.end(), out_buf.begin(), out_buf.begin() + output.pos);
+        decompressed.insert(
+                decompressed.end(),
+                reinterpret_cast<const std::byte*>(out_buf.data()),
+                reinterpret_cast<const std::byte*>(out_buf.data()) + output.pos);
     } while (ret > 0 || input.pos < input.size);
 
     return decompressed;

@@ -44,8 +44,8 @@ class Local : public ConfigBase {
     ///
     /// Outputs:
     /// - `Local` - Constructor
-    Local(std::span<const unsigned char> ed25519_secretkey,
-          std::optional<std::span<const unsigned char>> dumped);
+    Local(const ed25519::PrivKeySpan& ed25519_secretkey,
+          std::optional<std::span<const std::byte>> dumped);
 
     /// API: local/Local::storage_namespace
     ///
@@ -86,12 +86,12 @@ class Local : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// - `std::tuple<seqno_t, std::vector<std::byte>, std::vector<std::string>>` - Returns a
     /// tuple containing
     ///   - `seqno_t` -- sequence number of 0
-    ///   - `std::vector<unsigned char>` -- empty data vector
+    ///   - `std::vector<std::byte>` -- empty data vector
     ///   - `std::vector<std::string>` -- empty list of message hashes
-    std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>> push()
+    std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>> push()
             override {
         return {0, {}, {}};
     };

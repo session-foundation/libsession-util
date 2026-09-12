@@ -5,8 +5,9 @@
 #include <vector>
 namespace session::network::backends {
 
-const std::string_view FRAGMENT_PUBKEY = "p";
-const std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
+constexpr std::string_view FRAGMENT_PUBKEY = "p";
+constexpr std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
+constexpr std::string_view FRAGMENT_SROUTER = "sr";
 
 struct MatchedEndpoint {
     std::string_view base;  // everything before the pattern match (e.g. "https://example.com")

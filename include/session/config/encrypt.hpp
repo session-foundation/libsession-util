@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -34,10 +35,10 @@ namespace session::config {
 /// - `domain` -- short string for the keyed hash
 ///
 /// Outputs:
-/// - `std::vector<unsigned char>` -- Returns the encrypted message bytes
-std::vector<unsigned char> encrypt(
-        std::span<const unsigned char> message,
-        std::span<const unsigned char> key_base,
+/// - `std::vector<std::byte>` -- Returns the encrypted message bytes
+std::vector<std::byte> encrypt(
+        std::span<const std::byte> message,
+        std::span<const std::byte> key_base,
         std::string_view domain);
 
 /// API: encrypt/encrypt_inplace
@@ -50,9 +51,23 @@ std::vector<unsigned char> encrypt(
 /// - `key_base` -- Fixed key that all clients, must be 32 bytes.
 /// - `domain` -- short string for the keyed hash
 void encrypt_inplace(
-        std::vector<unsigned char>& message,
-        std::span<const unsigned char> key_base,
+        std::vector<std::byte>& message,
+        std::span<const std::byte> key_base,
         std::string_view domain);
+
+/// API: encrypt/encrypt_prealloced
+///
+/// Encrypts a pre-allocated buffer in place.  `message` must have exactly ENCRYPT_DATA_OVERHEAD
+/// bytes of trailing space already allocated beyond the plaintext (i.e. message.size() must equal
+/// plaintext_size + ENCRYPT_DATA_OVERHEAD).  The plaintext in the leading bytes is encrypted in
+/// place, and the auth tag and nonce are written into the trailing ENCRYPT_DATA_OVERHEAD bytes.
+///
+/// Inputs:
+/// - `message` -- buffer containing plaintext followed by ENCRYPT_DATA_OVERHEAD reserved bytes
+/// - `key_base` -- Fixed key that all clients, must be 32 bytes.
+/// - `domain` -- short string for the keyed hash
+void encrypt_prealloced(
+        std::span<std::byte> message, std::span<const std::byte> key_base, std::string_view domain);
 
 /// API: encrypt/ENCRYPT_DATA_OVERHEAD
 ///
@@ -82,10 +97,10 @@ struct decrypt_error : std::runtime_error {
 /// - `domain` -- short string for the keyed hash
 ///
 /// Outputs:
-/// - `std::vector<unsigned char>` -- Returns the decrypt message bytes
-std::vector<unsigned char> decrypt(
-        std::span<const unsigned char> ciphertext,
-        std::span<const unsigned char> key_base,
+/// - `std::vector<std::byte>` -- Returns the decrypted message bytes
+std::vector<std::byte> decrypt(
+        std::span<const std::byte> ciphertext,
+        std::span<const std::byte> key_base,
         std::string_view domain);
 
 /// API: encrypt/decrypt_inplace
@@ -98,8 +113,8 @@ std::vector<unsigned char> decrypt(
 /// - `key_base` -- Fixed key that all clients, must be 32 bytes.
 /// - `domain` -- short string for the keyed hash
 void decrypt_inplace(
-        std::vector<unsigned char>& ciphertext,
-        std::span<const unsigned char> key_base,
+        std::vector<std::byte>& ciphertext,
+        std::span<const std::byte> key_base,
         std::string_view domain);
 
 /// Returns the target size of the message with padding, assuming an additional `overhead` bytes of
@@ -126,6 +141,6 @@ inline constexpr size_t padded_size(size_t s, size_t overhead = ENCRYPT_DATA_OVE
 /// - `data` -- the data; this is modified in place
 /// - `overhead` -- encryption overhead to account for to reach the desired padded size.  The
 /// default, if omitted, is the space used by the `encrypt()` function defined above.
-void pad_message(std::vector<unsigned char>& data, size_t overhead = ENCRYPT_DATA_OVERHEAD);
+void pad_message(std::vector<std::byte>& data, size_t overhead = ENCRYPT_DATA_OVERHEAD);
 
 }  // namespace session::config

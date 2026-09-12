@@ -4,14 +4,13 @@
 
 #include <charconv>
 #include <optional>
+#include <session/format.hpp>
 #include <session/types.hpp>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
 #include "internal.hpp"
-#include "oxenc/base32z.h"
-#include "oxenc/base64.h"
 #include "session/config/community.h"
 #include "session/export.h"
 #include "session/util.hpp"
@@ -24,7 +23,7 @@ community::community(std::string_view base_url_, std::string_view room_) {
 }
 
 community::community(
-        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey_) :
+        std::string_view base_url, std::string_view room, std::span<const std::byte, 32> pubkey_) :
         community{base_url, room} {
     set_pubkey(pubkey_);
 }
@@ -46,9 +45,7 @@ void community::set_base_url(std::string_view new_url) {
     base_url_ = canonical_url(new_url);
 }
 
-void community::set_pubkey(std::span<const unsigned char> pubkey) {
-    if (pubkey.size() != 32)
-        throw std::invalid_argument{"Invalid pubkey: expected a 32-byte pubkey"};
+void community::set_pubkey(std::span<const std::byte, 32> pubkey) {
     pubkey_.assign(pubkey.begin(), pubkey.end());
 }
 void community::set_pubkey(std::string_view pubkey) {
@@ -56,18 +53,15 @@ void community::set_pubkey(std::string_view pubkey) {
 }
 
 std::string community::pubkey_hex() const {
-    const auto& pk = pubkey();
-    return oxenc::to_hex(pk.begin(), pk.end());
+    return "{:x}"_format(pubkey());
 }
 
 std::string community::pubkey_b32z() const {
-    const auto& pk = pubkey();
-    return oxenc::to_base32z(pk.begin(), pk.end());
+    return "{:a}"_format(pubkey());
 }
 
 std::string community::pubkey_b64() const {
-    const auto& pk = pubkey();
-    return oxenc::to_base64(pk.begin(), pk.end());
+    return "{:b}"_format(pubkey());
 }
 
 void community::set_room(std::string_view room) {
@@ -80,13 +74,8 @@ std::string community::full_url() const {
 }
 
 std::string community::full_url(
-        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey) {
-    std::string url{base_url};
-    url += '/';
-    url += room;
-    url += qs_pubkey;
-    url += oxenc::to_hex(pubkey);
-    return url;
+        std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey) {
+    return "{}/{}?public_key={:x}"_format(base_url, room, pubkey);
 }
 
 void community::canonicalize_url(std::string& url) {
@@ -112,10 +101,8 @@ std::string community::canonical_url(std::string_view url) {
     std::string result;
     result += proto;
     result += host;
-    if (port) {
-        result += ':';
-        result += std::to_string(*port);
-    }
+    if (port)
+        fmt::format_to(std::back_inserter(result), ":{}", *port);
     // We don't (currently) allow a /path in a community URL
     if (path)
         throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};
@@ -130,9 +117,9 @@ std::string community::canonical_room(std::string_view room) {
     return r;
 }
 
-std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>>
+std::tuple<std::string, std::string, std::optional<std::vector<std::byte>>>
 community::parse_partial_url(std::string_view url) {
-    std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>> result;
+    std::tuple<std::string, std::string, std::optional<std::vector<std::byte>>> result;
     auto& [base_url, room_token, maybe_pubkey] = result;
 
     // Consume the URL from back to front; first the public key:
@@ -156,7 +143,7 @@ community::parse_partial_url(std::string_view url) {
     return result;
 }
 
-std::tuple<std::string, std::string, std::vector<unsigned char>> community::parse_full_url(
+std::tuple<std::string, std::string, std::vector<std::byte>> community::parse_full_url(
         std::string_view full_url) {
     auto [base, rm, maybe_pk] = parse_partial_url(full_url);
     if (!maybe_pk)
@@ -216,7 +203,9 @@ LIBSESSION_C_API bool community_parse_partial_url(
 LIBSESSION_C_API void community_make_full_url(
         const char* base_url, const char* room, const unsigned char* pubkey, char* full_url) {
     auto full = session::config::community::full_url(
-            base_url, room, std::span<const unsigned char>{pubkey, 32});
+            base_url,
+            room,
+            std::span<const std::byte>{reinterpret_cast<const std::byte*>(pubkey), 32});
     assert(full.size() <= COMMUNITY_FULL_URL_MAX_LENGTH);
     std::memcpy(full_url, full.data(), full.size() + 1);
 }

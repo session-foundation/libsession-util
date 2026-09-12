@@ -1,5 +1,6 @@
 #pragma once
 
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 
 #include "namespaces.hpp"
@@ -21,9 +22,9 @@ namespace session::config::protos {
 /// Outputs:
 /// Returns the wrapped config.  Will throw on serious errors (e.g. `ed25519_sk` or `ns` are
 /// invalid).
-std::vector<unsigned char> wrap_config(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> data,
+std::vector<std::byte> wrap_config(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte> data,
         int64_t seqno,
         config::Namespace ns);
 
@@ -44,9 +45,9 @@ std::vector<unsigned char> wrap_config(
 /// Throws a std::invalid_argument if the given ed25519_sk is invalid.  (It is recommended that only
 /// the std::runtime_error is caught for detecting non-wrapped input as the invalid secret key is
 /// more serious).
-std::vector<unsigned char> unwrap_config(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> data,
+std::vector<std::byte> unwrap_config(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte> data,
         config::Namespace ns);
 
 }  // namespace session::config::protos

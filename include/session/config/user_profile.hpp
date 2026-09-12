@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 
 #include "base.hpp"
@@ -55,6 +56,16 @@ using namespace std::literals;
 ///     when `T > t`).
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
+/// d - "delete before" unix timestamp (seconds) for the "Note to Self" pseudo-conversation:
+///     messages in it older than this are to be deleted, and arriving ones older than it dropped.
+///     Omitted when 0.  Named to match the equivalent field in the contacts and group info configs;
+///     note to self needs its own because it has no contacts entry to carry one.
+/// x - set to 1 to suppress the notification that tells someone we saved a file they sent.  Omitted
+///     when we do send them, which is the default and what nearly every account will carry -- hence
+///     a key that is absent rather than a value that is false, so the common case costs nothing in
+///     every push.  Note this is the *negative*: present means do not tell them.
+/// D - "delete attachments before" unix timestamp (seconds) for "Note to Self": as above but for
+///     attachments alone, leaving the messages themselves.  Omitted when 0.
 class UserProfile : public ConfigBase {
   public:
     friend class UserProfileTester;
@@ -79,8 +90,8 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `UserProfile` - Constructor
     UserProfile(
-            std::span<const unsigned char> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+            const ed25519::PrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: user_profile/UserProfile::storage_namespace
     ///
@@ -148,7 +159,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -158,7 +169,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::set_reupload_profile_pic
@@ -167,7 +178,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_reupload_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -177,7 +188,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_reupload_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::get_nts_priority
@@ -221,6 +232,54 @@ class UserProfile : public ConfigBase {
     /// - `timer` -- Default to 0 seconds, will set the expiry timer
     void set_nts_expiry(std::chrono::seconds timer = 0s);
 
+    /// API: user_profile/UserProfile::get_nts_delete_before
+    ///
+    /// Returns the "delete before" timestamp for the Note-to-self conversation: messages in it
+    /// older than this are to be deleted, and arriving ones older than it dropped.  This is what
+    /// makes clearing that conversation mean the same thing on every device -- the instruction is
+    /// recorded rather than inferred from when some config happened to be written.
+    ///
+    /// Note to self needs its own because it has no contacts entry to carry one.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` -- the timestamp, or the epoch if no such instruction is set
+    std::chrono::sys_seconds get_nts_delete_before() const;
+
+    /// API: user_profile/UserProfile::set_nts_delete_before
+    ///
+    /// Sets the Note-to-self "delete before" timestamp.  Pass the epoch (or a non-positive time) to
+    /// clear it.
+    ///
+    /// Inputs:
+    /// - `before` -- messages older than this are to be deleted
+    void set_nts_delete_before(std::chrono::sys_seconds before);
+
+    /// API: user_profile/UserProfile::get_nts_delete_attach_before
+    ///
+    /// As `get_nts_delete_before`, but covering the attachments alone: the messages themselves
+    /// stay.
+    ///
+    /// Only ever holds a value that says something `get_nts_delete_before` does not: deleting a
+    /// message takes its attachments with it, so setting either of the pair clears this one when
+    /// the message instruction already covers it.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` -- the timestamp, or the epoch if no such instruction is set
+    std::chrono::sys_seconds get_nts_delete_attach_before() const;
+
+    /// API: user_profile/UserProfile::set_nts_delete_attach_before
+    ///
+    /// Sets the Note-to-self "delete attachments before" timestamp.  Pass the epoch (or a
+    /// non-positive time) to clear it.
+    ///
+    /// Inputs:
+    /// - `before` -- attachments older than this are to be deleted
+    void set_nts_delete_attach_before(std::chrono::sys_seconds before);
+
     /// API: user_profile/UserProfile::get_blinded_msgreqs
     ///
     /// Accesses whether or not blinded message requests are enabled for the client.  Can have three
@@ -249,6 +308,36 @@ class UserProfile : public ConfigBase {
     ///   not, and `std::nullopt` to drop the setting from the config (and thus use the client's
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
+
+    /// API: user_profile/UserProfile::get_notify_media_saved
+    ///
+    /// Whether to tell somebody that we saved a file they sent us.  True by default, and for an
+    /// account that has never set it either way: Session's clients report it, so it is what a
+    /// sender expects.
+    ///
+    /// Whether that notification should be sent is a privacy decision rather than a technical one,
+    /// and it belongs to the person rather than to the device they happen to be holding — which is
+    /// why it lives here, where it follows the account, and not in a device-local config.
+    ///
+    /// A plain bool rather than the tri-state `get_blinded_msgreqs` uses: "never asked" and
+    /// "explicitly wants the default" are the same instruction, and keeping them apart would only
+    /// matter if the default were ever to flip — which would be a decision taken across every
+    /// client at once, where having accounts that never expressed a preference move with it is
+    /// exactly what you would want.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` -- true to tell the sender, which is the default.
+    bool get_notify_media_saved() const;
+
+    /// API: user_profile/UserProfile::set_notify_media_saved
+    ///
+    /// Sets the above.
+    ///
+    /// Inputs:
+    /// - `notify` -- false to stop telling senders that we saved their files.
+    void set_notify_media_saved(bool notify);
 
     /// API: user_profile/UserProfile::get_profile_updated
     ///
@@ -294,18 +383,18 @@ class UserProfile : public ConfigBase {
     /// - `bool` - Flag indicating whether the config had Session Pro config removed or not.
     bool remove_pro_config();
 
-    /// API: user_profile/UserProfile::get_pro_features
+    /// API: user_profile/UserProfile::get_profile_flags
     ///
-    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    /// Retrieves the flags indicating which pro features the user currently has enabled.
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - Bitset with individual bits set on it corresponding to
-    /// SESSION_PROTOCOL_PRO_PROFILE_FEATURES_BITSET. It is possible to receive bits set that don't
-    /// have a corresponding enum value if you are receiving a bitset from a newer client with newer
-    /// features enabled. These flags should be ignored by clients that do not recognise them.
-    ProProfileBitset get_profile_bitset() const;
+    /// - `ProProfileFlags` with the individual `ProProfileFlags::*` bits set that the user has
+    /// enabled. It is possible to receive bits set that don't have a corresponding enumerator if
+    /// you are receiving flags from a newer client with newer features enabled; unrecognised bits
+    /// should be ignored.
+    ProProfileFlags get_profile_flags() const;
 
     /// API: user_profile/UserProfile::set_pro_badge
     ///
@@ -336,9 +425,9 @@ class UserProfile : public ConfigBase {
     /// Inputs:  None
     ///
     /// Outputs:
-    /// - `std::optional<sys_seconds>` - The unix timestamp in
+    /// - `std::optional<std::chrono::sys_seconds>` - The unix timestamp in
     /// seconds that the users pro access will expire, or nullopt if unset.
-    std::optional<sys_seconds> get_pro_access_expiry() const;
+    std::optional<std::chrono::sys_seconds> get_pro_access_expiry() const;
 
     /// API: user_profile/UserProfile::set_pro_access_expiry
     ///
@@ -347,7 +436,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
-    void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
+    void set_pro_access_expiry(std::optional<std::chrono::sys_seconds> access_expiry_ts);
 
     /// API: user_profile/UserProfile::get_pro_auto_renewing
     ///
@@ -412,9 +501,9 @@ class UserProfile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a refund was
-    /// requested, or nullopt if no refund has been requested (or the stored value is stale).
-    std::optional<sys_seconds> get_refund_requested() const;
+    /// - `std::optional<std::chrono::sys_seconds>` - the unix timestamp (seconds) at which a refund
+    /// was requested, or nullopt if no refund has been requested (or the stored value is stale).
+    std::optional<std::chrono::sys_seconds> get_refund_requested() const;
 
     /// API: user_profile/UserProfile::set_refund_requested
     ///
@@ -426,7 +515,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `when` -- the timestamp (unix epoch seconds) at which the refund was requested, or nullopt
     /// to clear the refund-requested state.
-    void set_refund_requested(std::optional<sys_seconds> when);
+    void set_refund_requested(std::optional<std::chrono::sys_seconds> when);
 
     /// API: user_profile/UserProfile::get_pro_prepaid
     ///
@@ -440,7 +529,7 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a purchase was
     /// initiated, or nullopt if none is pending (or the stored value is stale).
-    std::optional<sys_seconds> get_pro_prepaid() const;
+    std::optional<std::chrono::sys_seconds> get_pro_prepaid() const;
 
     /// API: user_profile/UserProfile::set_pro_prepaid
     ///
@@ -453,7 +542,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `when` -- the timestamp (unix epoch seconds) at which the purchase was initiated, or
     /// nullopt to clear the marker.
-    void set_pro_prepaid(std::optional<sys_seconds> when);
+    void set_pro_prepaid(std::optional<std::chrono::sys_seconds> when);
 
     /// API: user_profile/UserProfile::pro_renewal_target
     ///
@@ -476,7 +565,13 @@ class UserProfile : public ConfigBase {
     ///
     /// Outputs:
     /// - `std::optional<sys_seconds>` - when to renew, or nullopt for "no renewal needed".
-    std::optional<sys_seconds> pro_renewal_target(sys_seconds now) const;
+    std::optional<std::chrono::sys_seconds> pro_renewal_target(std::chrono::sys_seconds now) const;
+
+  private:
+    // Enables/disables a single profile feature flag in the synced "f" set. The set stores feature
+    // *bit positions*, so `flag` must be a single-bit ProProfileFlags value (deflated here to its
+    // position via countr_zero).
+    void set_profile_feature(ProProfileFlags flag, bool enabled);
 };
 
 }  // namespace session::config

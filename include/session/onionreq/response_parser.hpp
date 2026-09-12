@@ -34,7 +34,7 @@ class ResponseParser {
 
     static bool response_long_enough(EncryptType enc_type, size_t response_size);
 
-    std::vector<unsigned char> decrypt(std::vector<unsigned char> ciphertext) const;
+    std::vector<std::byte> decrypt(std::vector<std::byte> ciphertext) const;
     DecryptedResponse decrypted_response(const std::string& encrypted_response);
 
   private:

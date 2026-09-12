@@ -24,6 +24,10 @@ enum class Namespace : std::int16_t {
     GroupInfo = NAMESPACE_GROUP_INFO,
     GroupMembers = NAMESPACE_GROUP_MEMBERS,
 
+    // Device group namespaces:
+    Devices = NAMESPACE_DEVICES,
+    AccountPubkeys = NAMESPACE_ACCOUNT_PUBKEYS,
+
     // The local config should never be pushed but this gives us a nice identifier for each config
     // type
     Local = NAMESPACE_LOCAL,

@@ -4,14 +4,16 @@
 # then (especially after touching hashing or any wire/config serialization).
 #
 # Most of libsession runs only on little-endian hosts, so endian-sensitive byte serialization — the
-# Pro signed-digest encoding, config data, protobuf packing — normally never exercises its big-endian
-# path. This script builds and runs the test suite inside an emulated big-endian target (s390x) so
-# those paths run for real.
+# Pro signed-digest encoding (hash::detail::make_hashable's byte-swap branch), config data, protobuf
+# packing — normally never exercises its big-endian path. This script builds and runs the test suite
+# inside an emulated big-endian target (s390x) so those paths run for real. In particular it exercises
+# the [endian] known-answer test (hash::blake2b_pers integer args must be little-endian) on an actual
+# big-endian machine, where make_hashable takes its otherwise-never-compiled swap branch.
 #
 # session-router (the onion-routing layer) is endian-irrelevant to what we test and drags in the
-# heaviest deps, so we build with -DENABLE_NETWORKING_SROUTER=OFF. oxen::quic itself can't be turned
-# off (a couple of ungated backend-session test sources include its headers), so it still builds — we
-# satisfy it with libngtcp2 + gnutls from apt (nghttp3 is not needed; libquic uses raw QUIC).
+# heaviest deps, so we build with -DENABLE_NETWORKING_SROUTER=OFF. This branch has no ENABLE_NETWORKING
+# toggle (networking is always required), so oxen::quic still builds regardless — we satisfy it with
+# libngtcp2 + gnutls from apt (nghttp3 is not needed; libquic uses raw QUIC).
 #
 # Cost: everything runs under qemu-user emulation, so expect a slow build (oxen-libquic is the bulk of
 # it). Fine for an occasional manual audit; it is deliberately not in CI.
@@ -43,10 +45,11 @@ docker run --platform=linux/s390x --rm -v "$PWD:/src" -w /src debian:sid bash -e
     rm -rf build-bigendian   # fresh configure each run; the dir lives in the mounted tree and would otherwise reuse a stale CMake cache
     cmake -B build-bigendian -G Ninja -DBUILD_STATIC_DEPS=OFF -DENABLE_NETWORKING_SROUTER=OFF -DCMAKE_BUILD_TYPE=Release
     cmake --build build-bigendian --target testAll
-    # Run the endian-sensitive tags on this big-endian host. Catch2 exits 0 even when a filter clause
-    # matches no tests, so capture the output and fail loudly if any tag went unmatched — that guards
-    # against a tag rename silently shrinking the audit. ([endian] is a pfs-only test, not present here.)
-    out=$(./build-bigendian/tests/testAll "[hash],[session-protocol],[pro_backend],[config]")
+    # Run the endian-sensitive tags on this big-endian host. [endian] is the make_hashable little-endian
+    # known-answer test; the hash / protocol / Pro / config tags also exercise serialization here. Catch2
+    # exits 0 even when a filter clause matches no tests, so capture the output and fail loudly if any tag
+    # went unmatched — that guards against a tag rename silently shrinking the audit.
+    out=$(./build-bigendian/tests/testAll "[endian],[hash],[session-protocol],[pro_backend],[config]")
     echo "$out"
     if echo "$out" | grep -q "No test cases matched"; then
         echo "ERROR: a filter tag matched no tests — the audit under-ran (tag renamed?)" >&2

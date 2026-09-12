@@ -100,6 +100,9 @@ inline PathCategory to_path_category(RequestCategory category) {
     return PathCategory::standard;  // Should not be reached
 }
 
+/// Runs on loops it does not own; its owner outlives it.  Its own jobs capture `this` bare -- see
+/// _jq -- while callbacks handed to the transport or the snode pool, which outlive this router,
+/// keep a weak guard.
 class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<OnionRequestRouter> {
   private:
     friend class TestOnionRequestRouter;
@@ -107,8 +110,9 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     bool _ready = false;
     bool _suspended = false;
     config::OnionRequestRouter _config;
-    std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<oxen::quic::Loop> _disk_loop;
+    oxen::quic::Loop& _loop;
+    // Only ever given jobs that capture what they need by value, so it needs no queue of its own.
+    oxen::quic::Loop& _disk_loop;
     std::weak_ptr<SnodePool> _snode_pool;
     std::weak_ptr<ITransport> _transport;
 
@@ -135,11 +139,18 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     // Disk I/O
     std::filesystem::path _edge_node_cache_file_path;
 
+    /// This router's own jobs, rather than the loop's shared queue, so that ~OnionRequestRouter can
+    /// take them away from the loop before anything is torn down: `stop()` waits out whatever is
+    /// running and cancels the rest.  That is what lets the jobs capture `this` bare.
+    ///
+    /// Declared last so that it is also the first member destroyed.
+    oxen::quic::JobQueue _jq{_loop};
+
   public:
     OnionRequestRouter(
             config::OnionRequestRouter config,
-            std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<oxen::quic::Loop> disk_loop,
+            oxen::quic::Loop& loop,
+            oxen::quic::Loop& disk_loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
     ~OnionRequestRouter() override;
@@ -153,7 +164,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::vector<PathInfo> get_active_paths() override;
     std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(UploadRequest request) override;
+    void upload(UploadRequest request) override;  // deprecated: use upload_file()
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed) override;
     void download(DownloadRequest request) override;
 
   private:
@@ -172,6 +184,16 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _update_status();
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _upload_internal(UploadRequest request);
+    void _cleanup_upload(const std::string& upload_id);
+
+    // Dispatches a pre-built file server upload request to the loop thread.  Called from a
+    // background thread after data accumulation.  `is_cancelled` is checked before sending
+    // and on completion; `on_result` receives the parsed file_metadata or error.
+    void _dispatch_upload(
+            std::string upload_id,
+            Request request,
+            std::function<bool()> is_cancelled,
+            std::function<void(std::variant<file_metadata, int16_t>, bool)> on_result);
     void _download_internal(DownloadRequest request);
 
     void _build_path(

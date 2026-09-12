@@ -1,0 +1,1382 @@
+#include <SessionProtos.pb.h>
+#include <fmt/chrono.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <mlkem_native.h>
+#include <oxenc/base64.h>
+#include <oxenc/bt_serialize.h>
+#include <oxenc/hex.h>
+#include <sodium/core.h>
+
+#include <nlohmann/json.hpp>
+#include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
+#include <oxen/quic/loop.hpp>
+#include <session/clock.hpp>
+#include <session/core.hpp>
+#include <session/core/schema/schema_registry.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/format.hpp>
+#include <session/network/session_network.hpp>
+#include <session/network/session_network_types.hpp>
+#include <session/pro_backend.hpp>
+#include <session/session_encrypt.hpp>
+#include <session/session_protocol.hpp>
+#include <session/util.hpp>
+#include <session/xed25519.hpp>
+#include <unordered_set>
+
+#include "core/swarm_request.hpp"
+#include "session/config/namespaces.hpp"
+#include "session/core/component.hpp"
+
+namespace session::core {
+
+namespace log = oxen::log;
+using namespace session::sqlite;
+using namespace oxen::log::literals;
+static auto cat = log::Cat("core");
+
+// How many recent hashes to keep per namespace per swarm node, as a position to fall back to when
+// the newest ones are deleted from the swarm.  Deleting more than this in a run costs one full
+// retrieve from that node, which is the same thing that happens today for any other reason.
+static constexpr int SWARM_HASH_HISTORY = 100;
+
+static cleared_b32 seed_from_words(
+        std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
+    auto n = words.size();
+    if (n != 12 && n != 13 && n != 24 && n != 25)
+        throw std::invalid_argument{
+                "Seed phrase must be 12, 13, 24, or 25 words (got {})"_format(n)};
+
+    cleared_b32 result;
+    if (n <= 13) {
+        // 12 or 13 words → 16-byte seed in the lower half; upper 16 bytes are zeroed
+        mnemonics::words_to_bytes(words, lang, std::span<std::byte>(result.data(), 16));
+        std::memset(result.data() + 16, 0, 16);
+    } else {
+        // 24 or 25 words → full 32-byte seed
+        mnemonics::words_to_bytes(words, lang, std::span<std::byte>(result.data(), 32));
+    }
+    return result;
+}
+
+predefined_seed::predefined_seed(
+        std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) :
+        predefined_seed{seed_from_words(words, lang)} {}
+
+predefined_seed::predefined_seed(
+        std::span<const std::string_view> words, std::string_view lang_name) :
+        predefined_seed{words, mnemonics::get_language(lang_name)} {}
+
+void Core::NetworkDeleter::operator()(network::Network* p) const {
+    delete p;
+}
+
+void Core::init() {
+    if (sodium_init() < 0)
+        throw std::runtime_error{"libsodium initialization failed!"};
+
+    apply_migrations();
+
+    for (auto* component : _comp_init)
+        component->init();
+
+    _comp_init.clear();
+
+    _update_polling();
+}
+
+void Core::register_comp_init(detail::CoreComponent* c) {
+    _comp_init.push_back(c);
+}
+
+quic::Loop& Core::loop() {
+    return _loop;
+}
+
+void Core::set_network(std::unique_ptr<network::Network> network) {
+    // Polling signs its retrieve requests with the account key, so attaching a network before the
+    // account has an identity would fail inside a background poll rather than here.  Refuse at the
+    // call site, where the ordering mistake actually is.
+    if (network && !globals.have_account())
+        throw no_account{};
+
+    // Ownership moves in via release() because the two pointer types differ deliberately: the
+    // parameter is a plain unique_ptr so callers can hand over a std::make_unique, while the
+    // member's deleter (which is just `delete`) is what keeps Network an incomplete type in
+    // core.hpp -- including session_network.hpp there costs ~6x the compile time per file.
+    _network.reset(network.release());
+    _update_polling();
+}
+
+void Core::_update_polling() {
+    if (_network && !_poll_ticker) {
+        _poll_ticker = _loop.call_every(_poll_interval, [this] { _poll(); });
+    } else if (!_network && _poll_ticker) {
+        _poll_ticker->stop();
+        _poll_ticker.reset();
+    }
+}
+
+void Core::set_poll_interval(std::chrono::milliseconds interval) {
+    // Marshalled onto the loop rather than done here: this replaces the ticker, and creating or
+    // stopping a libevent event from a thread that is not the loop's races the loop itself.  (Both
+    // `_poll_interval` and `_poll_ticker` are otherwise only touched there.)  `Loop::call` runs it
+    // inline when we are already on the loop thread, so this costs nothing in that case.
+    _loop.call([this, interval] {
+        _poll_interval = interval;
+        if (_poll_ticker) {
+            _poll_ticker->stop();
+            _poll_ticker.reset();
+        }
+        _update_polling();
+    });
+}
+
+// Order matters: the batch's results are handled in this order, so a namespace whose contents
+// another one's depend on has to come first.  The configs lead because a message arriving in the
+// same poll may be from a contact those configs are what tells us about; among themselves,
+// ConvoInfoVolatile comes last because it refers to conversations that Contacts and UserGroups
+// are what establish.
+static constexpr std::array POLL_NAMESPACES = {
+        config::Namespace::UserProfile,
+        config::Namespace::Contacts,
+        config::Namespace::UserGroups,
+        config::Namespace::ConvoInfoVolatile,
+        config::Namespace::Default,
+        config::Namespace::Devices,
+        config::Namespace::AccountPubkeys};
+
+// Ceiling on continuation rounds within one poll.  A well-behaved node exhausts a namespace in far
+// fewer; this exists so that a node whose `more` never goes false cannot poll indefinitely.
+static constexpr int POLL_MAX_ROUNDS = 20;
+
+void Core::_poll() {
+    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
+    // could make the loop thread the last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net) {
+        log::debug(cat, "Not polling: no network attached");
+        return;
+    }
+
+    log::debug(cat, "Polling swarm for {}", globals.session_id_hex());
+
+    net->get_swarm(globals.pubkey_x25519(), false, [this, net](auto, auto swarm) {
+        if (swarm.empty()) {
+            log::warning(cat, "Cannot poll: no swarm nodes available");
+            return;
+        }
+
+        _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
+    });
+}
+
+void Core::_send_poll(
+        network::Network* net,
+        network::service_node node,
+        std::vector<config::Namespace> namespaces,
+        int round) {
+
+    auto now_ms = epoch_ms(clock_now_ms());
+    auto ed25519_hex = globals.pubkey_ed25519().hex();
+
+    // Build per-namespace signatures for namespaces that require authentication; index-aligned with
+    // `namespaces`.  Empty string means no auth needed for that namespace.  Signed here rather than
+    // once per poll because the signature covers a timestamp the storage server checks for
+    // freshness, so a continuation round cannot reuse the first round's.
+    std::vector<std::string> ns_sig(namespaces.size());
+    {
+        auto seed = globals.account_seed();
+        for (size_t i = 0; i < namespaces.size(); ++i) {
+            auto ns_val = static_cast<int16_t>(namespaces[i]);
+            if (!retrieve_requires_auth(ns_val))
+                continue;
+            auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
+            auto sig = ed25519::sign(seed.ed25519_secret(), to_span(to_sign));
+            ns_sig[i] = "{:b}"_format(sig);
+        }
+    }
+
+    // Build one batch subrequest per namespace.
+    nlohmann::json requests = nlohmann::json::array();
+    {
+        auto conn = db.conn();
+
+        for (size_t i = 0; i < namespaces.size(); ++i) {
+            auto ns_val = static_cast<int16_t>(namespaces[i]);
+            nlohmann::json params = {
+                    {"pubkey", globals.session_id_hex()},
+                    {"namespace", ns_val},
+            };
+
+            if (!ns_sig[i].empty()) {
+                params["pubkey_ed25519"] = ed25519_hex;
+                params["timestamp"] = now_ms;
+                params["signature"] = ns_sig[i];
+            }
+
+            // The newest hash this node handed us that it still holds.  Derived rather than stored
+            // so that deleting a hash from the swarm moves the cursor back to its predecessor on
+            // its own, with nothing to remember to update.  A continuation round therefore picks up
+            // the hashes the previous round recorded, with no separate cursor to thread through.
+            //
+            // A NULL expiry is a node that did not tell us when it would drop the message, which is
+            // unknown rather than expired: refusing to use it would throw away a working cursor
+            // over a missing field.
+            auto last_hash = conn.prepared_maybe_get<std::string>(
+                    R"(
+SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
+ WHERE h.namespace = ? AND n.pubkey = ? AND (h.expiry IS NULL OR h.expiry > ?)
+ ORDER BY h.id DESC LIMIT 1
+)",
+                    ns_val,
+                    node.remote_pubkey,
+                    epoch_ms(clock_now_ms()));
+            if (last_hash)
+                params["last_hash"] = *last_hash;
+
+            requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});
+        }
+    }
+
+    auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
+
+    log::debug(
+            cat,
+            "Retrieving {} namespaces from {} (round {}): {}",
+            namespaces.size(),
+            node.remote_pubkey.hex(),
+            round,
+            body_str);
+
+    net->send_request(
+            swarm_request(node, globals.pubkey_x25519(), "batch", to_vector(body_str)),
+            [this, node, namespaces = std::move(namespaces), round](
+                    bool success,
+                    bool timeout,
+                    int16_t /*status_code*/,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
+                    std::optional<std::string> body) mutable {
+                if (!success || !body) {
+                    log::warning(
+                            cat,
+                            "Swarm poll request failed: {}",
+                            timeout ? "timed out"
+                            : body  ? *body
+                                    : "request failed");
+                    return;
+                }
+
+                _handle_poll_response(
+                        std::move(node), std::move(namespaces), std::move(*body), round);
+            });
+}
+
+void Core::_handle_poll_response(
+        network::service_node node,
+        std::vector<config::Namespace> namespaces,
+        std::string body,
+        int round) {
+
+    const auto& sn_pubkey = node.remote_pubkey;
+
+    // Namespaces the node says it has more of, to continue in another round.  Collected rather than
+    // continued in place because the cursor each one resumes from is written below.
+    std::vector<config::Namespace> unfinished;
+
+    try {
+        auto json = nlohmann::json::parse(body);
+        auto it = json.find("results");
+        if (it == json.end() || !it->is_array())
+            return;
+
+        // One poll can carry several config namespaces, and each merge would otherwise dump on its
+        // way out.  Nothing reads those intermediate states, so hold them until the whole response
+        // is handled.  (An external caller feeding receive_messages() directly can take its own.)
+        auto configs_held = configs.batch();
+
+        auto& results = *it;
+        auto conn = db.conn();
+        for (size_t i = 0; i < namespaces.size() && i < results.size(); ++i) {
+            auto ns = namespaces[i];
+            auto ns_val = static_cast<int16_t>(ns);
+
+            const auto& res = results[i];
+            auto code_it = res.find("code");
+            if (code_it == res.end() || code_it->get<int>() != 200) {
+                log::warning(cat, "Retrieve of namespace {} failed: {}", ns_val, res.dump());
+                continue;
+            }
+            auto body_it = res.find("body");
+            if (body_it == res.end())
+                continue;
+            auto msgs_it = body_it->find("messages");
+            if (msgs_it == body_it->end() || !msgs_it->is_array())
+                continue;
+
+            // A retrieve is capped, so this says whether the node is holding more past what it
+            // returned.  Everything above `continue`s instead, which is the distinction that
+            // matters: a namespace that failed or answered malformedly is not reported to its
+            // handler at all, while one that answered with nothing is -- "we asked and there is
+            // nothing" is an answer, and some handlers act on it.
+            bool more = false;
+            if (auto m = body_it->find("more"); m != body_it->end() && m->is_boolean())
+                more = m->get<bool>();
+
+            log::debug(cat, "Retrieved {} message(s) from namespace {}", msgs_it->size(), ns_val);
+
+            // Decode each message; keep the decoded bytes alive until after
+            // receive_messages() returns, since SwarmMessage::data spans
+            // into them.
+            std::vector<std::vector<std::byte>> messages_data;
+            std::vector<SwarmMessage> swarm_messages;
+
+            for (const auto& msg : *msgs_it) {
+                auto data_it = msg.find("data");
+                if (data_it == msg.end() || !data_it->is_string())
+                    continue;
+                auto& decoded = messages_data.emplace_back();
+                auto b64 = data_it->get<std::string_view>();
+                decoded.reserve(oxenc::from_base64_size(b64.size()));
+                oxenc::from_base64(b64.begin(), b64.end(), std::back_inserter(decoded));
+
+                SwarmMessage swarm_msg;
+                swarm_msg.data = {decoded.data(), decoded.size()};
+
+                if (auto h = msg.find("hash"); h != msg.end() && h->is_string())
+                    swarm_msg.hash = h->get<std::string>();
+
+                if (auto t = msg.find("timestamp"); t != msg.end() && t->is_number_integer())
+                    swarm_msg.timestamp = from_epoch_ms(t->get<int64_t>());
+
+                if (auto e = msg.find("expiry"); e != msg.end() && e->is_number_integer())
+                    swarm_msg.expiry = from_epoch_ms(e->get<int64_t>());
+
+                swarm_messages.push_back(std::move(swarm_msg));
+            }
+
+            // A node claiming more while returning nothing cannot be continued: there is no new
+            // hash to move the cursor to, so another round would ask the same question and get the
+            // same answer.  Treat the namespace as finished instead, or a handler waiting on
+            // `is_final` would wait for one that never comes.
+            more = more && !swarm_messages.empty();
+
+            receive_messages(swarm_messages, ns, !more);
+            if (more)
+                unfinished.push_back(ns);
+
+            if (!swarm_messages.empty()) {
+                // Only advance the cursor once the batch has been handled: the swarm filters on
+                // last_hash, so advancing past messages that threw would drop them permanently.
+                // Handling then dying before this point re-delivers the batch instead, so message
+                // handlers must tolerate seeing a message twice.
+                //
+                // Every hash goes in, not just the ones that produced something we kept: the cursor
+                // is a position in what this node returned, so leaving out what we ignored would
+                // park it behind those and fetch them again on every poll.  Insertion order is the
+                // order the node returned them, which is what `id DESC` reads back.
+                conn.prepared_exec(
+                        "INSERT INTO swarm_nodes (pubkey) VALUES (?) ON CONFLICT DO NOTHING",
+                        sn_pubkey);
+                auto node_id = conn.prepared_get<int64_t>(
+                        "SELECT id FROM swarm_nodes WHERE pubkey = ?", sn_pubkey);
+
+                for (const auto& m : swarm_messages) {
+                    if (m.hash.empty())
+                        continue;
+                    conn.prepared_exec(
+                            R"(
+INSERT INTO swarm_hashes (namespace, node, hash, expiry) VALUES (?, ?, ?, ?)
+ON CONFLICT(namespace, node, hash) DO UPDATE SET expiry = max(expiry, excluded.expiry)
+)",
+                            ns_val,
+                            node_id,
+                            m.hash,
+                            m.expiry.time_since_epoch().count() > 0
+                                    ? std::optional{epoch_ms(m.expiry)}
+                                    : std::nullopt);
+                }
+
+                // An expired hash is not a cursor: the node no longer holds the message to measure
+                // from.
+                conn.prepared_exec(
+                        "DELETE FROM swarm_hashes WHERE expiry IS NOT NULL AND expiry <= ?",
+                        epoch_ms(clock_now_ms()));
+
+                // And a cap on top of that, because expiry alone bounds this at every message in
+                // the retention window.  Only the newest entry is ever read; the rest exist solely
+                // to walk back past hashes deleted from the swarm, so keeping more than a run of
+                // deletions could plausibly cover buys nothing but disk.
+                conn.prepared_exec(
+                        R"(
+DELETE FROM swarm_hashes
+ WHERE namespace = ?1 AND node = ?2
+   AND id NOT IN (SELECT id FROM swarm_hashes
+                   WHERE namespace = ?1 AND node = ?2
+                   ORDER BY id DESC LIMIT ?3)
+)",
+                        ns_val,
+                        node_id,
+                        SWARM_HASH_HISTORY);
+            }
+        }
+    } catch (const std::exception& e) {
+        log::warning(cat, "Failed to parse poll response: {}", e.what());
+        return;
+    }
+
+    if (unfinished.empty())
+        return;
+
+    if (round + 1 >= POLL_MAX_ROUNDS) {
+        log::warning(
+                cat,
+                "Stopping poll of {} after {} rounds with {} namespace(s) still reporting more",
+                sn_pubkey.hex(),
+                POLL_MAX_ROUNDS,
+                unfinished.size());
+        return;
+    }
+
+    // Deliberately not re-fetching the swarm: the cursor these resume from is this node's, so the
+    // continuation has to go back to the same one.
+    if (auto* net = _network.get())
+        _send_poll(net, std::move(node), std::move(unfinished), round + 1);
+}
+
+PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) {
+    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
+    // could make the loop thread the last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net)
+        throw std::logic_error{"prefetch_pfs_keys called without a network object"};
+
+    // One copy of session_id for async use; subsequently moved into lambdas.
+    b33 sid;
+    std::ranges::copy(session_id, sid.begin());
+
+    // Skip the fetch if the cached entry is still fresh, or a recent NAK suppresses retrying.
+    // Otherwise determine whether we have a stale (but usable) key or no key at all.
+    auto status = PfsKeyStatus::fetching;
+    {
+        auto conn = db.conn();
+        if (auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
+                    "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?", sid)) {
+            auto [fetched_at, nak_at] = *row;
+            if (fetched_at) {
+                auto age = clock_now_s() - from_epoch_s(*fetched_at);
+                if (age < PFS_KEY_FRESH_DURATION) {
+                    log::debug(
+                            cat,
+                            "prefetch_pfs_keys: cached key for {} is still fresh ({} old), "
+                            "skipping",
+                            session_id,
+                            age);
+                    return PfsKeyStatus::fresh;
+                }
+                log::debug(
+                        cat,
+                        "prefetch_pfs_keys: cached key for {} is stale ({} old), re-fetching",
+                        session_id,
+                        age);
+                status = PfsKeyStatus::stale;
+            } else if (nak_at) {
+                auto age = clock_now_s() - from_epoch_s(*nak_at);
+                if (age < PFS_KEY_NAK_DURATION) {
+                    log::debug(
+                            cat,
+                            "prefetch_pfs_keys: recent NAK for {} ({} old), skipping",
+                            session_id,
+                            age);
+                    return PfsKeyStatus::nak;
+                }
+                log::debug(
+                        cat,
+                        "prefetch_pfs_keys: expired NAK for {} ({} old), re-fetching",
+                        session_id,
+                        age);
+            }
+        } else {
+            log::debug(cat, "prefetch_pfs_keys: no cached key for {}, fetching", session_id);
+        }
+    }
+
+    // The swarm is indexed by the x25519 pubkey — the session_id without its 0x05 prefix.
+    network::x25519_pubkey x25519_pub;
+    std::ranges::copy(session_id.subspan<1>(), x25519_pub.begin());
+
+    auto now_ms = epoch_ms(clock_now_ms());
+
+    // AccountPubkeys (-21) allows unauthenticated retrieve: no signature needed.
+    nlohmann::json params = {
+            {"pubkey", oxenc::to_hex(session_id)},
+            {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
+    };
+
+    net->get_swarm(
+            x25519_pub,
+            false,
+            [this, net, sid = std::move(sid), params, x25519_pub](auto, auto swarm) {
+                if (swarm.empty()) {
+                    log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+                    _pfs_fetch_done(sid, PfsKeyFetch::failed);
+                    return;
+                }
+
+                auto body_str = params.dump();
+                net->send_request(
+                        swarm_request(swarm.front(), x25519_pub, "retrieve", to_vector(body_str)),
+                        [this, sid = std::move(sid)](
+                                bool success,
+                                bool timeout,
+                                int16_t /*status_code*/,
+                                std::vector<std::pair<std::string, std::string>> /*headers*/,
+                                std::optional<std::string> body) {
+                            if (!success || !body) {
+                                log::warning(
+                                        cat,
+                                        "Failed to fetch PFS keys for {}: {}",
+                                        sid,
+                                        timeout ? "timed out"
+                                        : body  ? *body
+                                                : "request failed");
+                                _pfs_fetch_done(sid, PfsKeyFetch::failed);
+                                return;
+                            }
+
+                            return _handle_pfs_response(sid, std::move(*body));
+                        });
+            });
+    return status;
+}
+
+bool Core::_store_pfs_keys(
+        std::span<const std::byte, 33> session_id,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte, 1184> mlkem768_pub) {
+    auto now_s = epoch_seconds(clock_now_s());
+    auto conn = db.conn();
+    SQLite::Transaction tx{conn.sql};
+
+    bool is_unchanged = conn.prepared_maybe_get<int>(
+                                    R"(
+SELECT 1 FROM pfs_key_cache
+WHERE session_id = ? AND pubkey_x25519 = ? AND pubkey_mlkem768 = ?
+)",
+                                    session_id,
+                                    x25519_pub,
+                                    mlkem768_pub)
+                                .has_value();
+
+    conn.prepared_exec(
+            R"(
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, ?, NULL, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+    fetched_at = excluded.fetched_at,
+    pubkey_x25519 = excluded.pubkey_x25519,
+    pubkey_mlkem768 = excluded.pubkey_mlkem768
+)",
+            session_id,
+            now_s,
+            x25519_pub,
+            mlkem768_pub);
+    tx.commit();
+    return !is_unchanged;
+}
+
+void Core::_store_pfs_nak(std::span<const std::byte, 33> session_id) {
+    auto now_s = epoch_seconds(clock_now_s());
+    db.conn().prepared_exec(
+            R"(
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, NULL, ?, NULL, NULL)
+ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
+)",
+            session_id,
+            now_s);
+}
+
+void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string body) {
+    try {
+        auto json = nlohmann::json::parse(body);
+        auto msgs_it = json.find("messages");
+        if (msgs_it == json.end() || !msgs_it->is_array()) {
+            log::warning(
+                    cat,
+                    "prefetch_pfs_keys: response missing or invalid "
+                    "'messages' array");
+            return;
+        }
+
+        // Strip the 0x05 prefix to get the x25519 pubkey for
+        // signature verification.
+        auto x25519_pub = sid.subspan<1>();
+
+        // Track the most recently valid pubkeys seen across all messages.
+        std::optional<std::array<std::byte, 32>> pk_x25519;
+        std::optional<std::array<std::byte, MLKEM768_PUBLICKEYBYTES>> pk_mlkem768;
+
+        for (const auto& msg : *msgs_it) {
+            auto data_it = msg.find("data");
+            if (data_it == msg.end() || !data_it->is_string()) {
+                log::warning(
+                        cat,
+                        "prefetch_pfs_keys: message missing or "
+                        "non-string 'data' field");
+                continue;
+            }
+            auto b64 = data_it->get<std::string_view>();
+            std::vector<std::byte> decoded;
+            decoded.reserve(oxenc::from_base64_size(b64.size()));
+            oxenc::from_base64(b64.begin(), b64.end(), std::back_inserter(decoded));
+            try {
+                oxenc::bt_dict_consumer in{decoded};
+                auto M = in.require_span<std::byte, MLKEM768_PUBLICKEYBYTES>("M");
+                auto X = in.require_span<std::byte, 32>("X");
+                in.require_signature(
+                        "~",
+                        [&x25519_pub](
+                                std::span<const std::byte> b, std::span<const std::byte> sig) {
+                            if (sig.size() != 64 ||
+                                !xed25519::verify(sig.first<64>(), x25519_pub, b))
+                                throw std::runtime_error{"signature verification failed"};
+                        });
+                std::ranges::copy(X, pk_x25519.emplace().begin());
+                std::ranges::copy(M, pk_mlkem768.emplace().begin());
+            } catch (const std::exception& e) {
+                log::warning(
+                        cat,
+                        "Ignoring malformed remote account pubkey "
+                        "message: {}",
+                        e.what());
+            }
+        }
+
+        if (!pk_x25519 || !pk_mlkem768) {
+            log::debug(
+                    cat,
+                    "prefetch_pfs_keys: no valid account pubkey message "
+                    "found in response");
+            _store_pfs_nak(sid);
+            _pfs_fetch_done(sid, PfsKeyFetch::not_found);
+            return;
+        }
+
+        bool changed = _store_pfs_keys(sid, *pk_x25519, *pk_mlkem768);
+        _pfs_fetch_done(sid, changed ? PfsKeyFetch::new_key : PfsKeyFetch::unchanged);
+    } catch (const std::exception& e) {
+        log::warning(cat, "Failed to process PFS key fetch response: {}", e.what());
+    }
+}
+
+void Core::delete_from_swarm(
+        std::vector<std::string> hashes, std::function<void(bool)> on_complete) {
+    if (hashes.empty()) {
+        if (on_complete)
+            on_complete(true);
+        return;
+    }
+
+    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
+    // could make the loop thread the last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net)
+        throw std::logic_error{"delete_from_swarm: no network object"};
+
+    b64 sig;
+    {
+        auto seed = globals.account_seed();
+        // Signed over the hashes in the order they are sent, so the two must not be reordered
+        // independently.
+        auto to_sign = delete_signature_value(hashes);
+        ed25519::sign(sig, seed.ed25519_secret(), std::as_bytes(std::span{to_sign}));
+    }
+
+    nlohmann::json params = {
+            {"pubkey", globals.session_id_hex()},
+            {"pubkey_ed25519", globals.pubkey_ed25519().hex()},
+            {"messages", hashes},
+            {"signature", "{:b}"_format(sig)},
+    };
+    auto body = to_vector<std::byte>(params.dump());
+
+    net->get_swarm(
+            globals.pubkey_x25519(),
+            false,
+            [this, net, hashes = std::move(hashes), body = std::move(body), on_complete](
+                    auto, auto swarm) mutable {
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot delete from swarm: no swarm nodes available");
+                    if (on_complete)
+                        on_complete(false);
+                    return;
+                }
+
+                net->send_request(
+                        swarm_request(
+                                swarm.front(), globals.pubkey_x25519(), "delete", std::move(body)),
+                        [this, hashes = std::move(hashes), on_complete](
+                                bool success,
+                                bool timeout,
+                                int16_t status,
+                                auto,
+                                std::optional<std::string> resp) {
+                            if (!success) {
+                                log::warning(
+                                        cat,
+                                        "Swarm delete failed ({}): {}",
+                                        timeout ? "timed out" : "status {}"_format(status),
+                                        resp.value_or("no response body"));
+                                if (on_complete)
+                                    on_complete(false);
+                                return;
+                            }
+
+                            // Forget the cursors naming what we just deleted, so the next retrieve
+                            // measures from the newest hash the node still holds.  Done on success
+                            // only: a failed delete leaves the messages there, and dropping the
+                            // cursor would replay the retention window for nothing.
+                            {
+                                auto conn = db.conn();
+                                for (const auto& h : hashes)
+                                    conn.prepared_exec(
+                                            "DELETE FROM swarm_hashes WHERE hash = ?", h);
+                            }
+
+                            if (on_complete)
+                                on_complete(true);
+                        });
+            });
+}
+
+void Core::_send_to_swarm(
+        std::span<const std::byte, 33> dest_pubkey,
+        config::Namespace ns,
+        std::vector<std::byte> payload,
+        std::chrono::milliseconds ttl,
+        std::function<void(bool success, std::optional<std::string_view> swarm_hash)> on_complete) {
+    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
+    // could make the loop thread the last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net)
+        throw std::logic_error{"_send_to_swarm: no network object"};
+
+    auto ns_val = static_cast<int16_t>(ns);
+    auto now_ms = epoch_ms(clock_now_ms());
+
+    // The pubkey in the body and the swarm the request goes to must be the same account: a storage
+    // server answers a store for a pubkey outside its own swarm with a 421, and the retry that
+    // provokes cannot recover, because every node of the swarm we picked says the same thing.
+    nlohmann::json params = {
+            {"pubkey", oxenc::to_hex(dest_pubkey.begin(), dest_pubkey.end())},
+            {"namespace", ns_val},
+            {"data", "{:b}"_format(payload)},
+            {"timestamp", now_ms},
+            {"ttl", ttl.count()},
+    };
+
+    // Signed only where the storage server actually requires it.  Signing anyway would not merely
+    // be redundant -- a public inbox store skips signature checking entirely, so the server never
+    // reads it -- it would identify us as the one doing the storing.  For a message deposited in
+    // our own swarm that distinguishes a copy we sent from one we were sent, which is precisely
+    // what a storage server should not be able to tell.
+    //
+    // TODO: this signs with the account key, which is only right when the destination swarm is our
+    // own.  Storing to a group swarm (namespaces 11-14) also requires authentication, but we do not
+    // hold the group's key: a non-admin member signs with the subaccount token the admins issued
+    // them and sends it alongside as `subaccount` + `subaccount_sig`, which the server checks
+    // carries subaccount_access::Write (and, for a public outbox namespace, Delete as well).  Until
+    // that exists, a group store signed here will be rejected with a 401.
+    bool signed_store = store_requires_auth(ns_val);
+    if (signed_store) {
+        auto to_sign = ns_signature_value("store", ns_val, now_ms);
+        b64 sig;
+        {
+            auto seed = globals.account_seed();
+            ed25519::sign(sig, seed.ed25519_secret(), std::as_bytes(std::span{to_sign}));
+        }
+        params["pubkey_ed25519"] = globals.pubkey_ed25519().hex();
+        params["sig_timestamp"] = now_ms;
+        params["signature"] = "{:b}"_format(sig);
+    }
+
+    auto body = to_vector<std::byte>(params.dump());
+
+    log::debug(
+            cat,
+            "Storing {}B to namespace {} of {}{}",
+            payload.size(),
+            ns_val,
+            params["pubkey"].get<std::string_view>(),
+            signed_store ? ", signed" : "");
+
+    // Resolve the recipient's swarm and send.
+    network::x25519_pubkey x25519_pub;
+    std::memcpy(x25519_pub.data(), dest_pubkey.data() + 1, 32);
+
+    net->get_swarm(
+            x25519_pub,
+            false,
+            [net, body = std::move(body), on_complete = std::move(on_complete), x25519_pub](
+                    auto, auto swarm) mutable {
+                if (swarm.empty()) {
+                    log::warning(cat, "Cannot store: no swarm nodes available");
+                    if (on_complete)
+                        on_complete(false, std::nullopt);
+                    return;
+                }
+                // The two values a 421 turns on: which swarm we resolved, and which of its nodes we
+                // picked.  Read this against the "Storing ... of <pubkey>" line above -- a store
+                // rejected as misdirected means those two pubkeys are not the same account.
+                log::debug(
+                        cat,
+                        "Storing to swarm of {} via {} ({} nodes)",
+                        x25519_pub.hex(),
+                        swarm.front().to_string(),
+                        swarm.size());
+
+                net->send_request(
+                        swarm_request(swarm.front(), x25519_pub, "store", std::move(body)),
+                        [on_complete = std::move(on_complete)](
+                                bool success,
+                                bool timeout,
+                                int16_t status,
+                                auto,
+                                std::optional<std::string> resp) {
+                            if (!success)
+                                log::warning(
+                                        cat,
+                                        "Store request failed ({}): {}",
+                                        timeout ? "timed out" : "status {}"_format(status),
+                                        resp.value_or("no response body"));
+                            if (!on_complete)
+                                return;
+
+                            std::optional<std::string> hash;
+                            if (success && resp) {
+                                try {
+                                    auto json = nlohmann::json::parse(*resp);
+                                    if (auto h = json.find("hash");
+                                        h != json.end() && h->is_string())
+                                        hash = h->get<std::string>();
+                                } catch (const std::exception& e) {
+                                    log::warning(
+                                            cat,
+                                            "Could not read stored message hash: {}",
+                                            e.what());
+                                }
+                            }
+                            on_complete(
+                                    success,
+                                    hash ? std::optional<std::string_view>{*hash} : std::nullopt);
+                        });
+            });
+}
+
+void Core::_do_send_dm(
+        int64_t message_id,
+        std::span<const std::byte, 33> recipient,
+        std::span<const std::byte> content,
+        sys_ms sent_timestamp,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+    auto fire_status = [&](MessageSendStatus status) {
+        if (callbacks.message_send_status) {
+            try {
+                callbacks.message_send_status(message_id, status, std::nullopt);
+            } catch (const std::exception& e) {
+                log::error(cat, "message_send_status callback threw: {}", e.what());
+            }
+        }
+    };
+
+    // Look up cached PFS keys for the recipient.
+    using X = sqlite::blob_guts<b32>;
+    using M = sqlite::blob_guts<std::array<std::byte, 1184>>;
+    auto row = db.conn()
+                       .prepared_maybe_get<
+                               std::optional<int64_t>,
+                               std::optional<int64_t>,
+                               std::optional<X>,
+                               std::optional<M>>(
+                               "SELECT fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768"
+                               " FROM pfs_key_cache WHERE session_id = ?",
+                               recipient);
+
+    const b32* pfs_x25519 = nullptr;
+    const std::array<std::byte, 1184>* pfs_mlkem768 = nullptr;
+    if (row) {
+        auto& [fetched_at, nak_at, pk_x, pk_m] = *row;
+        if (fetched_at && pk_x && pk_m) {
+            pfs_x25519 = &static_cast<const b32&>(*pk_x);
+            pfs_mlkem768 = &static_cast<const std::array<std::byte, 1184>&>(*pk_m);
+        }
+    }
+
+    // Encrypt the message.  v2 (PFS or nopfs) produces the complete wire format directly
+    // (0x00 0x02 | ki | E | mlkem_ct | encrypted_inner) — no protobuf wrapping.  v1 uses
+    // encode_dm_v1 which wraps in Envelope + WebSocketMessage protobufs.
+    std::vector<std::byte> payload;
+    try {
+        auto seed = globals.account_seed();
+        auto ed_sec = seed.ed25519_secret();
+
+        std::string_view version;
+        if (pfs_x25519) {
+            payload = encrypt_for_recipient_v2(
+                    ed_sec, recipient, *pfs_x25519, *pfs_mlkem768, content, pro_privkey);
+            version = "v2 PFS";
+        } else if (force_v2) {
+            payload = encrypt_for_recipient_v2_nopfs(ed_sec, recipient, content, pro_privkey);
+            version = "v2 nopfs";
+        } else {
+            payload = encode_dm_v1(content, ed_sec, sent_timestamp, recipient, pro_privkey);
+            version = "v1";
+        }
+
+        log::debug(
+                cat,
+                "send_dm: message {} encrypted for {} as {} ({}B)",
+                message_id,
+                oxenc::to_hex(recipient),
+                version,
+                payload.size());
+    } catch (const std::exception& e) {
+        log::warning(cat, "send_dm: encryption failed for message {}: {}", message_id, e.what());
+        fire_status(MessageSendStatus::encrypt_failed);
+        return;
+    }
+
+    // Dispatch to swarm.
+    fire_status(MessageSendStatus::sending);
+    try {
+        _send_to_swarm(
+                recipient,
+                config::Namespace::Default,
+                std::move(payload),
+                ttl,
+                [this, message_id](bool success, std::optional<std::string_view> swarm_hash) {
+                    if (callbacks.message_send_status) {
+                        try {
+                            callbacks.message_send_status(
+                                    message_id,
+                                    success ? MessageSendStatus::success
+                                            : MessageSendStatus::network_error,
+                                    swarm_hash);
+                        } catch (const std::exception& e) {
+                            log::error(cat, "message_send_status callback threw: {}", e.what());
+                        }
+                    }
+                });
+    } catch (const std::logic_error&) {
+        fire_status(MessageSendStatus::no_network);
+    }
+}
+
+void Core::_pfs_fetch_done(std::span<const std::byte, 33> session_id, PfsKeyFetch result) {
+    if (callbacks.pfs_keys_fetched) {
+        try {
+            callbacks.pfs_keys_fetched(session_id, result);
+        } catch (const std::exception& e) {
+            // Contained so that a misbehaving callback cannot strand the queued sends below.
+            log::error(cat, "pfs_keys_fetched callback threw: {}", e.what());
+        }
+    }
+    _flush_pending_sends(session_id);
+}
+
+void Core::_flush_pending_sends(std::span<const std::byte, 33> session_id) {
+    auto it = _pending_sends.begin();
+    while (it != _pending_sends.end()) {
+        if (std::ranges::equal(it->recipient, session_id)) {
+            auto pending = std::move(*it);
+            it = _pending_sends.erase(it);
+            _do_send_dm(
+                    pending.id,
+                    pending.recipient,
+                    pending.content,
+                    pending.sent_timestamp,
+                    pending.pro_privkey ? ed25519::OptionalPrivKeySpan{*pending.pro_privkey}
+                                        : ed25519::OptionalPrivKeySpan{},
+                    pending.ttl,
+                    pending.force_v2);
+        } else {
+            ++it;
+        }
+    }
+}
+
+int64_t Core::send_dm(
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte> content,
+        sys_ms sent_timestamp,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+    auto id = _next_message_id++;
+
+    log::debug(
+            cat,
+            "send_dm: message {} to {} ({}B content)",
+            id,
+            oxenc::to_hex(recipient_session_id),
+            content.size());
+
+    // Check cache state to decide whether we can send immediately or must queue.
+    auto conn = db.conn();
+    auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
+            "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?",
+            recipient_session_id);
+
+    bool have_cached_key = false;
+    bool is_nak = false;
+
+    if (row) {
+        auto& [fetched_at, nak_at] = *row;
+        if (fetched_at)
+            have_cached_key = true;
+        else if (nak_at)
+            is_nak = true;
+    }
+
+    if (have_cached_key || is_nak) {
+        // Can send immediately: either we have keys (use v2 PFS) or it's a NAK (use v1 or v2
+        // nopfs).
+        _do_send_dm(id, recipient_session_id, content, sent_timestamp, pro_privkey, ttl, force_v2);
+    } else if (_network) {
+        // No cache entry at all: need to fetch keys first.  Queue the send and initiate a
+        // prefetch; _pfs_fetch_done() releases it when the fetch settles, whatever the outcome.
+        PendingSend pending;
+        pending.id = id;
+        std::ranges::copy(recipient_session_id, pending.recipient.begin());
+        pending.content.assign(content.begin(), content.end());
+        pending.sent_timestamp = sent_timestamp;
+        if (pro_privkey) {
+            auto& stored = pending.pro_privkey.emplace();
+            std::memcpy(stored.data(), pro_privkey->data(), 64);
+        }
+        pending.ttl = ttl;
+        pending.force_v2 = force_v2;
+        _pending_sends.push_back(std::move(pending));
+
+        if (callbacks.message_send_status)
+            callbacks.message_send_status(id, MessageSendStatus::awaiting_keys, std::nullopt);
+
+        prefetch_pfs_keys(recipient_session_id);
+    } else {
+        // No cache and no network: fire immediate failure.
+        if (callbacks.message_send_status)
+            callbacks.message_send_status(id, MessageSendStatus::no_network, std::nullopt);
+    }
+
+    return id;
+}
+
+int64_t Core::send_dm(
+        std::span<const std::byte, 33> recipient_session_id,
+        const SessionProtos::Content& content,
+        sys_ms sent_timestamp,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+
+    auto ts = static_cast<uint64_t>(sent_timestamp.time_since_epoch().count());
+
+    std::string serialized;
+    if (!content.has_sigtimestamp()) {
+        auto stamped = content;
+        stamped.set_sigtimestamp(ts);
+        serialized = stamped.SerializeAsString();
+    } else {
+        if (content.sigtimestamp() != ts)
+            throw std::invalid_argument{fmt::format(
+                    "send_dm: Content sigTimestamp ({}) disagrees with sent_timestamp ({})",
+                    content.sigtimestamp(),
+                    ts)};
+        serialized = content.SerializeAsString();
+    }
+
+    return send_dm(
+            recipient_session_id,
+            to_span<std::byte>(serialized),
+            sent_timestamp,
+            pro_privkey,
+            ttl,
+            force_v2);
+}
+
+void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
+    if (!callbacks.message_received && !callbacks.message_decrypt_failed)
+        return;
+
+    auto seed = globals.account_seed();
+    auto session_id = globals.session_id();
+    // Long-term X25519 pub/sec used for v2 key-indicator prefix decryption.
+    std::span<const std::byte, 32> x25519_pub{session_id.data() + 1, 32};
+    auto x25519_sec = seed.x25519_key();
+
+    // Ed25519 secret key used for v1 envelope decryption.
+    auto ed_sec = seed.ed25519_secret();
+
+    auto fire_received = [&](ReceivedMessage out) {
+        if (!callbacks.message_received)
+            return;
+        try {
+            callbacks.message_received(std::move(out));
+        } catch (const std::exception& e) {
+            log::error(cat, "message_received callback threw: {}", e.what());
+        }
+    };
+
+    auto fire_fail = [&](const SwarmMessage& msg, MessageDecryptFailure reason) {
+        if (!callbacks.message_decrypt_failed)
+            return;
+        try {
+            callbacks.message_decrypt_failed(msg, reason);
+        } catch (const std::exception& e) {
+            log::error(cat, "message_decrypt_failed callback threw: {}", e.what());
+        }
+    };
+
+    for (const auto& msg : messages) {
+        auto data = msg.data;
+        if (data.empty()) {
+            fire_fail(msg, MessageDecryptFailure::bad_format);
+            continue;
+        }
+
+        if (data[0] == std::byte{0x00}) {
+            // Version 2 (PFS+PQ) or an unrecognised future version.
+            if (data.size() < 2 || data[1] != std::byte{0x02}) {
+                fire_fail(msg, MessageDecryptFailure::unknown_version);
+                continue;
+            }
+
+            // Extract the 2-byte ML-KEM key indicator, then look up matching account keys.
+            std::array<std::byte, 2> ki;
+            try {
+                ki = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, data);
+            } catch (const std::exception&) {
+                // Ciphertext is too short or otherwise structurally malformed.
+                fire_fail(msg, MessageDecryptFailure::bad_format);
+                continue;
+            }
+
+            auto keys = devices.active_account_keys(ki);
+
+            bool decrypted = false;
+            for (auto& key : keys) {
+                try {
+                    auto result = decrypt_incoming_v2(
+                            session_id, key.x25519_sec, key.x25519_pub, key.mlkem768_sec, data);
+                    ReceivedMessage out;
+                    out.hash = msg.hash;
+                    out.timestamp = msg.timestamp;
+                    out.expiry = msg.expiry;
+                    out.sender_session_id = result.sender_session_id;
+                    out.version = 2;
+                    out.content = std::move(result.content);
+                    out.pro_signature = result.pro_signature;
+                    out.pfs_encrypted = true;
+                    fire_received(std::move(out));
+                    decrypted = true;
+                    break;
+                } catch (const DecryptV2Error&) {
+                    // This key didn't work; try the next candidate.
+                } catch (const std::exception& e) {
+                    // Unrecoverable structural error in the message itself.
+                    log::warning(cat, "v2 direct message format error: {}", e.what());
+                    fire_fail(msg, MessageDecryptFailure::bad_format);
+                    decrypted = true;  // Prevent the non-PFS fallback attempt.
+                    break;
+                }
+            }
+            if (!decrypted) {
+                // No PFS key matched; try the non-PFS fallback (sender had no PFS keys).
+                try {
+                    auto result =
+                            decrypt_incoming_v2_nopfs(session_id, x25519_sec, x25519_pub, data);
+                    ReceivedMessage out;
+                    out.hash = msg.hash;
+                    out.timestamp = msg.timestamp;
+                    out.expiry = msg.expiry;
+                    out.sender_session_id = result.sender_session_id;
+                    out.version = 2;
+                    out.content = std::move(result.content);
+                    out.pro_signature = result.pro_signature;
+                    // pfs_encrypted remains false (default)
+                    fire_received(std::move(out));
+                } catch (const DecryptV2Error&) {
+                    // Non-PFS fallback also failed: message cannot be read.
+                    fire_fail(msg, MessageDecryptFailure::no_pfs_key);
+                } catch (const std::exception& e) {
+                    log::warning(cat, "v2 direct message format error: {}", e.what());
+                    fire_fail(msg, MessageDecryptFailure::bad_format);
+                }
+            }
+
+        } else {
+            // Version 1: protobuf WebSocketMessage → Envelope wire format.
+            try {
+                auto decoded = decode_dm_envelope(ed_sec, data, pro_backend::PUBKEY);
+
+                ReceivedMessage out;
+                out.hash = msg.hash;
+                out.timestamp = msg.timestamp;
+                out.expiry = msg.expiry;
+                out.version = 1;
+                // Reconstruct the 33-byte (0x05-prefixed) session ID from the x25519 pubkey.
+                out.sender_session_id[0] = std::byte{0x05};
+                std::ranges::copy(decoded.sender_x25519_pubkey, out.sender_session_id.begin() + 1);
+                out.content = std::move(decoded.content_plaintext);
+                if (decoded.envelope.flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG)
+                    out.pro_signature = decoded.envelope.pro_sig;
+                fire_received(std::move(out));
+            } catch (const std::exception& e) {
+                log::warning(cat, "v1 direct message decryption error: {}", e.what());
+                fire_fail(msg, MessageDecryptFailure::decrypt_failed);
+            }
+        }
+    }
+}
+
+void Core::receive_messages(
+        std::span<const SwarmMessage> messages, config::Namespace ns, bool is_final) {
+    using config::Namespace;
+    switch (ns) {
+        case Namespace::Default: _handle_direct_messages(messages); break;
+        case Namespace::Devices: devices.parse_device_messages(messages, is_final); break;
+        case Namespace::AccountPubkeys: devices.parse_account_pubkeys(messages, is_final); break;
+        case Namespace::UserProfile:
+        case Namespace::Contacts:
+        case Namespace::ConvoInfoVolatile:
+        case Namespace::UserGroups: configs.merge(ns, messages); break;
+        default:
+            log::warning(
+                    cat,
+                    "receive_messages: ignoring unhandled namespace {}",
+                    static_cast<int16_t>(ns));
+    }
+}
+
+void Core::apply_migrations() {
+    auto cat = log::Cat("schema");
+
+    auto conn = db.conn();
+    exec_query(conn.sql, R"(
+CREATE TABLE IF NOT EXISTS migrations_applied (
+    name TEXT PRIMARY KEY NOT NULL
+) STRICT
+)");
+
+    std::unordered_set<std::string> applied;
+    {
+        SQLite::Statement st{conn.sql, "SELECT name FROM migrations_applied"};
+        while (st.executeStep())
+            applied.insert(get<std::string>(st));
+    }
+
+    log::debug(cat, "Checking schema migrations");
+
+    // Core's own migrations record their bare name; an extension's are recorded as "owner:name" so
+    // that two sets cannot collide.  A collision would not error, it would silently mark the second
+    // migration as already applied.  Core's names deliberately stay unprefixed: prefixing them now
+    // would re-run every migration on every existing database.
+    auto apply_set = [&](std::string_view owner,
+                         std::span<const schema::Migration> migrations,
+                         std::string_view full_schema) {
+        auto key_for = [&owner](std::string_view name) {
+            return owner.empty() ? std::string{name} : "{}:{}"_format(owner, name);
+        };
+
+        // full_schema.sql creates the schema outright; the migrations beside it are deltas that
+        // upgrade a database built from an *older* full_schema.  Nothing builds the schema from
+        // nothing, and that is the point: a CREATE lives in one place rather than being duplicated
+        // into an initial migration that then never changes.
+        //
+        // So a database with no record of this owner is built from the full schema, with the
+        // migrations recorded as applied without running.  Keyed on the owner rather than on the
+        // database being new, so an extension added to an existing database takes this path too.
+        //
+        // The marker is a row of its own rather than being inferred from the migration list,
+        // because that list is legitimately empty until the first delta is written -- "none of this
+        // owner's migrations are applied" would then be vacuously true on every open, re-running
+        // the full schema against tables that already exist.  Migration names all begin with a
+        // digit, so this cannot collide with one.
+        auto created_key = owner.empty() ? std::string{"@created"} : "{}:@created"_format(owner);
+
+        if (!full_schema.empty() && !applied.count(created_key) &&
+            std::ranges::none_of(migrations, [&](const auto& m) {
+                return applied.count(key_for(m.name)) > 0;
+            })) {
+            try {
+                log::info(
+                        cat, "Creating {} schema from full_schema", owner.empty() ? "core" : owner);
+
+                SQLite::Transaction tx{conn.sql};
+
+                conn.sql.exec(std::string{full_schema});
+                conn.prepared_exec("INSERT INTO migrations_applied (name) VALUES (?)", created_key);
+                for (const auto& m : migrations)
+                    conn.prepared_exec(
+                            "INSERT INTO migrations_applied (name) VALUES (?)", key_for(m.name));
+
+                tx.commit();
+            } catch (const std::exception& e) {
+                log::critical(
+                        cat,
+                        "Creating {} schema from full_schema failed: {}",
+                        owner.empty() ? "core" : owner,
+                        e.what());
+                throw;
+            }
+            return;
+        }
+
+        for (const auto& [name, apply] : migrations) {
+            auto key = key_for(name);
+            if (applied.count(key)) {
+                log::debug(cat, "Schema migration {} already applied", key);
+                continue;
+            }
+
+            try {
+                log::info(cat, "Applying database schema migration {}", key);
+
+                SQLite::Transaction tx{conn.sql};
+
+                apply(conn, *this);
+                conn.prepared_exec("INSERT INTO migrations_applied (name) VALUES (?)", key);
+
+                tx.commit();
+            } catch (const std::exception& e) {
+                log::critical(cat, "Database schema migration '{}' failed: {}", key, e.what());
+                throw;
+            }
+        }
+    };
+
+    apply_set("", schema::MIGRATIONS, schema::FULL_SCHEMA);
+
+    std::unordered_set<std::string_view> owners;
+    for (const auto& ext : _schema_extensions) {
+        if (ext.owner.empty() || ext.owner.find(':') != std::string_view::npos)
+            throw std::invalid_argument{
+                    "schema_extension owner must be non-empty and must not contain ':' (got '{}')"_format(
+                            ext.owner)};
+        if (!owners.insert(ext.owner).second)
+            throw std::invalid_argument{
+                    "duplicate schema_extension owner '{}': migration names would collide"_format(
+                            ext.owner)};
+        apply_set(ext.owner, ext.migrations, ext.full_schema);
+    }
+    _schema_extensions.clear();
+
+    log::debug(cat, "All schema migrations are applied");
+}
+
+}  // namespace session::core

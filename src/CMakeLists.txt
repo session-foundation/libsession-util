@@ -18,6 +18,15 @@ if(WARNINGS_AS_ERRORS)
     endif()
 endif()
 
+if(FATAL_MISSING_DECLARATIONS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(common INTERFACE -Werror=missing-declarations)
+        message(STATUS "Compiling with -Werror=missing-declarations")
+    else()
+        message(WARNING "FATAL_MISSING_DECLARATIONS is not supported by this compiler (${CMAKE_CXX_COMPILER_ID}); ignoring")
+    endif()
+endif()
+
 # -Wunused-parameter isn't in the default warning set (we don't pass -Wextra), so enable it
 # explicitly. WARNINGS_AS_ERRORS's -Werror (above) then promotes it to an error.
 if(WARN_UNUSED_PARAMETERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -51,8 +60,10 @@ add_libsession_util_library(util
 add_libsession_util_library(crypto
     attachments.cpp
     blinding.cpp
+    crypto/ed25519.cpp
+    crypto/mlkem768.cpp
+    crypto/x25519.cpp
     curve25519.cpp
-    ed25519.cpp
     hash.cpp
     multi_encrypt.cpp
     random.cpp
@@ -60,6 +71,7 @@ add_libsession_util_library(crypto
     session_protocol.cpp
     sodium_array.cpp
     xed25519.cpp
+    xed25519-tweetnacl.cpp
     pro_backend.cpp
     types.cpp
 )
@@ -82,7 +94,6 @@ add_libsession_util_library(config
     config/pro.cpp
     config/user_groups.cpp
     config/user_profile.cpp
-    fields.cpp
 )
 
 
@@ -91,17 +102,74 @@ target_link_libraries(util
     PUBLIC
     common
     oxen::logging
-    libzstd::static
-    simdutf
+    PRIVATE
+    sessiondep::libzstd
+    sessiondep::simdutf
 )
 
 target_link_libraries(crypto
     PUBLIC
     util
+    session::secure_buffer
     PRIVATE
-    libsodium::sodium-internal
+    sessiondep::libsodium
+    # AES-CBC for legacy attachment decryption, which libsodium has no equivalent of: it exposes
+    # AES only as GCM, and only where the hardware supports it.
+    sessiondep::nettle
+    sessiondep::simdutf
+    sessiondep::libutf8proc
+    mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     libsession::protos
+)
+
+# libsession "Core" for maintaining persistent Session client state
+add_libsession_util_library(core
+    core.cpp
+    core/component.cpp
+    core/configs.cpp
+    core/devices.cpp
+    core/globals.cpp
+    core/link_sas.cpp
+    core/pro.cpp
+)
+add_subdirectory(core/schema)
+add_subdirectory(mnemonics)
+
+# Conversation-level data model built on top of core.  The dependency is one-directional by
+# design: core neither knows nor links this.
+add_libsession_util_library(client
+    client/client.cpp
+    client/conversation.cpp
+    client/download_cache.cpp
+    client/conversation_id.cpp
+)
+add_subdirectory(client/schema)
+
+target_link_libraries(
+    client
+    PUBLIC
+    core
+    PRIVATE
+    libsession::protos
+)
+
+target_link_libraries(
+    core
+    PUBLIC
+    crypto
+    # core.hpp holds a sqlite::Database by value and takes DatabaseOptions in its constructor, so
+    # consumers need the SQLiteCpp headers.
+    session::SQLite
+    # Core owns the account's config objects and hands them out by reference, so a consumer that
+    # reads one calls into config itself.
+    config
+    PRIVATE
+    libsession::protos
+    sessiondep::libsodium
+    nlohmann_json::nlohmann_json
+    mlkem_native::mlkem768
+    oxen::quic
 )
 
 target_link_libraries(config
@@ -109,62 +177,77 @@ target_link_libraries(config
     crypto
     libsession::protos
     PRIVATE
-    libsodium::sodium-internal
+    sessiondep::libsodium
 )
 
-if(ENABLE_NETWORKING)
-    # libevent
-    if(NOT TARGET libevent::core)
-        add_library(libevent_core INTERFACE)
-        pkg_check_modules(LIBEVENT_core libevent_core>=2.1 IMPORTED_TARGET REQUIRED)
-        target_link_libraries(libevent_core INTERFACE PkgConfig::LIBEVENT_core)
-        add_library(libevent::core ALIAS libevent_core)
+session_dep(libevent_core 2.1)
+
+add_libsession_util_library(network
+    onionreq/builder.cpp
+    onionreq/hop_encryption.cpp
+    onionreq/parser.cpp
+    onionreq/response_parser.cpp
+    network/ip_country/lookup.cpp
+    network/key_types.cpp
+    network/network_config.cpp
+    network/request_queue.cpp
+    network/service_node.cpp
+    network/session_network_internal.cpp
+    network/session_network_types.cpp
+    network/session_network.cpp
+    network/snode_pool.cpp
+    network/swarm.cpp
+    network/backends/quic_file_client.cpp
+    network/backends/session_file_server.cpp
+    network/backends/session_open_group_server.cpp
+    network/transport/quic_transport.cpp
+    network/routing/direct_router.cpp
+    network/routing/onion_request_router.cpp
+)
+
+target_link_libraries(network
+    PUBLIC
+    crypto
+    oxen::quic
+    PRIVATE
+    nlohmann_json::nlohmann_json
+    sessiondep::libsodium
+    sessiondep::nettle
+    date::date
+    sessiondep::libevent_core
+)
+
+# The two databases define the same accessors, so the lookup code is identical either way and only
+# the table it searches differs; see src/network/ip_country/data.hpp.
+if(WITH_IP_GEOLOCATION)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/network/ip_country/data.cpp")
+        # Generating it needs a ~4.5MB download, so it is neither committed nor fetched during a
+        # build: ask for it explicitly, once, and it stays until the next refresh.
+        message(FATAL_ERROR
+            "WITH_IP_GEOLOCATION is enabled but the database has not been generated yet.  Run\n"
+            "    ${PROJECT_SOURCE_DIR}/utils/update-ip-country-db.py\n"
+            "to download a DB-IP Lite release and generate it, then re-run cmake.")
     endif()
-
-    add_libsession_util_library(network
-        onionreq/builder.cpp
-        onionreq/hop_encryption.cpp
-        onionreq/parser.cpp
-        onionreq/response_parser.cpp
-        network/key_types.cpp
-        network/network_config.cpp
-        network/request_queue.cpp
-        network/service_node.cpp
-        network/session_network_internal.cpp
-        network/session_network_types.cpp
-        network/session_network.cpp
-        network/snode_pool.cpp
-        network/swarm.cpp
-        network/backends/session_file_server.cpp
-        network/backends/session_open_group_server.cpp
-        network/transport/quic_transport.cpp
-        network/routing/direct_router.cpp
-        network/routing/onion_request_router.cpp
-    )
-
-    target_link_libraries(network
-        PUBLIC
-        crypto
-        quic
-        PRIVATE
-        nlohmann_json::nlohmann_json
-        libsodium::sodium-internal
-        nettle::nettle
-        date::date
-        libevent::core
-    )
-
-    if(ENABLE_NETWORKING_SROUTER)
-        target_sources(network
-            PRIVATE
-            network/routing/session_router_router.cpp)
-        target_link_libraries(network PUBLIC session-router::libsessionrouter)
-    endif()
-
-    if (BUILD_STATIC_DEPS)
-        target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
-    endif()
+    target_sources(network PRIVATE network/ip_country/data.cpp)
+else()
+    target_sources(network PRIVATE network/ip_country/no_data.cpp)
 endif()
+
+if(ENABLE_NETWORKING_SROUTER)
+    target_sources(network
+        PRIVATE
+        network/routing/session_router_router.cpp)
+    target_link_libraries(network PUBLIC session-router::core)
+    target_compile_definitions(network PUBLIC ENABLE_NETWORKING_SROUTER)
+endif()
+
+if (BUILD_STATIC_DEPS)
+    target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
+endif()
+
+# core's public headers expose network::Network and it constructs network::Request, so it
+# depends on the network target (defined after core above).
+target_link_libraries(core PUBLIC network)
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.
@@ -216,11 +299,6 @@ target_link_libraries(common INTERFACE version)
 foreach(tgt ${export_targets})
     add_library("libsession::${tgt}" ALIAS "${tgt}")
 endforeach()
-export(
-    TARGETS ${export_targets} common version
-    NAMESPACE libsession::
-    APPEND FILE libsessionTargets.cmake
-)
 
 list(APPEND libsession_export_targets ${export_targets})
 set(libsession_export_targets "${libsession_export_targets}" PARENT_SCOPE)

@@ -20,7 +20,7 @@ using namespace std::literals;
 
 namespace detail {
     template <size_t Length>
-    inline constexpr std::array<unsigned char, Length> null_bytes = {0};
+    inline constexpr std::array<std::byte, Length> null_bytes = {};
 
     void load_from_hex(void* buffer, size_t length, std::string_view hex);
     void load_from_bytes(void* buffer, size_t length, std::string_view bytes);
@@ -28,7 +28,7 @@ namespace detail {
 }  // namespace detail
 
 template <typename Derived, size_t KeyLength>
-struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
+struct alignas(size_t) key_base : std::array<std::byte, KeyLength> {
     std::string_view view() const {
         return {reinterpret_cast<const char*>(this->data()), KeyLength};
     }
@@ -55,10 +55,7 @@ struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
         detail::load_from_bytes(d.data(), d.size(), bytes);
         return d;
     }
-    static Derived from_bytes(std::vector<unsigned char> bytes) {
-        return from_bytes(to_string(bytes));
-    }
-    static Derived from_bytes(std::span<const unsigned char> bytes) {
+    static Derived from_bytes(std::span<const std::byte> bytes) {
         return from_bytes(to_string(bytes));
     }
 };
@@ -98,7 +95,7 @@ using x25519_keypair = std::pair<x25519_pubkey, x25519_seckey>;
 legacy_pubkey parse_legacy_pubkey(std::string_view pubkey_in);
 ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in);
-x25519_pubkey compute_x25519_pubkey(std::span<const unsigned char> ed25519_pk);
+x25519_pubkey compute_x25519_pubkey(std::span<const std::byte, 32> ed25519_pk);
 
 }  // namespace session::network
 

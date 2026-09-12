@@ -29,7 +29,7 @@ LIBSESSION_EXPORT bool session_xed25519_verify(
 /// in a given curve25519 pubkey: this always returns the positive value.  You can get the other
 /// possibility (the negative) by flipping the sign bit, i.e. `returned_pubkey[31] |= 0x80`.
 /// Returns 0 on success, non-0 on failure.
-LIBSESSION_EXPORT bool session_xed25519_pubkey(
+LIBSESSION_EXPORT void session_xed25519_pubkey(
         unsigned char* ed25519_pubkey /* 32-byte output buffer */,
         const unsigned char* curve25519_pubkey /* 32 bytes */);
 

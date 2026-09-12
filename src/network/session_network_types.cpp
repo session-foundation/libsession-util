@@ -14,7 +14,7 @@ Request::Request(
         std::string request_id,
         network_destination destination,
         std::string endpoint,
-        std::optional<std::vector<unsigned char>> body,
+        std::optional<std::vector<std::byte>> body,
         RequestCategory category,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> overall_timeout,
@@ -33,7 +33,7 @@ Request::Request(
 Request::Request(
         network_destination destination,
         std::string endpoint,
-        std::optional<std::vector<unsigned char>> body,
+        std::optional<std::vector<std::byte>> body,
         RequestCategory category,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> overall_timeout,

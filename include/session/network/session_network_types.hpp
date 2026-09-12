@@ -1,13 +1,17 @@
 #pragma once
 
+#include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "session/attachments.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
 #include "session/network/session_network_types.h"
+#include "session/sodium_array.hpp"
 
 namespace session::network {
 
@@ -30,6 +34,7 @@ constexpr int16_t ERROR_FAILED_GENERATE_ONION_PAYLOAD = -10010;
 constexpr int16_t ERROR_FAILED_TO_GET_STREAM = -10011;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10100;
 constexpr int16_t ERROR_REQUEST_CANCELLED = -10200;
+constexpr int16_t ERROR_FILE_SERVER_UNAVAILABLE = -10300;
 constexpr int16_t ERROR_UNKNOWN = -11000;
 
 const std::pair<std::string, std::string> content_type_plain_text = {
@@ -146,7 +151,7 @@ struct Request {
     std::string request_id;
     network_destination destination;
     std::string endpoint;
-    std::optional<std::vector<unsigned char>> body;
+    std::optional<std::vector<std::byte>> body;
     RequestCategory category;
 
     /// Timeout for an in-flight request after it has been sent via the transport mechanism.
@@ -180,12 +185,28 @@ struct Request {
     /// `overall_timeout` has been exceeded.
     std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
 
-    int retry_count = 0;
+    /// How many times this request has been redirected after a 421, bounded by
+    /// `config.redirect_retry_count`.  Counts redirects only -- a 421 means our swarm information
+    /// was wrong, so recovery is to re-resolve the swarm from scratch.  It has nothing to do with
+    /// `failed_nodes` below, which is the opposite situation.
+    int retry_421_count = 0;
+
+    /// Swarm members that could not be reached for this request, in the order they were tried.
+    ///
+    /// A node that cannot be reached says nothing about the swarm -- unlike a 421, which says the
+    /// swarm itself is wrong -- so recovery is to keep the swarm and move to the next-best member,
+    /// excluding these.  Running out of members is what ends it, so this is a set rather than a
+    /// count: "once per node" cannot be expressed as a number, since choosing the next one has to
+    /// know which have already been spent.
+    ///
+    /// Empty for anything not addressed to a swarm; a request with no `swarm_pubkey` has no other
+    /// member to move to.
+    std::vector<service_node> failed_nodes;
 
     Request(std::string request_id,
             network_destination destination,
             std::string endpoint,
-            std::optional<std::vector<unsigned char>> body,
+            std::optional<std::vector<std::byte>> body,
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
@@ -194,7 +215,7 @@ struct Request {
 
     Request(network_destination destination,
             std::string endpoint,
-            std::optional<std::vector<unsigned char>> body,
+            std::optional<std::vector<std::byte>> body,
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
@@ -223,9 +244,10 @@ struct file_metadata {
 };
 
 struct FileTransferRequest {
-    std::chrono::milliseconds stall_timeout;
+    std::chrono::milliseconds stall_timeout = 25s;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
+    std::chrono::milliseconds progress_interval = 1s;
     std::optional<int8_t> desired_path_index;
 
     // This shared ptr is designed to be held by the caller (without the rest of the request object)
@@ -240,22 +262,44 @@ struct FileTransferRequest {
 
     // Called when transfer completes (file_metadata) or fails (int16_t error code)
     std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
+
+    // Called periodically during a transfer with progress information, at most once per
+    // progress_interval, and only when progress has been made since the last call.
+    // For uploads, progress_bytes is total bytes acked by the remote; for downloads, it is
+    // total bytes received.
+    std::function<void(int64_t progress_bytes, int64_t total_bytes)> on_progress;
 };
 
 struct UploadRequest : FileTransferRequest {
-    std::function<std::vector<unsigned char>()> next_data;
+    std::function<std::vector<std::byte>()> next_data;
     std::optional<std::string> file_name;
     std::optional<std::chrono::seconds> ttl;
+};
+
+struct FileUploadRequest : FileTransferRequest {
+    std::filesystem::path file;
+    attachment::Domain domain = attachment::Domain::ATTACHMENT;
+    bool allow_large = false;
+    std::optional<std::chrono::seconds> ttl;
+
+    // Hides FileTransferRequest::on_complete: this version includes the decryption key
+    // alongside the file metadata on success.
+    std::function<void(
+            std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result, bool timeout)>
+            on_complete;
 };
 
 struct DownloadRequest : FileTransferRequest {
     std::string download_url;
 
-    // Called as data arrives (can be called multiple times)
-    std::function<void(const file_metadata& info, std::vector<unsigned char> data)> on_data;
-
-    // Minimum interval between on_data calls (to control callback overhead vs memory usage)
-    std::chrono::milliseconds partial_min_interval = 250ms;
+    // Called as data arrives, once per chunk received, with a non-owning view of that chunk and the
+    // file's metadata.  `info.size` is the total, and is known before the first chunk arrives, so a
+    // caller wanting transfer progress accumulates the chunk sizes itself rather than being told.
+    //
+    // Any coalescing of these belongs above this layer: throttling here would mean holding payload
+    // to save an in-process call, whereas a consumer relaying progress across a process boundary
+    // can drop redundant notifications for free.
+    std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data;
 };
 
 using node_failure_reporter_t = std::function<void(const ed25519_pubkey&, bool)>;

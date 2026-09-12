@@ -25,20 +25,20 @@ class HopEncryption {
     // Encrypts `plaintext` message using encryption `type`. `pubkey` is the recipients public key.
     // `reply` should be false for a client-to-snode message, and true on a returning
     // snode-to-client message.
-    std::vector<unsigned char> encrypt(
+    std::vector<std::byte> encrypt(
             EncryptType type,
-            std::vector<unsigned char> plaintext,
+            std::vector<std::byte> plaintext,
             const network::x25519_pubkey& pubkey) const;
-    std::vector<unsigned char> decrypt(
+    std::vector<std::byte> decrypt(
             EncryptType type,
-            std::vector<unsigned char> ciphertext,
+            std::vector<std::byte> ciphertext,
             const network::x25519_pubkey& pubkey) const;
 
     // AES-GCM encryption.
-    std::vector<unsigned char> encrypt_aesgcm(
-            std::vector<unsigned char> plainText, const network::x25519_pubkey& pubKey) const;
-    std::vector<unsigned char> decrypt_aesgcm(
-            std::vector<unsigned char> cipherText, const network::x25519_pubkey& pubKey) const;
+    std::vector<std::byte> encrypt_aesgcm(
+            std::vector<std::byte> plainText, const network::x25519_pubkey& pubKey) const;
+    std::vector<std::byte> decrypt_aesgcm(
+            std::span<const std::byte> cipherText, const network::x25519_pubkey& pubKey) const;
 
     // xchacha20-poly1305 encryption; for a message sent from client Alice to server Bob we use a
     // shared key of a Blake2B 32-byte (i.e. crypto_aead_xchacha20poly1305_ietf_KEYBYTES) hash of
@@ -48,10 +48,10 @@ class HopEncryption {
     // When Bob (the server) encrypts a method for Alice (the client), he uses shared key
     // H(bA || A || B) (note that this is *different* that what would result if Bob was a client
     // sending to Alice the client).
-    std::vector<unsigned char> encrypt_xchacha20(
-            std::vector<unsigned char> plaintext, const network::x25519_pubkey& pubKey) const;
-    std::vector<unsigned char> decrypt_xchacha20(
-            std::vector<unsigned char> ciphertext, const network::x25519_pubkey& pubKey) const;
+    std::vector<std::byte> encrypt_xchacha20(
+            std::vector<std::byte> plaintext, const network::x25519_pubkey& pubKey) const;
+    std::vector<std::byte> decrypt_xchacha20(
+            std::span<const std::byte> ciphertext, const network::x25519_pubkey& pubKey) const;
 
   private:
     const network::x25519_seckey private_key_;

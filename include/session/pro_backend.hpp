@@ -5,6 +5,8 @@
 
 #include <chrono>
 #include <optional>
+#include <session/clock.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/parse_error.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
@@ -61,12 +63,10 @@
 
 namespace session::pro_backend {
 
-using namespace oxenc::literals;
-
 /// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
 /// checking its signature against this key (see ProProof::verify_signature). This is the current
 /// backend signing key (test deployment, expected to carry through to production).
-constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_u;
+constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_b;
 static_assert(PUBKEY.size() == 32);
 
 /// The X25519 form of `PUBKEY` (the same key converted via crypto_sign_ed25519_pk_to_curve25519),
@@ -74,7 +74,7 @@ static_assert(PUBKEY.size() == 32);
 /// channel to the backend) without doing the conversion themselves. A unit test asserts these bytes
 /// match the runtime conversion of `PUBKEY`, so the two cannot drift.
 constexpr auto PUBKEY_X25519 =
-        "ce5a75f64b6c43db6c1374d362c3ea9d85951c4f42a3d04cf94f87822d4f803b"_hex_u;
+        "ce5a75f64b6c43db6c1374d362c3ea9d85951c4f42a3d04cf94f87822d4f803b"_hex_b;
 static_assert(PUBKEY_X25519.size() == 32);
 
 /// The Session Pro Backend's production base URL: POST a request body to `<URL>/<endpoint>` (see
@@ -92,6 +92,10 @@ constexpr std::string_view PAYMENT_PROVIDER_APP_STORE = "app_store";
 // STF = the Session Technology Foundation's out-of-band grant (not a purchasable store).
 constexpr std::string_view PAYMENT_PROVIDER_STF = "stf";
 
+/// Domain used with ed25519::derive_subkey to derive the Session Pro signing keypair from the
+/// account's root Ed25519 seed.
+constexpr auto pro_subkey_domain = "SessionProRandom"_bytes;
+
 /// Response outcome category (the wire `status`, spec §5). CLOSED/exhaustive by design: the backend
 /// will never add a fourth value, so libsession treats any unrecognized wire status as a protocol
 /// error (fail-closed) rather than passing it through. New categories/detail arrive via
@@ -104,7 +108,7 @@ enum class ResponseStatus {
 };
 
 struct ResponseBase {
-    /// Outcome category; `success()` is the usual check. See ResponseStatus.
+    /// Outcome category; the `explicit operator bool()` is the usual check. See ResponseStatus.
     ResponseStatus status = ResponseStatus::Ok;
 
     /// On non-Ok, a stable machine-readable slug identifying the outcome (spec §5.1), e.g.
@@ -122,11 +126,6 @@ struct ResponseBase {
     /// Contextually convertible to bool: `if (response) { ... }` is true iff the request succeeded
     /// (status == Ok). Explicit, so it can't silently leak into arithmetic or comparisons.
     explicit operator bool() const { return status == ResponseStatus::Ok; }
-};
-
-struct MasterRotatingSignatures {
-    array_uc64 master_sig;
-    array_uc64 rotating_sig;
 };
 
 /// Per-provider support/management URLs (from provider_urls()). These are identical for every user
@@ -234,9 +233,9 @@ GenerateProProofResponse parse_pro_proof(std::string_view json);
 /// - `master_privkey` / `rotating_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium private key
 /// - `unix_ts` -- Unix timestamp for the request
 ProRequest pro_proof_request(
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
-        sys_seconds unix_ts);
+        const ed25519::PrivKeySpan& master_privkey,
+        const ed25519::PrivKeySpan& rotating_privkey,
+        std::chrono::sys_seconds unix_ts);
 
 /// Build a request for the current Session Pro revocation list (endpoint `get_pro_revocations`).
 /// This request is unsigned. The caller retains each returned item for the response's `retain_for`
@@ -251,10 +250,10 @@ ProRequest revocations_request(std::int64_t ticket);
 
 struct ProRevocationItem {
     /// 32-byte opaque revocation tag identifying a proof
-    array_uc32 revocation_tag;
+    b32 revocation_tag;
 
     /// A matching proof is revoked once the client's clock reaches this unix timestamp (not before)
-    sys_seconds effective_at;
+    std::chrono::sys_seconds effective_at;
 };
 
 struct GetProRevocationsResponse : ResponseBase {
@@ -286,7 +285,8 @@ GetProRevocationsResponse parse_revocations(std::string_view json);
 /// Inputs:
 /// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
 /// - `unix_ts` -- Unix timestamp for the request
-ProRequest pro_status_request(std::span<const uint8_t> master_privkey, sys_seconds unix_ts);
+ProRequest pro_status_request(
+        const ed25519::PrivKeySpan& master_privkey, std::chrono::sys_seconds unix_ts);
 
 /// Query a master key's Session Pro payment history (endpoint `get_payment_details`), one keyset
 /// page at a time. Builds the whole request, signing internally with the master key, and returns
@@ -300,8 +300,8 @@ ProRequest pro_status_request(std::span<const uint8_t> master_privkey, sys_secon
 ///   PaymentDetailsResponse); the empty string requests the newest page. Pass it through verbatim;
 ///   it must not be parsed or synthesized.
 ProRequest payment_details_request(
-        std::span<const uint8_t> master_privkey,
-        sys_seconds unix_ts,
+        const ed25519::PrivKeySpan& master_privkey,
+        std::chrono::sys_seconds unix_ts,
         uint32_t limit,
         std::string_view before);
 
@@ -352,7 +352,7 @@ struct ProPaymentItem {
     sys_ms purchased_at;
 
     /// Unix timestamp of when the payment was expiry. 0 if not activated
-    sys_seconds expiry_at;
+    std::chrono::sys_seconds expiry_at;
 
     /// The dunning window this ONE payment's provider declared -- raw store data, and NOT the same
     /// quantity as `ProStatusResponse::grace_period_duration`, which is account-level and adds the
@@ -365,7 +365,7 @@ struct ProPaymentItem {
 
     /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
     /// provider. Thereafter the user must initiate a refund manually via Session support.
-    sys_seconds platform_refund_expiry_at;
+    std::chrono::sys_seconds platform_refund_expiry_at;
 
     /// Provider revocation instant (when the payment was revoked). Epoch (0) if not applicable.
     /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
@@ -403,7 +403,7 @@ struct ProStatusResponse : ResponseBase {
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
-    sys_seconds expiry_at;
+    std::chrono::sys_seconds expiry_at;
 
     /// How much longer entitlement continues PAST `expiry_at`: the payment provider's dunning
     /// window (the leeway it allows itself to retry a failed renewal) plus the backend's own

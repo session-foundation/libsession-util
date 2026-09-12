@@ -298,9 +298,9 @@ void session_pro_backend_get_payment_details_response_free(
 /// - `ts` -- Unix timestamp (seconds) for the request.
 LIBSESSION_EXPORT
 session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         int64_t ts) NON_NULL_ARG(1, 3);
 
@@ -326,7 +326,7 @@ session_pro_backend_request session_pro_backend_get_pro_revocations_request_buil
 /// - `ts` -- Unix timestamp (seconds) for the request.
 LIBSESSION_EXPORT
 session_pro_backend_request session_pro_backend_get_pro_status_request_build(
-        const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts) NON_NULL_ARG(1);
+        const unsigned char* master_privkey, size_t master_privkey_len, int64_t ts) NON_NULL_ARG(1);
 
 /// API: session_pro_backend/get_payment_details_request_build
 ///
@@ -344,7 +344,7 @@ session_pro_backend_request session_pro_backend_get_pro_status_request_build(
 ///   empty string for the newest page. Pass through verbatim; do not parse or synthesize it.
 LIBSESSION_EXPORT
 session_pro_backend_request session_pro_backend_get_payment_details_request_build(
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         int64_t ts,
         uint32_t limit,

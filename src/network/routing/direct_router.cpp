@@ -92,6 +92,49 @@ void DirectRouter::upload(UploadRequest request) {
     });
 }
 
+void DirectRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    if (!_config.quic_file_server_address || !_config.quic_file_server_ed_pubkey) {
+        if (request.on_complete)
+            request.on_complete(ERROR_FILE_SERVER_UNAVAILABLE, false);
+        return;
+    }
+
+    attachment::Encryptor enc{seed, request.domain};
+    auto address = *_config.quic_file_server_address;
+    auto pubkey_hex = *_config.quic_file_server_ed_pubkey;
+    auto port = _config.quic_file_server_port;
+    const auto upload_id = random::unique_id("UPL");
+
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 enc = std::move(enc),
+                                 request = std::move(request),
+                                 address,
+                                 pubkey_hex,
+                                 port,
+                                 upload_id]() mutable {
+        streaming_file_upload(
+                _loop,
+                std::move(enc),
+                std::move(request),
+                [weak_self, this, address, pubkey_hex, port]() -> QuicFileClient* {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return nullptr;
+                    return &_get_file_client(ed25519_pubkey::from_hex(pubkey_hex), address, port);
+                });
+
+        _loop->call([weak_self = weak_from_this(), this, upload_id] {
+            if (auto self = weak_self.lock())
+                _cleanup_upload(upload_id);
+        });
+    });
+}
+
 void DirectRouter::download(DownloadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
@@ -165,21 +208,148 @@ void DirectRouter::_send_request_internal(Request request, network_response_call
             });
 }
 
+void DirectRouter::_cleanup_upload(const std::string& upload_id) {
+    auto node = _active_uploads.extract(upload_id);
+    if (!node.empty()) {
+        auto& thread = node.mapped().second;
+        if (thread.joinable())
+            thread.join();
+    }
+}
+
+QuicFileClient& DirectRouter::_get_file_client(
+        const ed25519_pubkey& pubkey, std::string_view address, uint16_t port) {
+    auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
+    if (inserted)
+        it->second = std::make_unique<QuicFileClient>(_loop, pubkey, std::string{address}, port);
+    else
+        it->second->set_target(pubkey, std::string{address}, port);
+    return *it->second;
+}
+
 void DirectRouter::_upload_internal(UploadRequest request) {
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
-    auto& [_, upload_thread] =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second;
 
-    // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
-    // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
-    // disk should be prioritised)
+    // Use the QUIC file server path if configured, otherwise fall back to the legacy HTTP path
+    if (!_config.quic_file_server_address || !_config.quic_file_server_ed_pubkey) {
+        _upload_internal_legacy(std::move(request), std::move(upload_id));
+        return;
+    }
+
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
+
+    auto address = *_config.quic_file_server_address;
+    auto pubkey_hex = *_config.quic_file_server_ed_pubkey;
+    auto port = _config.quic_file_server_port;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 upload_request = request,
+                                 upload_id,
+                                 address,
+                                 pubkey_hex,
+                                 port] {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        try {
+            std::vector<std::byte> all_data;
+            while (true) {
+                if (upload_request.is_cancelled())
+                    throw cancellation_exception{"Cancelled during data accumulation."};
+                auto chunk = upload_request.next_data();
+                if (chunk.empty())
+                    break;
+                auto* p = reinterpret_cast<const std::byte*>(chunk.data());
+                all_data.insert(all_data.end(), p, p + chunk.size());
+            }
+
+            if (all_data.empty())
+                throw std::runtime_error{"No data to upload"};
+
+            log::debug(
+                    cat,
+                    "[Upload {}]: Accumulated {} bytes, uploading to {}:{}.",
+                    upload_id,
+                    all_data.size(),
+                    address,
+                    port);
+
+            _loop->call([weak_self,
+                         this,
+                         upload_request,
+                         upload_id,
+                         address,
+                         pubkey_hex,
+                         port,
+                         data = std::move(all_data)]() mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (upload_request.is_cancelled()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                    return;
+                }
+
+                auto pubkey = ed25519_pubkey::from_hex(pubkey_hex);
+                auto& client = _get_file_client(pubkey, address, port);
+
+                client.upload(
+                        std::move(data),
+                        upload_request.ttl,
+                        [weak_self, this, upload_request, upload_id](
+                                std::variant<file_metadata, int16_t> result) {
+                            auto self = weak_self.lock();
+                            if (!self)
+                                return;
+
+                            if (auto* meta = std::get_if<file_metadata>(&result))
+                                log::info(
+                                        cat,
+                                        "[Upload {}]: Success, file ID: {}",
+                                        upload_id,
+                                        meta->id);
+                            else
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Failed with error {}",
+                                        upload_id,
+                                        std::get<int16_t>(result));
+
+                            upload_request.on_complete(std::move(result), false);
+                            _cleanup_upload(upload_id);
+                        });
+            });
+        } catch (const cancellation_exception&) {
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        } catch (const std::exception& e) {
+            log::error(cat, "[Upload {}]: Exception: {}", upload_id, e.what());
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_UNKNOWN, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        }
+    });
+}
+
+void DirectRouter::_upload_internal_legacy(UploadRequest request, std::string upload_id) {
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
+
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
                                  upload_request = request,
@@ -189,8 +359,6 @@ void DirectRouter::_upload_internal(UploadRequest request) {
         if (!self)
             return;
 
-        // Onion requests don't support streaming data so we need to load all the data from the
-        // streaming source into memory
         try {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
@@ -203,11 +371,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-
-                    auto active_upload_node = _active_uploads.extract(upload_id);
-                    if (!active_upload_node.empty() &&
-                        active_upload_node.mapped().second.joinable())
-                        active_upload_node.mapped().second.join();
+                    _cleanup_upload(upload_id);
                     return;
                 }
 
@@ -230,11 +394,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            // Join the thread to keep it alive during callback handling
-                            auto active_upload_node = _active_uploads.extract(upload_id);
-                            if (!active_upload_node.empty() &&
-                                active_upload_node.mapped().second.joinable())
-                                active_upload_node.mapped().second.join();
+                            _cleanup_upload(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -290,12 +450,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
-
-                // Join the thread to keep it alive during callback handling
-                auto active_upload_node = _active_uploads.extract(upload_id);
-                if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
-                    active_upload_node.mapped().second.join();
-
+                _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });
         }
@@ -306,10 +461,63 @@ void DirectRouter::_download_internal(DownloadRequest request) {
     const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
+
+    if (!_config.quic_file_server_address || !_config.quic_file_server_ed_pubkey) {
+        _download_internal_legacy(std::move(request), std::move(download_id));
+        return;
+    }
+
+    // QUIC download: parse file_id from URL, connect directly to configured file server
+    auto download_info = file_server::parse_download_url(request.download_url);
+    if (!download_info) {
+        log::error(
+                cat, "[Download {}]: Invalid download URL: {}", download_id, request.download_url);
+        request.on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
+        return;
+    }
+
+    _active_downloads[download_id] = request;
+    auto file_id = download_info->file_id;
+    auto address = *_config.quic_file_server_address;
+    auto pubkey = ed25519_pubkey::from_hex(*_config.quic_file_server_ed_pubkey);
+    auto port = _config.quic_file_server_port;
+
+    auto& client = _get_file_client(pubkey, address, port);
+
+    log::debug(
+            cat, "[Download {}]: Downloading {} from {}:{}.", download_id, file_id, address, port);
+
+    client.download(
+            std::move(file_id),
+            request.on_data,
+            [weak_self = weak_from_this(), this, request, download_id](
+                    std::variant<file_metadata, int16_t> result) {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                _active_downloads.erase(download_id);
+
+                if (auto* meta = std::get_if<file_metadata>(&result))
+                    log::info(
+                            cat,
+                            "[Download {}]: Success, file ID: {} ({} bytes)",
+                            download_id,
+                            meta->id,
+                            meta->size);
+                else
+                    log::error(
+                            cat,
+                            "[Download {}]: Failed with error {}",
+                            download_id,
+                            std::get<int16_t>(result));
+
+                request.on_complete(std::move(result), false);
+            });
+}
+
+void DirectRouter::_download_internal_legacy(DownloadRequest request, std::string download_id) {
     _active_downloads[download_id] = request;
 
     try {
@@ -355,7 +563,7 @@ void DirectRouter::_download_internal(DownloadRequest request) {
                                 metadata.id);
 
                         if (request.on_data)
-                            request.on_data(metadata, std::move(data));
+                            request.on_data(metadata, to_span<const std::byte>(data));
 
                         request.on_complete(std::move(metadata), false);
                     } catch (const cancellation_exception&) {

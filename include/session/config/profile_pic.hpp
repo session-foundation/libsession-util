@@ -11,9 +11,9 @@ struct profile_pic {
     static constexpr size_t MAX_URL_LENGTH = 223;
 
     std::string url;
-    std::vector<unsigned char> key;
+    std::vector<std::byte> key;
 
-    static void check_key(std::span<const unsigned char> key) {
+    static void check_key(std::span<const std::byte> key) {
         if (!(key.empty() || key.size() == 32))
             throw std::invalid_argument{"Invalid profile pic key: 32 bytes required"};
     }
@@ -22,13 +22,13 @@ struct profile_pic {
     profile_pic() = default;
 
     // Constructs from a URL and key.  Key must be empty or 32 bytes.
-    profile_pic(std::string_view url, std::span<const unsigned char> key) :
-            url{url}, key{to_vector(key)} {
+    profile_pic(std::string_view url, std::span<const std::byte> key) :
+            url{url}, key{to_vector<std::byte>(key)} {
         check_key(this->key);
     }
 
-    // Constructs from a string/std::vector<unsigned char> pair moved into the constructor
-    profile_pic(std::string&& url, std::vector<unsigned char>&& key) :
+    // Constructs from a string/std::vector<std::byte> pair moved into the constructor
+    profile_pic(std::string&& url, std::vector<std::byte>&& key) :
             url{std::move(url)}, key{std::move(key)} {
         check_key(this->key);
     }
@@ -66,7 +66,7 @@ struct profile_pic {
     ///
     /// Inputs:
     /// - `new_key` -- binary data of a new key to be set. Must be 32 bytes
-    void set_key(std::vector<unsigned char> new_key) {
+    void set_key(std::vector<std::byte> new_key) {
         check_key(new_key);
         key = std::move(new_key);
     }

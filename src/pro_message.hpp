@@ -3,6 +3,7 @@
 #include <cassert>
 #include <charconv>
 #include <concepts>
+#include <cstddef>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -25,32 +26,37 @@ namespace session::pro {
 /// raw fields need no separator, and the domain prefix (also raw) never precedes one. The message
 /// is signed directly — there is no pre-hash (Ed25519 hashes internally).
 template <typename... Fields>
-std::vector<unsigned char> signed_message(std::string_view domain, const Fields&... fields) {
-    std::vector<unsigned char> buf(domain.begin(), domain.end());
+std::vector<std::byte> signed_message(std::string_view domain, const Fields&... fields) {
+    std::vector<std::byte> buf;
     bool prev_var = false;  // the previously-appended field was variable-length (int/string)
+
+    auto put_chars = [&](std::string_view s) {
+        for (char c : s)
+            buf.push_back(static_cast<std::byte>(static_cast<unsigned char>(c)));
+    };
+    put_chars(domain);  // domain prefix: fixed-width, self-delimiting
 
     auto append = [&](const auto& field) {
         using T = std::remove_cvref_t<decltype(field)>;
         if constexpr (std::is_integral_v<T>) {
             if (prev_var)
-                buf.push_back('\0');
+                buf.push_back(std::byte{0});
             char tmp[24];  // enough for -9223372036854775808 (20 chars)
             auto [ptr, ec] = std::to_chars(tmp, tmp + sizeof(tmp), field);
             assert(ec == std::errc{});  // tmp is large enough for any integer, so this cannot fail
-            buf.insert(buf.end(), tmp, ptr);
+            put_chars({tmp, static_cast<std::size_t>(ptr - tmp)});
             prev_var = true;
         } else if constexpr (std::convertible_to<const T&, std::string_view>) {
             if (prev_var)
-                buf.push_back('\0');
-            std::string_view s = field;
-            buf.insert(buf.end(), s.begin(), s.end());
+                buf.push_back(std::byte{0});
+            put_chars(field);
             prev_var = true;
         } else {
             static_assert(
-                    std::convertible_to<const T&, std::span<const unsigned char>>,
+                    std::convertible_to<const T&, std::span<const std::byte>>,
                     "signed_message() fields must be an integer, a string_view, or a "
                     "byte-spannable raw value (e.g. a public key or tag)");
-            std::span<const unsigned char> b = field;
+            std::span<const std::byte> b = field;
             buf.insert(buf.end(), b.begin(), b.end());
             prev_var = false;
         }
