@@ -84,6 +84,29 @@ TEST_CASE("Client: settings from another device reach the conversation", "[clien
     CHECK(convo->display_name() == "Mr Underhill");
 }
 
+TEST_CASE("Client: a page size has to be a page", "[client][convos]") {
+    TempClient c;
+    auto id = dm_from_hex("05" + std::string(64, 'a'));
+    c->open_dm(id, await);
+    c->send_message(id, {.body = "hi"}, await);
+
+    // Unchecked, these reach SQLite as `LIMIT ?`, where a negative is no limit at all: asking for
+    // one message would load every message in the conversation.
+    for (int limit : {0, -1, -50}) {
+        CHECK_THROWS_AS(c->conversation(id, await)->messages(limit, await), std::invalid_argument);
+        CHECK_THROWS_AS(
+                c->conversation(id, await)->messages(limit, std::nullopt, true, await),
+                std::invalid_argument);
+    }
+
+    // The handler form refuses on the calling thread too, rather than reporting it: the caller is
+    // still there to catch, and a bad page size is its bug rather than a runtime condition.
+    auto ignore = [](std::optional<std::string>, std::vector<Message>) {};
+    CHECK_THROWS_AS(c->conversation(id, await)->messages(0, ignore), std::invalid_argument);
+
+    CHECK(c->conversation(id, await)->messages(1, await).size() == 1);
+}
+
 TEST_CASE("Client: a conversation knows which kind it is", "[client][convos]") {
     TempClient c;
     SenderKeys them;

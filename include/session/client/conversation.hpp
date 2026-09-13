@@ -197,6 +197,11 @@ class Conversation {
     /// Filtered in the query rather than left to the caller, because the alternative breaks paging:
     /// a page of 50 that is mostly deleted would hand back a handful of rows with nothing to say
     /// that another page is warranted.
+    ///
+    /// @throws std::invalid_argument if `limit` is not positive.  In particular there is no value
+    /// meaning "all of it" -- SQLite reads `LIMIT -1` that way, this does not.  History grows
+    /// without bound, so reading all of it means paging with `before` until a page comes back
+    /// short.
     void messages(failable_function<void(std::vector<Message>)> cb) const;
     void messages(int limit, failable_function<void(std::vector<Message>)> cb) const;
     void messages(

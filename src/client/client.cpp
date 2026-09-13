@@ -627,6 +627,14 @@ void Client::_require_contact(std::string_view op, const ConversationId& id) {
         throw std::invalid_argument{"{}: not applicable to your own account"_format(op)};
 }
 
+void Client::_require_page(std::string_view op, int limit) {
+    // The value reaches SQLite as `LIMIT ?`, where a negative is no limit at all and zero is the
+    // end of the history -- so an unchecked one loads the whole conversation instead of failing.
+    if (limit <= 0)
+        throw std::invalid_argument{
+                "{}: limit must be a positive page size (got {})"_format(op, limit)};
+}
+
 void Client::log_operation_failure(const std::exception& e) {
     log::error(cat, "Client operation failed: {}", e.what());
 }
