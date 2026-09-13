@@ -42,6 +42,22 @@ namespace {
 
     const std::chrono::seconds STRIKE_EXPIRY = 48h;
     const std::chrono::seconds SAVE_THROTTLE = 5min;
+
+    // A swarm rejection is evidence against the pool snapshot the swarm was derived from, so it is
+    // only worth acting on once that snapshot is old enough for a refresh to plausibly return
+    // something different.
+    const std::chrono::seconds EVIDENCE_REFRESH_MIN_POOL_AGE = 1min;
+
+    // A rejection arriving *after* we already refreshed on one is the refresh telling us it didn't
+    // help - the network hasn't settled, or the node is lying - so each successive one waits twice
+    // as long, up to `cache_expiration`.  A single 3-node refresh per minute sustained indefinitely
+    // is not an acceptable resting state for a client on a bad connection, and without this it is
+    // exactly what a persistent rejection source would produce.
+    const std::chrono::seconds EVIDENCE_REFRESH_BASE_BACKOFF = 1min;
+
+    // Two nodes disagreeing about who owns a swarm can redirect us back and forth; after this many
+    // in a row without an intervening pool refresh, stop believing them and go and refresh.
+    constexpr uint8_t MAX_CONSECUTIVE_SWARM_REDIRECTS = 3;
 }  // namespace
 
 SnodePool::SnodePool(
@@ -877,6 +893,11 @@ void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> 
         _snode_cache = std::move(nodes);
         _all_swarms = swarm::generate_swarms(_snode_cache);
         _swarm_cache.clear();
+
+        // The pool these redirects were correcting has been replaced, so they have outlived what
+        // they were for.  Keeping them would let one node's claim outlast the ground truth that
+        // would have overruled it.
+        _swarm_overrides.clear();
         _last_snode_cache_update = std::chrono::system_clock::now();
 
         // Reset all failure and refresh-in-progress state
@@ -958,6 +979,7 @@ void SnodePool::clear_cache() {
         _snode_cache = {};
         _all_swarms = {};
         _swarm_cache = {};
+        _swarm_overrides = {};
 
         _disk_loop->call([path = _snode_cache_file_path] { SnodePool::_clear_disk_cache(path); });
     });
@@ -1113,6 +1135,145 @@ void SnodePool::refresh_if_needed(
     });
 }
 
+void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, std::function<void()> on_complete) {
+    _loop->call([this, swarm_pubkey, cb = std::move(on_complete)]() mutable {
+        if (_suspended) {
+            log::info(cat, "Ignoring swarm invalidation as pool is suspended.");
+
+            if (cb)
+                cb();
+            return;
+        }
+
+        // The swarm cache only ever memoises `swarm::get_swarm(pubkey, _all_swarms)`, and
+        // `_all_swarms` is generated from the pool, so dropping the single entry would recompute
+        // the same rejected answer.  What the rejection actually disproves is the pool snapshot,
+        // and a refresh is the only thing that replaces it - clearing the swarm cache as it goes.
+        auto now = std::chrono::system_clock::now();
+
+        if (!_current_snode_cache_refresh_id) {
+            // The backoff is deliberately global rather than per-swarm: a refresh replaces the pool
+            // every swarm is derived from, so a rejection for one swarm is exactly as unhelpful to
+            // act on right after a refresh as a second rejection for the swarm that prompted it
+            auto pool_age = now - _last_snode_cache_update;
+            auto since_last = now - _last_evidence_refresh;
+
+            // Quiet for twice the interval we were holding means whatever caused the last run is
+            // over, so the next incident starts from the base delay rather than inheriting it
+            if (since_last > 2 * _evidence_refresh_backoff)
+                _evidence_refresh_backoff = 0s;
+
+            if (pool_age < EVIDENCE_REFRESH_MIN_POOL_AGE || since_last < _evidence_refresh_backoff)
+                log::info(
+                        cat,
+                        "Swarm {} was rejected, but the pool is {}s old and the last refresh on a "
+                        "rejection was {}s ago (backoff {}s); leaving it alone.",
+                        swarm_pubkey.hex(),
+                        std::chrono::duration_cast<std::chrono::seconds>(pool_age).count(),
+                        std::chrono::duration_cast<std::chrono::seconds>(since_last).count(),
+                        _evidence_refresh_backoff.count());
+            else {
+                _evidence_refresh_backoff = std::min(
+                        std::chrono::seconds{_config.cache_expiration},
+                        (_evidence_refresh_backoff == 0s ? EVIDENCE_REFRESH_BASE_BACKOFF
+                                                         : _evidence_refresh_backoff * 2));
+                _last_evidence_refresh = now;
+
+                log::info(
+                        cat,
+                        "Swarm {} was rejected by a node we had in it, refreshing the pool (next "
+                        "rejection-driven refresh no sooner than {}s from now).",
+                        swarm_pubkey.hex(),
+                        _evidence_refresh_backoff.count());
+                _refresh_snode_cache();
+            }
+        }
+
+        if (!cb)
+            return;
+
+        // `_refresh_snode_cache` runs inline here (we are on the loop thread) and can decline to
+        // start, so it is the refresh id - not the call above - that says whether there is anything
+        // to wait for.  A callback queued against a refresh that never started never runs, and on
+        // this path that would strand the request that triggered the rejection.
+        if (_current_snode_cache_refresh_id)
+            _after_snode_cache_refresh.push_back(std::move(cb));
+        else
+            cb();
+    });
+}
+
+bool SnodePool::record_swarm_redirect(
+        x25519_pubkey swarm_pubkey, const std::vector<ed25519_pubkey>& swarm_node_keys) {
+    return _loop->call_get([this, swarm_pubkey, &swarm_node_keys] {
+        if (_snode_cache.empty() || _all_swarms.empty())
+            return false;
+
+        // Resolving the names against our own pool is what makes a redirect safe to act on: the
+        // responding node chooses which registered nodes we end up talking to, but it cannot invent
+        // a node or point us at an address of its own choosing, because we never read the contact
+        // details it sent
+        std::unordered_set<ed25519_pubkey> named{swarm_node_keys.begin(), swarm_node_keys.end()};
+        std::vector<service_node> resolved;
+
+        for (const auto& node : _snode_cache)
+            if (named.count(node.remote_pubkey))
+                resolved.push_back(node);
+
+        if (resolved.size() < _config.cache_min_swarm_size) {
+            log::debug(
+                    cat,
+                    "Ignoring redirect for {}: only {}/{} named nodes are in our pool.",
+                    swarm_pubkey.hex(),
+                    resolved.size(),
+                    swarm_node_keys.size());
+            return false;
+        }
+
+        // A redirect naming the swarm we already calculated is the node contradicting itself - it
+        // rejected the request and then pointed us back at the nodes we asked through.  Refusing it
+        // sends the caller off to refresh the pool, which is the only thing that can help
+        auto computed = swarm::get_swarm(swarm_pubkey, _all_swarms);
+        if (computed.second.size() == resolved.size()) {
+            std::unordered_set<ed25519_pubkey> computed_keys;
+            for (const auto& node : computed.second)
+                computed_keys.insert(node.remote_pubkey);
+
+            if (std::ranges::all_of(resolved, [&computed_keys](const auto& node) {
+                    return computed_keys.count(node.remote_pubkey) > 0;
+                })) {
+                log::debug(
+                        cat,
+                        "Ignoring redirect for {}: it names the swarm we already calculated.",
+                        swarm_pubkey.hex());
+                return false;
+            }
+        }
+
+        auto& [nodes, redirects] = _swarm_overrides[swarm_pubkey];
+
+        if (++redirects > MAX_CONSECUTIVE_SWARM_REDIRECTS) {
+            log::warning(
+                    cat,
+                    "Dropping redirects for {} after {} in a row; refreshing the pool instead.",
+                    swarm_pubkey.hex(),
+                    MAX_CONSECUTIVE_SWARM_REDIRECTS);
+            _swarm_overrides.erase(swarm_pubkey);
+            return false;
+        }
+
+        log::info(
+                cat,
+                "Redirected to a swarm of {} nodes for {} ({} of at most {}).",
+                resolved.size(),
+                swarm_pubkey.hex(),
+                redirects,
+                MAX_CONSECUTIVE_SWARM_REDIRECTS);
+        nodes = std::move(resolved);
+        return true;
+    });
+}
+
 std::vector<service_node> SnodePool::get_unused_nodes(
         size_t count, const std::vector<service_node>& exclude_nodes) {
     // Kick of a cache refresh in the background if needed (call_soon to ensure it is scheduled
@@ -1223,6 +1384,17 @@ void SnodePool::get_swarm(
 
             return nodes;
         };
+
+        // A node that rejected a request for this account told us where it belongs, which beats
+        // anything we can work out from a pool we now know is behind.  There is no swarm id to give
+        // back - a redirect names members, not an id - and nothing downstream reads it.
+        if (auto it = _swarm_overrides.find(swarm_pubkey); it != _swarm_overrides.end()) {
+            const auto& swarm_nodes = it->second.first;
+
+            return cb(
+                    swarm::INVALID_SWARM_ID,
+                    (ignore_strike_count ? swarm_nodes : filter_by_strikes(swarm_nodes)));
+        }
 
         // Check the in-memory swarm cache first
         if (auto it = _swarm_cache.find(swarm_pubkey); it != _swarm_cache.end()) {
