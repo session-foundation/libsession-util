@@ -84,6 +84,18 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             session::network::x25519_pubkey swarm_pubkey,
             std::function<void()> on_complete = nullptr);
 
+    // Records the swarm a node named when it rejected a request for `swarm_pubkey`, so the mapping
+    // can be corrected without refreshing the whole pool - a swarm change would otherwise have
+    // every client of that swarm fetch the full node list, where nothing made them before.
+    //
+    // Only the node pubkeys are taken from the response, and only ones that resolve against the
+    // pool we fetched ourselves, so a redirect can reach registered service nodes we already know
+    // and nothing else.  Returns false when the redirect is unusable, which is the caller's cue to
+    // fall back to `invalidate_swarm`.
+    virtual bool record_swarm_redirect(
+            session::network::x25519_pubkey swarm_pubkey,
+            const std::vector<ed25519_pubkey>& swarm_node_keys);
+
     virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
@@ -108,6 +120,13 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
     std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
             _swarm_cache;
+
+    // Swarms a node has redirected us to, which `get_swarm` prefers over its own calculation.  Kept
+    // apart from `_swarm_cache` deliberately: that is a memo of `_all_swarms` and stays one, where
+    // these are claims from outside that outrank it until the pool is refreshed.  The count bounds
+    // how far a disagreement between nodes can bounce us before we go and refresh instead.
+    std::unordered_map<x25519_pubkey, std::pair<std::vector<service_node>, uint8_t>>
+            _swarm_overrides;
     std::map<ed25519_pubkey, std::vector<std::chrono::sys_seconds>> _snode_strikes;
     bool _strikes_flush_scheduled = false;
 

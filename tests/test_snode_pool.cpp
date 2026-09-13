@@ -479,3 +479,127 @@ TEST_CASE("Network", "[network][invalidate_swarm]") {
     CHECK(snode_pool->debug_refresh_in_progress());
     CHECK(snode_pool->debug_evidence_backoff() == 1min);
 }
+
+TEST_CASE("Network", "[network][swarm_redirect]") {
+    session::network::config::SnodePool pool_config{
+            .cache_expiration = 2h,
+            .cache_min_lifetime = 2s,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_min_size = 12,
+            .cache_min_swarm_size = 3,
+            .cache_num_nodes_to_use_for_refresh = 1,
+            .cache_min_num_refresh_presence_to_include_node = 1,
+            .cache_node_strike_threshold = 3};
+
+    // A redirect is resolved by node pubkey, so every node needs its own
+    auto key_for = [](uint16_t i) {
+        return ed25519_pubkey::from_hex(
+                "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46a{:02x}"_format(i));
+    };
+    std::vector<service_node> snode_cache;
+
+    for (uint16_t i = 0; i < 12; ++i)
+        snode_cache.emplace_back(service_node{
+                key_for(i),
+                oxen::quic::ipv4{"192.168.0.{}"_format(i)},
+                static_cast<uint16_t>(20000 + i),
+                static_cast<uint16_t>(30000 + i),
+                {2, 11, 0},
+                static_cast<uint64_t>(i < 6 ? 0 : 1)});
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePoolAgePolicy>(pool_config, loop, disk_loop);
+    snode_pool->update_cache(snode_cache);
+
+    // Old enough that the fallback would refresh, so "no refresh happened" below means the redirect
+    // was taken rather than the pool being too fresh to bother
+    snode_pool->debug_age_pool(10min);
+
+    auto swarm_pubkey = x25519_pubkey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000000");
+
+    std::vector<service_node> calculated;
+    snode_pool->debug_run_on_loop([&] {
+        snode_pool->get_swarm(
+                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
+                    calculated = std::move(nodes);
+                });
+    });
+    REQUIRE(calculated.size() == 6);
+
+    // Everything the calculation didn't pick, which is what a real redirect would be naming
+    std::vector<service_node> elsewhere;
+    for (const auto& node : snode_cache)
+        if (std::ranges::find(calculated, node) == calculated.end())
+            elsewhere.push_back(node);
+    REQUIRE(elsewhere.size() == 6);
+
+    // Membership is the claim in every comparison below; the pool is reshuffled on each refresh and
+    // a redirect is resolved in pool order, so neither side has an order worth asserting
+    auto sorted = [](std::vector<service_node> nodes) {
+        std::ranges::sort(nodes);
+        return nodes;
+    };
+    auto keys_of = [](const std::vector<service_node>& nodes, size_t count) {
+        std::vector<ed25519_pubkey> keys;
+        for (size_t i = 0; i < count && i < nodes.size(); ++i)
+            keys.push_back(nodes[i].remote_pubkey);
+        return keys;
+    };
+
+    // Nodes we've never heard of can't redirect us anywhere - this is what stops a response putting
+    // us in touch with something that isn't a registered service node
+    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, {key_for(200), key_for(201)}));
+
+    // Too few of the named nodes resolve to be a swarm
+    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 2)));
+
+    // Naming the swarm we already calculated is the node contradicting itself
+    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
+
+    // A usable redirect is taken, and - the point of all this - no pool refresh is started for it
+    REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+
+    std::vector<service_node> redirected;
+    snode_pool->debug_run_on_loop([&] {
+        snode_pool->get_swarm(
+                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
+                    redirected = std::move(nodes);
+                });
+    });
+    CHECK(sorted(redirected) ==
+          sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 4)));
+    CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+
+    // Nodes that keep disagreeing must not bounce us forever; after the third we stop believing
+    // them and the calculated swarm is back, for the caller to fall back on refreshing the pool
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 5)));
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 5)));
+
+    std::vector<service_node> after_giving_up;
+    snode_pool->debug_run_on_loop([&] {
+        snode_pool->get_swarm(
+                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
+                    after_giving_up = std::move(nodes);
+                });
+    });
+    CHECK(sorted(after_giving_up) == sorted(calculated));
+
+    // A refreshed pool is ground truth again, so redirects correcting the old one are dropped
+    REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    snode_pool->update_cache(snode_cache);
+
+    std::vector<service_node> after_refresh;
+    snode_pool->debug_run_on_loop([&] {
+        snode_pool->get_swarm(
+                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
+                    after_refresh = std::move(nodes);
+                });
+    });
+    CHECK(sorted(after_refresh) == sorted(calculated));
+}
