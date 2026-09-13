@@ -42,6 +42,12 @@ class empty_file_exception : public std::runtime_error {
 class SnodePool : public std::enable_shared_from_this<SnodePool> {
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
+
+    // `refreshed` is false when the pool could not be refreshed at all - suspended, no candidate
+    // nodes, no fetcher.  Callers that retry their work on this callback have to check it: without
+    // it the only way to signal "that didn't happen" was to never call back, which leaves whatever
+    // the caller set up beforehand set up forever.
+    using refresh_callback_t = std::function<void(bool refreshed)>;
     using fetcher_connectivity_check_t = std::function<bool()>;
 
     SnodePool(
@@ -74,7 +80,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     // Checks if the pool is empty or stale and triggers a refresh if needed
     virtual void refresh_if_needed(
             const std::vector<service_node>& in_use_nodes,
-            std::function<void()> on_refresh_complete = nullptr);
+            refresh_callback_t on_refresh_complete = nullptr);
 
     virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
@@ -113,7 +119,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     int _snode_cache_refresh_failure_count = 0;
     std::vector<service_node> _refresh_candidate_nodes;
     std::vector<std::vector<std::byte>> _snode_refresh_results;
-    std::vector<std::function<void()>> _after_snode_cache_refresh;
+    std::vector<refresh_callback_t> _after_snode_cache_refresh;
 
     // Disk I/O functions
     void _load_from_disk();
@@ -145,6 +151,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             const bool use_direct_fetcher,
             const uint8_t total_requests);
     void _update_cache(std::string refresh_id, std::vector<service_node> nodes);
+    void _run_pending_refresh_callbacks(bool refreshed);
 };
 
 }  // namespace session::network

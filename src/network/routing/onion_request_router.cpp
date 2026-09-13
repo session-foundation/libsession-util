@@ -331,7 +331,12 @@ OnionRequestRouter::OnionRequestRouter(
         }
 
         if (snode_pool->size() == 0)
-            snode_pool->refresh_if_needed({}, [weak_self = weak_from_this()] {
+            snode_pool->refresh_if_needed({}, [weak_self = weak_from_this()](bool refreshed) {
+                // Setup finishes either way: not finishing leaves the router permanently unusable,
+                // where finishing with an empty pool just means the first request refreshes again
+                if (!refreshed)
+                    log::warning(cat, "Finishing router setup without a refreshed snode pool.");
+
                 if (auto self = weak_self.lock())
                     self->_loop->call([weak_self] {
                         if (auto self = weak_self.lock())
@@ -1160,14 +1165,49 @@ void OnionRequestRouter::_build_path(
 
         snode_pool->refresh_if_needed(
                 nodes_to_exclude,
-                [weak_self = weak_from_this(),
-                 this,
-                 category,
-                 initiating_req_id,
-                 nodes_to_exclude]() {
+                [weak_self = weak_from_this(), this, category, initiating_req_id, nodes_to_exclude](
+                        bool refreshed) {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
+
+                    // Rebuilding without a refresh lands back in this same branch with the same
+                    // too-few nodes, so the queued requests would wait on a loop that cannot end
+                    if (!refreshed) {
+                        log::error(
+                                cat,
+                                "[Request {}]: Cannot build a path, the snode pool could not be "
+                                "refreshed.",
+                                initiating_req_id.value_or("internal"));
+                        _update_status();
+
+                        auto queue_it = _request_queues.find(category);
+                        if (queue_it == _request_queues.end()) {
+                            log::critical(
+                                    cat,
+                                    "No request queue for category '{}'.",
+                                    to_string(category, _config.single_path_mode));
+                            return;
+                        }
+
+                        if (!queue_it->second->is_empty()) {
+                            auto to_fail = queue_it->second->pop_all();
+                            log::error(
+                                    cat,
+                                    "Failing {} queued requests for '{}' paths; the snode pool "
+                                    "could not be refreshed.",
+                                    to_fail.size(),
+                                    to_string(category, _config.single_path_mode));
+
+                            for (const auto& [req, cb] : to_fail)
+                                cb(false,
+                                   false,
+                                   -1,
+                                   {content_type_plain_text},
+                                   "Failed to refresh the snode pool to build a path.");
+                        }
+                        return;
+                    }
 
                     log::info(
                             cat,

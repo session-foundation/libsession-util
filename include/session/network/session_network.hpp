@@ -125,7 +125,7 @@ class Network : public std::enable_shared_from_this<Network> {
             const uint8_t index,
             const service_node& node,
             const uint8_t total_requests);
-    void _on_clock_resync_complete(const uint8_t total_requests);
+    void _on_clock_resync_complete();
 
     Request _preprocess_request(Request request);
 };

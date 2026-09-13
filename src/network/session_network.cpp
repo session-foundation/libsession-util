@@ -409,8 +409,19 @@ void Network::get_random_nodes(
             std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
 
             return _snode_pool->refresh_if_needed(
-                    nodes_to_exclude,
-                    [this, count, cb = std::move(cb)] { get_random_nodes(count, cb); });
+                    nodes_to_exclude, [this, count, cb = std::move(cb)](bool refreshed) {
+                        // Retrying without a refresh would re-enter this same branch and recurse
+                        // until the stack gives out
+                        if (!refreshed) {
+                            log::warning(
+                                    cat,
+                                    "Cannot get {} random nodes: the pool could not be refreshed.",
+                                    count);
+                            return cb({});
+                        }
+
+                        get_random_nodes(count, cb);
+                    });
         }
         cb(unused_nodes);
     });
@@ -836,7 +847,17 @@ void Network::_handle_421_retry(
             [this,
              req_to_retry = std::move(original_request),
              cb = std::move(final_callback),
-             failed_node = failed_node_copy] {
+             failed_node = failed_node_copy](bool refreshed) {
+                // Without a refresh the swarm cache still holds the mapping the 421 disproved, so
+                // the retry would go straight back to the swarm that just rejected us
+                if (!refreshed)
+                    return cb(
+                            false,
+                            false,
+                            ERROR_MISDIRECTED_REQUEST,
+                            {content_type_plain_text},
+                            "421 Misdirected Request, and the snode pool could not be refreshed");
+
                 auto swarm_pubkey = *req_to_retry.swarm_pubkey;
 
                 _snode_pool->get_swarm(
@@ -933,7 +954,20 @@ void Network::_resync_clock(
 
     // Refresh the snode pool if needed to ensure we have the most up-to-date cache
     std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
-    _snode_pool->refresh_if_needed(std::move(nodes_to_exclude), [this, request_id] {
+    _snode_pool->refresh_if_needed(std::move(nodes_to_exclude), [this, request_id](bool refreshed) {
+        // `_current_clock_resync_id` was set before this call, so giving up without clearing it
+        // blocks every later resync attempt for the life of the process and strands everything
+        // queued behind it.  Completing with no results takes the existing "resync finished,
+        // successful or not" path, which does both and leaves the offset we already had alone -
+        // an old offset beats none, and this says nothing about whether it was right.
+        if (!refreshed) {
+            log::warning(
+                    cat,
+                    "[Request {}] Abandoning clock resync: the snode pool could not be refreshed.",
+                    request_id);
+            return _on_clock_resync_complete();
+        }
+
         // Pick the random nodes we want to use for retrying (these won't change for this resync
         // attempt)
         auto resync_nodes =
@@ -1040,11 +1074,11 @@ void Network::_launch_next_clock_out_of_sync_request(
                 // If we've received all the results then we need to process them and complete the
                 // resync
                 if (_clock_resync_results.size() >= total_requests)
-                    _on_clock_resync_complete(total_requests);
+                    _on_clock_resync_complete();
             });
 }
 
-void Network::_on_clock_resync_complete(const uint8_t /*total_requests*/) {
+void Network::_on_clock_resync_complete() {
 
     auto raw_results = std::move(_clock_resync_results);
     auto refresh_id = std::move(*_current_clock_resync_id);
