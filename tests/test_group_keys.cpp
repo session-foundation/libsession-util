@@ -1161,6 +1161,11 @@ TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recover
         REQUIRE(held.count("keyhash1"));
         CHECK(to_hex(session::to_vector(held.at("keyhash1"))) == to_hex(rekey1));
 
+        auto one = member.keys.active_key_message("keyhash1");
+        REQUIRE(one);
+        CHECK(to_hex(session::to_vector(*one)) == to_hex(rekey1));
+        CHECK_FALSE(member.keys.active_key_message("nosuchhash"));
+
         // Every hash we advertise for renewal has bytes behind it.
         CHECK(as_set(member.keys.active_hashes()) == std::set<std::string>{{"keyhash1"s}});
 
@@ -1364,5 +1369,187 @@ TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recover
         groups_keys_free(conf);
         config_free(info_conf);
         config_free(mem_conf);
+    }
+}
+
+TEST_CASE("Group Keys - one message, several generations", "[config][groups][keys][recovery]") {
+
+    // `key_supplement` packs every key in `keys_`, so a member that can decrypt one ends up
+    // recording the same hash against each generation it carried.  Retained bytes are therefore
+    // shared between generations, and must outlive the *oldest* of them expiring -- pruning per
+    // dropped generation would strand a hash that is still active under a newer one.
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    auto rekey2 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash2", rekey2, t0 + 1000, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message(
+            "keyhash2", rekey2, t0 + 1000, member.info, member.members));
+
+    // Addressed to the member itself, so it decrypts and yields a key per generation the admin
+    // holds -- all of which the member already has, i.e. insert_key's early-return path, twice.
+    REQUIRE(admin.keys.size() == 2);
+    auto supp = admin.keys.key_supplement(member.session_id);
+    CHECK(member.keys.load_key_message("supphash", supp, t0 + 2000, member.info, member.members));
+
+    REQUIRE(member.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*member.keys.active_key_message("supphash"))) == to_hex(supp));
+
+    // A third generation far enough ahead to retire the first.
+    constexpr int64_t past_expiry = t0 + 1000 + 61 * 24 * 60 * 60 * 1000LL;
+    auto rekey3 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message(
+            "keyhash3", rekey3, past_expiry, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message(
+            "keyhash3", rekey3, past_expiry, member.info, member.members));
+
+    // The first generation's own message is gone...
+    CHECK_FALSE(member.keys.active_key_message("keyhash1"));
+
+    // ...but the supplemental is still named by a generation we keep, so its bytes must survive.
+    CHECK(member.keys.active_hashes().count("supphash"));
+    REQUIRE(member.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*member.keys.active_key_message("supphash"))) == to_hex(supp));
+
+    // The invariant, stated as the tests above state it: what we advertise is what we can re-store.
+    std::set<std::string> held;
+    for (const auto& [h, _] : member.keys.active_key_messages())
+        held.insert(h);
+    CHECK(held == as_set(member.keys.active_hashes()));
+
+    // And the same after a restart.
+    auto dump = member.keys.dump();
+    pseudo_client reloaded{
+            member_seed, false, group_pk.data(), std::nullopt, std::nullopt, std::nullopt, dump};
+    REQUIRE(reloaded.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*reloaded.keys.active_key_message("supphash"))) ==
+          to_hex(supp));
+    CHECK_FALSE(reloaded.keys.active_key_message("keyhash1"));
+}
+
+namespace {
+
+// Rebuilds a Keys dump with an extra "C" entry whose hash is not named in "A" -- the sort of orphan
+// a hand-written or corrupted dump can carry, and which nothing would ever prune again.
+std::vector<unsigned char> add_orphan_retained_message(
+        std::span<const unsigned char> dump, std::string_view hash) {
+    oxenc::bt_dict_consumer d{dump};
+    std::string out = "d";
+
+    REQUIRE(d.skip_until("A"));
+    out += "1:A";
+    out += d.consume_list_data();
+
+    std::map<std::string, std::string> msgs;
+    if (d.skip_until("C")) {
+        auto c = d.consume_dict_consumer();
+        while (!c.is_finished()) {
+            auto [h, v] = c.next_string();
+            msgs.emplace(h, v);
+        }
+    }
+    REQUIRE(msgs.emplace(hash, "not a keys message at all").second);
+    {
+        oxenc::bt_dict_producer c;
+        for (const auto& [h, v] : msgs)
+            c.append(h, v);
+        out += "1:C";
+        out += c.view();
+    }
+
+    REQUIRE(d.skip_until("L"));
+    out += "1:L";
+    out += d.consume_list_data();
+    if (d.skip_until("P")) {
+        out += "1:P";
+        out += d.consume_dict_data();
+    }
+    out += "e";
+    return session::to_vector(out);
+}
+
+}  // namespace
+
+TEST_CASE("Group Keys - orphaned retained messages", "[config][groups][keys][recovery]") {
+
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    SECTION("an orphan in the dump is dropped, and the cleaned dump is written back") {
+        auto tampered = add_orphan_retained_message(member.keys.dump(), "zorphanhash");
+        pseudo_client reloaded{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                tampered};
+
+        CHECK_FALSE(reloaded.keys.active_key_message("zorphanhash"));
+        CHECK(reloaded.keys.active_key_message("keyhash1"));
+
+        // Pruning it in memory is only half the job: the orphan is still on disk until something
+        // asks for a dump, and nothing else here would.
+        CHECK(reloaded.keys.needs_dump());
+
+        auto cleaned = reloaded.keys.dump();
+        pseudo_client again{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                cleaned};
+        CHECK_FALSE(again.keys.active_key_message("zorphanhash"));
+        CHECK(again.keys.active_key_message("keyhash1"));
+        // A dump with nothing to prune must not ask to be rewritten on every load.
+        CHECK_FALSE(again.keys.needs_dump());
     }
 }
