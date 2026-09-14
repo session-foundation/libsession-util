@@ -83,7 +83,8 @@ TEST_CASE("Client: a nickname too long to sync is refused rather than stored", "
     std::string at_limit(config::contact_info::MAX_NAME_LENGTH, 'y');
     CHECK_FALSE(config::validate_contact_name(at_limit).has_value());
     c->dm(id, await)->set_nickname(at_limit, await);
-    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname == at_limit);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
+          at_limit);
 }
 
 TEST_CASE("Client: settings from another device reach the conversation", "[client][configs]") {

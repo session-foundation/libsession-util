@@ -107,8 +107,9 @@ TEST_CASE("Core: running out of members ends the walk", "[core][swarm]") {
     CHECK(all_distinct(attempts));
 }
 
-TEST_CASE("Core: a failure that is not the member's fault is not retried elsewhere",
-          "[core][swarm]") {
+TEST_CASE(
+        "Core: a failure that is not the member's fault is not retried elsewhere",
+        "[core][swarm]") {
     PollFixture f{3};
 
     // A 500 says the request was carried and the server disliked it.  Asking a different member of
