@@ -134,7 +134,7 @@ TEST_CASE("Client: a page size has to be a page", "[client][convos]") {
 
     // The handler form refuses on the calling thread too, rather than reporting it: the caller is
     // still there to catch, and a bad page size is its bug rather than a runtime condition.
-    auto ignore = [](std::optional<std::string>, std::vector<Message>) {};
+    auto ignore = [](Expected<std::vector<Message>>) {};
     CHECK_THROWS_AS(c->conversation(id, await)->messages(0, ignore), std::invalid_argument);
 
     CHECK(c->conversation(id, await)->messages(1, await).size() == 1);
@@ -175,11 +175,16 @@ TEST_CASE(
     // work runs: a temporary, a handler's parameter, or a list element whose list got replaced.  So
     // the operation must not reach back into the object -- and only the handler form can get this
     // wrong, since the waiting form runs before it returns.
-    std::optional<std::string> error = "not called";
+    std::optional<Error> error = Error{"test.not_called", "not called"};
     {
         auto convo = c->conversation(id, await);
         REQUIRE(convo);
-        convo->mark_read([&](auto err) { error = std::move(err); });
+        convo->mark_read([&](auto r) {
+            if (r)
+                error.reset();
+            else
+                error = std::move(r).error();
+        });
     }  // convo destroyed here, before the loop has run the work
     sync(*c);
 
@@ -187,11 +192,14 @@ TEST_CASE(
     CHECK(c->conversation(id, await)->unread() == 0);
 
     // And on an outright temporary, which is how it reads at a call site.
-    std::optional<std::string> paged = "not called";
+    std::optional<Error> paged = Error{"test.not_called", "not called"};
     size_t got = 0;
-    c->conversation(id, await)->messages(50, [&](auto err, auto msgs) {
-        paged = std::move(err);
-        got = msgs.size();
+    c->conversation(id, await)->messages(50, [&](auto r) {
+        if (r) {
+            paged.reset();
+            got = r->size();
+        } else
+            paged = std::move(r).error();
     });
     sync(*c);
     CHECK_FALSE(paged.has_value());

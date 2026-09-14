@@ -457,7 +457,7 @@ device::map Devices::devices(
     return devs;
 }
 
-void Devices::device_info(failable_function<void(std::pair<device::Info, bool>)> cb) {
+void Devices::device_info(result_function<std::pair<device::Info, bool>> cb) {
     async([this] { return _device_info(); }, std::move(cb));
 }
 
@@ -484,7 +484,7 @@ bool device::Info::same_user_fields(const Info& other) const {
     return fields(*this) == fields(other);
 }
 
-void Devices::update_info(device::Info info, failable_function<void()> cb) {
+void Devices::update_info(device::Info info, result_function<> cb) {
     async([this, info = std::move(info)] { _update_info(info); }, std::move(cb));
 }
 
@@ -1138,7 +1138,7 @@ void Devices::receive_device_group_message(std::span<const std::byte> data) {
     tx.commit();
 }
 
-void Devices::build_link_request(failable_function<void(LinkRequestResult)> cb) {
+void Devices::build_link_request(result_function<LinkRequestResult> cb) {
     async([this] { return _build_link_request(); }, std::move(cb));
 }
 

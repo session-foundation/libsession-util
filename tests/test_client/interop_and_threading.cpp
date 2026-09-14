@@ -11,13 +11,15 @@ TEST_CASE("Client: an asynchronous call reports that it succeeded", "[client][ca
 
     // Qualified, because Client masks the asynchronous forms deliberately: choosing the easy
     // class means choosing it for everything.
-    std::optional<std::string> reported_error = "not called";
+    std::optional<Error> reported_error = Error{"test.not_called", "not called"};
     std::vector<AnyConversation> got;
-    c->Client::conversations(
-            [&](std::optional<std::string> error, std::vector<AnyConversation> cs) {
-                reported_error = std::move(error);
-                got = std::move(cs);
-            });
+    c->Client::conversations([&](Expected<std::vector<AnyConversation>> r) {
+        if (r) {
+            reported_error.reset();
+            got = *std::move(r);
+        } else
+            reported_error = std::move(r).error();
+    });
     sync(*c);
 
     // Called exactly once, and saying it worked rather than leaving the caller to assume so.

@@ -28,31 +28,6 @@ namespace session {
 struct await_t {};
 inline constexpr await_t await{};
 
-namespace detail {
-    template <typename Sig>
-    struct failable_function;
-
-    template <typename... A>
-    struct failable_function<void(A...)> {
-        using type = std::function<void(std::optional<std::string> error, A...)>;
-    };
-}  // namespace detail
-
-/// A handler an application passes to one of the asynchronous methods, written in terms of what
-/// that method produces: `failable_function<void(int64_t message_id)>` is a handler taking a
-/// message id.
-///
-/// What it adds is the leading `error` argument every one of them carries -- unset when the call
-/// succeeded, and otherwise saying what went wrong.  Every such handler is invoked exactly once,
-/// unless the object it was given to is destroyed before its work runs, so a caller is never left
-/// waiting on an answer that is not coming; the error argument is how a failure says so, since a
-/// call that has been dispatched has no caller left to throw to.
-///
-/// Written as an alias rather than spelled out at each declaration so that the convention is stated
-/// once and the argument cannot be forgotten or put in the wrong place.
-template <typename Sig>
-using failable_function = typename detail::failable_function<Sig>::type;
-
 /// A handler an application passes to one of the asynchronous methods, written in terms of what
 /// that method produces: `result_function<int64_t>` is handed either a message id or the reason
 /// there isn't one, and `result_function<>` is handed either "that worked" or the reason it did
