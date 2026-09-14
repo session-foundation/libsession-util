@@ -1015,6 +1015,7 @@ class Client {
 
     void _require_dm(std::string_view op, const ConversationId& id);
     void _require_contact(std::string_view op, const ConversationId& id);
+    void _require_page(std::string_view op, int limit);
     void _require_readable(const std::vector<OutgoingAttachment>& attachments);
 
     // Everything a send must be able to reject before storing anything: the conversation kind, the

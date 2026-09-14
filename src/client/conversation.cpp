@@ -41,6 +41,7 @@ void Conversation::messages(
         std::optional<MessageCursor> before,
         bool include_deleted,
         failable_function<void(std::vector<Message>)> cb) const {
+    _client->_require_page("messages", limit);
     _client->_async(
             [c = _client, id = id, limit, before, include_deleted] {
                 return c->_messages(id, limit, before, include_deleted);
@@ -60,6 +61,7 @@ std::vector<Message> Conversation::messages(
 }
 std::vector<Message> Conversation::messages(
         int limit, std::optional<MessageCursor> before, bool include_deleted, await_t) const {
+    _client->_require_page("messages", limit);
     return _client->loop.call_get([this, limit, before, include_deleted] {
         return _client->_messages(id, limit, before, include_deleted);
     });
