@@ -305,8 +305,8 @@ local clang(version) = debian_build(
               ' -DCMAKE_CXX_COMPILER=clang++-' + version
 );
 
-local full_llvm(version) = debian_build(
-  'Debian sid/llvm-' + version,
+local full_llvm(version, cxx=null) = debian_build(
+  'Debian sid/llvm-' + version + (if cxx == null then '' else '/C++' + cxx),
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version, ' lld-' + version, ' libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
@@ -315,6 +315,7 @@ local full_llvm(version) = debian_build(
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
               ' -DCMAKE_CXX_FLAGS="-stdlib=libc++ -fcolor-diagnostics" ' +
+              (if cxx == null then '' else '-DCMAKE_CXX_STANDARD=' + cxx + ' ') +
               ' -DOXEN_LOGGING_FORCE_SUBMODULES=ON ' +
               std.join(' ', [
                 '-DDEPS_FORCE_' + m + '_SUBMODULE=ON'
@@ -479,10 +480,14 @@ local static_build(name,
   debian_build('Debian testing', docker_base + 'debian-testing'),
 
   // C++23, which is what `session::Expected` is written against: under it `expected.hpp` resolves
-  // to `std::expected` rather than the local stand-in, so this compiles every use in the project
+  // to `std::expected` rather than the local stand-in, so these compile every use in the project
   // against the real thing.  That is what keeps the stand-in a strict subset -- a use that has
   // drifted outside it fails here rather than waiting for whoever eventually raises the standard.
+  //
+  // Both libstdc++ and libc++, because the two disagree about plenty and a subset that only holds
+  // against one of them is not a subset.
   debian_build('Debian sid/C++23', docker_base + 'debian-sid', cmake_extra='-DCMAKE_CXX_STANDARD=23'),
+  full_llvm(23, cxx=23),
 
   clang(19),
   full_llvm(19),
