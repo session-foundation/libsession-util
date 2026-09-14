@@ -12,6 +12,9 @@ check_submodule(protobuf)
 check_submodule(date)
 check_submodule(session-sqlite SQLiteCpp cmake/session-deps)
 
+# 1.2.2+ required for logging sink removal support
+set(OXEN_LOGGING_MIN_VERSION 1.2.2 CACHE STRING "")
+
 if(NOT BUILD_STATIC_DEPS AND NOT FORCE_ALL_SUBMODULES)
   find_package(PkgConfig REQUIRED)
 endif()
