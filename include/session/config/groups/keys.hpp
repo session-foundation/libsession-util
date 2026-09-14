@@ -141,10 +141,16 @@ class Keys : public ConfigSig {
     // Checks for and drops expired keys.
     void remove_expired();
 
-    // Drops any retained message bytes whose hash is no longer in `active_msgs_`.  Derived from
-    // `active_msgs_` rather than repeated at each place that drops hashes, so that a new way of
-    // dropping a hash cannot leak bytes by forgetting to prune here as well.
-    void prune_key_msgs();
+    // Drops any retained message bytes whose hash is no longer in `active_msgs_`, returning true
+    // if anything was dropped.  Derived from `active_msgs_` rather than repeated at each place
+    // that drops hashes, so that a new way of dropping a hash cannot leak bytes by forgetting to
+    // prune here as well.
+    //
+    // The survivors have to be taken across *all* generations, not just the ones being dropped: a
+    // supplemental carries every key in `keys_`, so one hash is routinely named by several
+    // generations, and erasing per dropped generation would strand a hash that is still active
+    // under a newer one.
+    bool prune_key_msgs();
 
     // Loads existing state from a previous dump of keys data
     void load_dump(std::span<const unsigned char> dump);

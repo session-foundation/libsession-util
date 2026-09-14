@@ -201,11 +201,16 @@ void Keys::load_dump(std::span<const unsigned char> dump) {
     prune_key_msgs();
 }
 
-void Keys::prune_key_msgs() {
+bool Keys::prune_key_msgs() {
     if (key_msgs_.empty())
-        return;
-    auto keep = active_hashes();
-    std::erase_if(key_msgs_, [&](const auto& item) { return !keep.count(item.first); });
+        return false;
+    // Views, not copies: `active_msgs_` owns these strings and outlives the lookup.
+    std::unordered_set<std::string_view> keep;
+    for (const auto& [gen, hashes] : active_msgs_)
+        keep.insert(hashes.begin(), hashes.end());
+    auto dropped =
+            std::erase_if(key_msgs_, [&](const auto& item) { return !keep.contains(item.first); });
+    return dropped > 0;
 }
 
 size_t Keys::size() const {
@@ -1225,14 +1230,18 @@ void Keys::remove_expired() {
     }
 
     // Drop any active message hashes for generations we are no longer keeping around
-    if (!keys_.empty())
-        active_msgs_.erase(
-                active_msgs_.begin(), active_msgs_.lower_bound(keys_.front().generation));
-    else
+    bool dropped_hashes = false;
+    if (!keys_.empty()) {
+        auto keep_from = active_msgs_.lower_bound(keys_.front().generation);
+        dropped_hashes = keep_from != active_msgs_.begin();
+        active_msgs_.erase(active_msgs_.begin(), keep_from);
+    } else {
         // Keys is empty, which means we aren't keep *any* keys around (or they are all invalid or
         // something) and so it isn't really up to us to keep them alive, since that's a history of
         // the group we apparently don't have access to.
+        dropped_hashes = !active_msgs_.empty();
         active_msgs_.clear();
+    }
 
     // Retained message bytes follow the hashes exactly, for both of the above branches, so they
     // expire on the same schedule as the keys; without this an expired generation's bytes would sit
@@ -1243,7 +1252,11 @@ void Keys::remove_expired() {
     // 177 + 48*N bytes for N members rounded up to a multiple of MESSAGE_KEY_MULTIPLE (see the
     // arithmetic in keys.hpp), so a large group that rekeys often can carry a sizeable dump.
     // Bounded and predictable, not necessarily small.
-    prune_key_msgs();
+    //
+    // Every path that adds bytes adds the hash too, so nothing can be orphaned unless a hash was
+    // just dropped -- which is the uncommon case, and this runs on every message load.
+    if (dropped_hashes)
+        prune_key_msgs();
 }
 
 bool Keys::needs_rekey() const {
