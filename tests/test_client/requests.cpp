@@ -27,9 +27,8 @@ TEST_CASE("Client: a stranger's message is a request, not a conversation", "[cli
 
     // And it is synced, so a request answered on one device is not still waiting on another.  Their
     // writing to us is what says they approved us; nothing yet says we approved them.
-    auto entry = in_configs(*c, [&](auto& cfg) {
-        return cfg.contacts().get(oxenc::to_hex(sender.session_id));
-    });
+    auto entry = in_configs(
+            *c, [&](auto& cfg) { return cfg.contacts().get(oxenc::to_hex(sender.session_id)); });
     REQUIRE(entry);
     CHECK(entry->approved_me);
     CHECK_FALSE(entry->approved);

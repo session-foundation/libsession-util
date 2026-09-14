@@ -221,7 +221,6 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
 
 LIBSESSION_EXPORT CONNECTION_STATUS session_network_get_status(network_object* network);
 
-
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object* network,
         const char* swarm_pubkey_hex,

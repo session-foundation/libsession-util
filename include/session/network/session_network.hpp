@@ -78,10 +78,8 @@ class Network {
     /// down: the connection it can see belongs to the last relay rather than to us, so it would
     /// key the subscription to that relay.  This is not a property of onion routing in general --
     /// `session_router` is onion-routed too, and is the mode this exists for.
-    std::function<
-            void(const ed25519_pubkey& node,
-                 std::string_view endpoint,
-                 std::span<const std::byte> body)>
+    std::function<void(
+            const ed25519_pubkey& node, std::string_view endpoint, std::span<const std::byte> body)>
             on_server_push;
 
     /// Hook to be notified once a connection to `node` is usable, including when it comes back
@@ -118,9 +116,7 @@ class Network {
     /// keys a subscription to the connection the request arrived on, which for an onion request is
     /// the last relay's rather than ours, so subscribing over one would register a relay as the
     /// subscriber.  Anything relying on pushed messages has to keep polling in that mode.
-    bool supports_server_push() const {
-        return config.router != opt::router::Type::onion_requests;
-    }
+    bool supports_server_push() const { return config.router != opt::router::Type::onion_requests; }
 
     void suspend();
     void resume(bool automatically_reconnect = true);

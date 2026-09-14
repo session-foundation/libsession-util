@@ -165,8 +165,7 @@ int64_t Conversation::send_message(OutgoingMessage msg, await_t) {
 }
 int64_t Conversation::send_message(OutgoingMessage msg, upload_progress on_upload, await_t) {
     _client->_require_sendable("send_message", id, msg);
-    return _client->call_get(
-            [&] { return _client->_send_message(id, msg, std::move(on_upload)); });
+    return _client->call_get([&] { return _client->_send_message(id, msg, std::move(on_upload)); });
 }
 
 // -- Destroying ---------------------------------------------------------------------------------
@@ -194,8 +193,7 @@ void Conversation::delete_conversation(await_t) {
 }
 void Conversation::delete_conversation(bool keep_messages, await_t) {
     _client->_require_dm("delete_conversation", id);
-    _client->call_get(
-            [this, keep_messages] { _client->_delete_conversation(id, keep_messages); });
+    _client->call_get([this, keep_messages] { _client->_delete_conversation(id, keep_messages); });
 }
 
 // -- One-to-one only ----------------------------------------------------------------------------

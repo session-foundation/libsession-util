@@ -149,9 +149,8 @@ inline void merge_contacts(Client& c, const std::vector<std::vector<std::byte>>&
         m.data = messages[i];
         incoming.push_back(std::move(m));
     }
-    TestHelper::on_loop(c.core, [&] {
-        c.core.receive_messages(incoming, config::Namespace::Contacts, true);
-    });
+    TestHelper::on_loop(
+            c.core, [&] { c.core.receive_messages(incoming, config::Namespace::Contacts, true); });
 }
 
 }  // namespace client_test

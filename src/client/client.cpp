@@ -685,8 +685,7 @@ void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb
 }
 
 bool Client::delete_message(int64_t message_id, await_t) {
-    return call_get(
-            [this, message_id] { return _delete_message(message_id, Deletion::here); });
+    return call_get([this, message_id] { return _delete_message(message_id, Deletion::here); });
 }
 
 void Client::set_cache_dir(std::filesystem::path dir) {
@@ -1263,13 +1262,13 @@ void Client::save_attachment(
     // is whether the file arrived, which is minutes away.  So the callback is carried down to the
     // download's own completion, and only the failures that happen before it starts come back here.
     call([this,
-               message_id,
-               index,
-               dest = std::move(dest),
-               on_progress = std::move(on_progress),
-               cb,
-               notify_sender,
-               replace]() mutable {
+          message_id,
+          index,
+          dest = std::move(dest),
+          on_progress = std::move(on_progress),
+          cb,
+          notify_sender,
+          replace]() mutable {
         try {
             _save_attachment(
                     message_id,
@@ -2423,9 +2422,9 @@ void Client::_prefetch_picture(sqlite::Connection& c, int64_t account, const std
         auto& [sid, key] = *row;
 
         call_soon([this,
-                        id = ConversationId::dm(sid),
-                        url,
-                        key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
+                   id = ConversationId::dm(sid),
+                   url,
+                   key = std::vector<std::byte>{key.begin(), key.end()}]() mutable {
             _fetch_picture(id, std::move(url), std::move(key));
         });
     } catch (const std::exception& e) {

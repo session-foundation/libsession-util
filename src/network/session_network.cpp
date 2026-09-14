@@ -526,55 +526,52 @@ void Network::send_request(Request request, network_response_callback_t callback
         auto processed_request = _preprocess_request(std::move(request));
         // Bare `this`: the router is destroyed by ~Network before our queue is stopped, so it
         // cannot still be holding this callback by the time any of our state goes.
-        auto router_callback =
-                [this, original_req = processed_request, cb = std::move(callback)](
-                        bool success, bool timeout, int16_t status_code, auto headers, auto body) {
-                    const auto dest_is_snode =
-                            std::holds_alternative<service_node>(original_req.destination);
+        auto router_callback = [this, original_req = processed_request, cb = std::move(callback)](
+                                       bool success,
+                                       bool timeout,
+                                       int16_t status_code,
+                                       auto headers,
+                                       auto body) {
+            const auto dest_is_snode =
+                    std::holds_alternative<service_node>(original_req.destination);
 
-                    // If we got a successful response (with a body) and the request was sent to a
-                    // service node then we should update the network state based on the response
-                    // (Note: we don't want to do this for server requests because they could
-                    // include values in different formats, eg. the "Session Network" API returns
-                    // `t` in seconds)
-                    if (success && body && dest_is_snode)
-                        _update_network_state(*body);
+            // If we got a successful response (with a body) and the request was sent to a
+            // service node then we should update the network state based on the response
+            // (Note: we don't want to do this for server requests because they could
+            // include values in different formats, eg. the "Session Network" API returns
+            // `t` in seconds)
+            if (success && body && dest_is_snode)
+                _update_network_state(*body);
 
-                    int16_t final_status_code = status_code;
+            int16_t final_status_code = status_code;
 
-                    if (body)
-                        if (auto uniform_error = response::find_uniform_batch_error(*body))
-                            final_status_code = *uniform_error;
+            if (body)
+                if (auto uniform_error = response::find_uniform_batch_error(*body))
+                    final_status_code = *uniform_error;
 
-                    // If we got a 406 from a snode, or a 425 from a server, then the device clock
-                    // is out of sync so we need to kick off a clock resync request
-                    if ((final_status_code == ERROR_NOT_ACCEPTABLE && dest_is_snode) ||
-                        (final_status_code == ERROR_TOO_EARLY && !dest_is_snode)) {
-                        _resync_clock(std::move(original_req), std::move(cb));
-                        return;
-                    }
+            // If we got a 406 from a snode, or a 425 from a server, then the device clock
+            // is out of sync so we need to kick off a clock resync request
+            if ((final_status_code == ERROR_NOT_ACCEPTABLE && dest_is_snode) ||
+                (final_status_code == ERROR_TOO_EARLY && !dest_is_snode)) {
+                _resync_clock(std::move(original_req), std::move(cb));
+                return;
+            }
 
-                    // A 421 says this node does not hold the account we asked about, and its body
-                    // carries the swarm that does.  Take the correction -- it is our cache and the
-                    // answer is authoritative -- but do not act on it: which member to ask next,
-                    // and whether to ask at all, is the caller's to decide, and only the caller
-                    // can know which node it ended up talking to.
-                    if (final_status_code == 421 && dest_is_snode && original_req.swarm_pubkey &&
-                        body)
-                        _adopt_swarm_from_421(*original_req.swarm_pubkey, *body);
+            // A 421 says this node does not hold the account we asked about, and its body
+            // carries the swarm that does.  Take the correction -- it is our cache and the
+            // answer is authoritative -- but do not act on it: which member to ask next,
+            // and whether to ask at all, is the caller's to decide, and only the caller
+            // can know which node it ended up talking to.
+            if (final_status_code == 421 && dest_is_snode && original_req.swarm_pubkey && body)
+                _adopt_swarm_from_421(*original_req.swarm_pubkey, *body);
 
-                    // `final_status_code`, not the raw one: a batch whose subrequests all failed
-                    // the same way arrives here as a transport-level 200, and reporting that
-                    // would leave the caller unable to tell a misdirected request from any other
-                    // failure -- which is exactly the decision it is now responsible for making.
-                    auto final_success =
-                            (success && final_status_code >= 200 && final_status_code <= 299);
-                    cb(final_success,
-                       timeout,
-                       final_status_code,
-                       std::move(headers),
-                       std::move(body));
-                };
+            // `final_status_code`, not the raw one: a batch whose subrequests all failed
+            // the same way arrives here as a transport-level 200, and reporting that
+            // would leave the caller unable to tell a misdirected request from any other
+            // failure -- which is exactly the decision it is now responsible for making.
+            auto final_success = (success && final_status_code >= 200 && final_status_code <= 299);
+            cb(final_success, timeout, final_status_code, std::move(headers), std::move(body));
+        };
 
         _router->send_request(std::move(processed_request), std::move(router_callback));
     } catch (const std::exception& e) {
@@ -1451,8 +1448,8 @@ LIBSESSION_C_API bool session_network_init(
                             std::chrono::seconds{config->quic_handshake_timeout_seconds}});
 
                 if (config->quic_tunnel_handshake_timeout_seconds > 0)
-                    cpp_opts.emplace_back(opt::quic_tunnel_handshake_timeout{std::chrono::seconds{
-                            config->quic_tunnel_handshake_timeout_seconds}});
+                    cpp_opts.emplace_back(opt::quic_tunnel_handshake_timeout{
+                            std::chrono::seconds{config->quic_tunnel_handshake_timeout_seconds}});
 
                 if (config->quic_keep_alive_seconds > 0)
                     cpp_opts.emplace_back(opt::quic_keep_alive{

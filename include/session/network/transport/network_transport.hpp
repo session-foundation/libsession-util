@@ -23,9 +23,7 @@ class ITransport {
     ///
     /// Runs on the network loop and must not throw.
     std::function<void(
-            const ed25519_pubkey& node,
-            std::string_view endpoint,
-            std::span<const std::byte> body)>
+            const ed25519_pubkey& node, std::string_view endpoint, std::span<const std::byte> body)>
             on_server_push;
 
     /// Called once a connection to `node` is up and requests can be sent on it, including when it

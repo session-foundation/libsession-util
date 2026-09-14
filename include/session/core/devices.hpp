@@ -246,7 +246,6 @@ class Devices final : detail::CoreComponent {
     LinkRequestResult _build_link_request();
 
   public:
-
     // Updates this device's info locally to match the given info; if the current device is
     // registered then this dirties the device config data, requiring a push.
     //

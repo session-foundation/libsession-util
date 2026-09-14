@@ -98,13 +98,15 @@ TEST_CASE("Client: marking unread syncs, and reading clears it", "[client][volat
     // Survives having read everything, which is the whole point of it.
     CHECK(c->conversation(id, await)->marked_unread());
     CHECK(c->conversation(id, await)->unread() == 0);
-    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); })
-                  ->unread);
+    CHECK(in_configs(*c, [&](auto& cfg) {
+              return cfg.convo_info_volatile().get_1to1(hex);
+          })->unread);
 
     c->conversation(id, await)->mark_read(await);
     CHECK_FALSE(c->conversation(id, await)->marked_unread());
-    CHECK_FALSE(in_configs(*c, [&](auto& cfg) { return cfg.convo_info_volatile().get_1to1(hex); })
-                        ->unread);
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) {
+                    return cfg.convo_info_volatile().get_1to1(hex);
+                })->unread);
 }
 
 TEST_CASE("Client: read state for a conversation we do not have is ignored", "[client][volatile]") {

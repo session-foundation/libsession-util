@@ -46,9 +46,9 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     // Clearing the nickname falls back to what they call themselves.
     c->dm(id, await)->set_nickname("", await);
     CHECK(convo().dm()->nickname.empty());
-    CHECK_FALSE(
-            in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
-            "Bilbo");
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) {
+                    return cfg.contacts().get(them);
+                })->nickname == "Bilbo");
 
     // A timer without a mode expires nothing, so it is not stored as though it were a setting.
     c->conversation(id, await)->set_expiry(config::expiration_mode::none, 3600s, await);
@@ -83,7 +83,8 @@ TEST_CASE("Client: a nickname too long to sync is refused rather than stored", "
     std::string at_limit(config::contact_info::MAX_NAME_LENGTH, 'y');
     CHECK_FALSE(config::validate_contact_name(at_limit).has_value());
     c->dm(id, await)->set_nickname(at_limit, await);
-    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname == at_limit);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
+          at_limit);
 }
 
 TEST_CASE("Client: settings from another device reach the conversation", "[client][configs]") {
