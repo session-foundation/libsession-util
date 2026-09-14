@@ -438,6 +438,13 @@ local static_build(name,
 
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
+
+  // C++23, which is what `session::Expected` is written against: under it `expected.hpp` resolves
+  // to `std::expected` rather than the local stand-in, so this compiles every use in the project
+  // against the real thing.  That is what keeps the stand-in a strict subset -- a use that has
+  // drifted outside it fails here rather than waiting for whoever eventually raises the standard.
+  debian_build('Debian sid/C++23', docker_base + 'debian-sid', cmake_extra='-DCMAKE_CXX_STANDARD=23'),
+
   clang(19),
   full_llvm(19),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),

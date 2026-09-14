@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <optional>
+#include <session/expected.hpp>
 #include <string>
 
 namespace session {
@@ -51,5 +52,24 @@ namespace detail {
 /// once and the argument cannot be forgotten or put in the wrong place.
 template <typename Sig>
 using failable_function = typename detail::failable_function<Sig>::type;
+
+/// A handler an application passes to one of the asynchronous methods, written in terms of what
+/// that method produces: `result_function<int64_t>` is handed either a message id or the reason
+/// there isn't one, and `result_function<>` is handed either "that worked" or the reason it did
+/// not.
+///
+/// One parameter rather than two, which is the point: the value and the failure are the same
+/// object, so there is no default-constructed value sitting beside an error waiting to be mistaken
+/// for an answer.
+///
+/// **Every such handler is invoked exactly once**, unless the object it was given to is destroyed
+/// before its work runs, so a caller is never left waiting for an answer that is not coming.  That
+/// is what the error side is for: a call that has been dispatched has no caller left to throw to.
+///
+/// A handler carrying several values names them at the declaration -- `result_function<std::tuple<
+/// device::Info, bool>>`, or better a struct -- rather than getting them from an arity-dependent
+/// parameter list.  Unpacked at the call site with `auto& [info, fresh] = *r;`.
+template <typename T = void>
+using result_function = std::function<void(Expected<T>)>;
 
 }  // namespace session
