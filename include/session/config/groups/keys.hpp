@@ -491,6 +491,12 @@ class Keys : public ConfigSig {
             std::span<const unsigned char> signing_value,
             bool binary = false) const;
 
+    static Keys::swarm_auth swarm_subaccount_sign_as_user(
+            std::span<const unsigned char> user_ed25519_sk,
+            std::span<const unsigned char> msg,
+            std::span<const unsigned char> sign_val,
+            bool binary = false);
+
     /// API: groups/Keys::swarm_subaccount_token
     ///
     /// Constructs the subaccount token for a session id.  The main use of this is to submit a swarm
