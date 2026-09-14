@@ -1161,6 +1161,11 @@ TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recover
         REQUIRE(held.count("keyhash1"));
         CHECK(to_hex(session::to_vector(held.at("keyhash1"))) == to_hex(rekey1));
 
+        auto one = member.keys.active_key_message("keyhash1");
+        REQUIRE(one);
+        CHECK(to_hex(session::to_vector(*one)) == to_hex(rekey1));
+        CHECK_FALSE(member.keys.active_key_message("nosuchhash"));
+
         // Every hash we advertise for renewal has bytes behind it.
         CHECK(as_set(member.keys.active_hashes()) == std::set<std::string>{{"keyhash1"s}});
 

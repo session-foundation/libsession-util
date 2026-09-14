@@ -1175,6 +1175,13 @@ std::map<std::string, std::span<const unsigned char>> Keys::active_key_messages(
     return msgs;
 }
 
+std::optional<std::span<const unsigned char>> Keys::active_key_message(
+        std::string_view msg_hash) const {
+    if (auto it = key_msgs_.find(std::string{msg_hash}); it != key_msgs_.end())
+        return std::span<const unsigned char>{it->second.data(), it->second.size()};
+    return std::nullopt;
+}
+
 void Keys::remove_expired() {
     if (keys_.size() >= 2) {
         // When we're done, this will point at the first element we want to keep (i.e. we want to
@@ -1534,10 +1541,9 @@ LIBSESSION_C_API bool groups_keys_active_message(
         const unsigned char** data,
         size_t* datalen) {
     assert(msg_hash && data && datalen);
-    auto msgs = unbox(conf).active_key_messages();
-    if (auto it = msgs.find(msg_hash); it != msgs.end()) {
-        *data = it->second.data();
-        *datalen = it->second.size();
+    if (auto msg = unbox(conf).active_key_message(msg_hash)) {
+        *data = msg->data();
+        *datalen = msg->size();
         return true;
     }
     return false;
