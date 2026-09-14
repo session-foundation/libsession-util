@@ -1165,8 +1165,14 @@ bool Keys::load_key_message(
         // typically.  Still worth retaining: it is part of the generation, and a member who gets
         // only some of a generation's messages doesn't get the key.
         active_msgs_[*max_gen].emplace(hash);
-        key_msgs_.insert_or_assign(std::string{hash}, to_vector(data));
+        // Same hash means same ciphertext (the storage server derives one from the other) so a
+        // re-delivery brings bytes we already hold.  Keeping the first copy skips re-copying them;
+        // the keys namespace is re-read in full whenever a device is missing retained bytes, so
+        // this is not a rare path.
+        if (auto key = std::string{hash}; !key_msgs_.contains(key))
+            key_msgs_.emplace(std::move(key), to_vector(data));
         remove_expired();
+        // Unconditional: `remove_expired()` above can prune without flagging a dump of its own.
         needs_dump_ = true;
     }
 
