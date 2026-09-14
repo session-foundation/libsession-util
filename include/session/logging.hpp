@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -10,6 +11,10 @@
 namespace spdlog::level {
 enum level_enum : int;
 }
+
+namespace oxen::log {
+class formatted_callback_sink;
+}  // namespace oxen::log
 
 namespace session {
 
@@ -45,6 +50,11 @@ inline const LogLevel LogLevel::warn{LOG_LEVEL_WARN};
 inline const LogLevel LogLevel::error{LOG_LEVEL_ERROR};
 inline const LogLevel LogLevel::critical{LOG_LEVEL_CRITICAL};
 
+/// A registered logger, as returned by `add_logger` and accepted by `remove_logger`.  The sink is
+/// only forward-declared, so spdlog stays out of this header: hold the handle, don't dereference
+/// it.
+using LoggerHandle = std::shared_ptr<oxen::log::formatted_callback_sink>;
+
 /// API: add_logger
 ///
 /// Adds a logger callback for oxen-logging log messages (such as from the network object).
@@ -56,9 +66,25 @@ inline const LogLevel LogLevel::critical{LOG_LEVEL_CRITICAL};
 ///     callback(std::string_view msg)
 ///     callback(std::string_view msg, std::string_view log_cat, LogLevel level)
 ///
-void add_logger(std::function<void(std::string_view msg)> cb);
-void add_logger(
+/// Outputs:
+/// - a handle naming this logger, for `remove_logger`.  Ignoring it is fine if the logger is
+///   meant to last as long as the process.
+LoggerHandle add_logger(std::function<void(std::string_view msg)> cb);
+LoggerHandle add_logger(
         std::function<void(std::string_view msg, std::string_view category, LogLevel level)> cb);
+
+/// API: session/remove_logger
+///
+/// Removes a logger added by `add_logger`.  Removing one that is not registered does nothing.
+///
+/// Logging is serialised against this, so once it returns the callback is neither running nor
+/// reachable, and whatever it captured can be destroyed.  That is the difference from
+/// `clear_loggers`, which drops every logger in the process including ones this caller does not
+/// own.
+///
+/// Inputs:
+/// - `logger` -- [in] the handle returned by `add_logger`.
+void remove_logger(const LoggerHandle& logger);
 
 /// API: session/logger_reset_level
 ///

@@ -24,12 +24,21 @@ std::string_view LogLevel::to_string() const {
     return log::to_string(spdlog_level());
 }
 
-void add_logger(std::function<void(std::string_view msg)> cb) {
-    log::add_sink(std::make_shared<log::formatted_callback_sink>(std::move(cb)));
+LoggerHandle add_logger(std::function<void(std::string_view msg)> cb) {
+    auto sink = std::make_shared<log::formatted_callback_sink>(std::move(cb));
+    log::add_sink(sink);
+    return sink;
 }
-void add_logger(
+LoggerHandle add_logger(
         std::function<void(std::string_view msg, std::string_view category, LogLevel level)> cb) {
-    log::add_sink(std::make_shared<log::formatted_callback_sink>(std::move(cb)));
+    auto sink = std::make_shared<log::formatted_callback_sink>(std::move(cb));
+    log::add_sink(sink);
+    return sink;
+}
+
+void remove_logger(const LoggerHandle& logger) {
+    if (logger)
+        log::remove_sink(logger);
 }
 
 void manual_log(std::string_view msg) {
