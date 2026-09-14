@@ -1212,6 +1212,20 @@ void SnodePool::get_swarm(
                         return get_strike_count(node) < _config.cache_node_strike_threshold;
                     });
 
+            // Within the ones we would use, put the preferred versions first -- again stable, so
+            // each subset keeps its shuffled order.  Strikes stay the outer split: one is a node
+            // that has actually failed us, whereas the version is only a prediction about whether
+            // it can be reached at all.
+            //
+            // Ordering rather than filtering, and only the retained set is touched, so everything
+            // below about adopting struck nodes to make up the numbers is unaffected -- a swarm
+            // with no preferred members still hands back exactly what it did before.
+            if (_config.prefer_min_version)
+                std::ranges::stable_partition(
+                        nodes.begin(), over_nodes.begin(), [&](const auto& node) {
+                            return node.storage_server_version >= *_config.prefer_min_version;
+                        });
+
             auto under_count = nodes.size() - over_nodes.size();
             if (over_nodes.empty()) {
                 // Nothing we can do even if we want more

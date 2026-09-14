@@ -89,7 +89,14 @@ namespace {
                 main_config.cache_min_swarm_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
                 main_config.cache_min_num_refresh_presence_to_include_node,
-                main_config.cache_node_strike_threshold};
+                main_config.cache_node_strike_threshold,
+                // Session Router only.  Onion requests reach a storage server through relays that
+                // do not care what it runs, and `direct` talks to it straight, so in neither case
+                // does the version predict anything -- preferring on it there would narrow the
+                // swarm for no reason.
+                main_config.router == opt::router::Type::session_router
+                        ? std::optional{opt::MIN_SESSION_ROUTER_SS_VERSION}
+                        : std::nullopt};
     }
 
     config::QuicTransport build_quic_transport_config(const config::Config& main_config) {

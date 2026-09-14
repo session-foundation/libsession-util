@@ -35,6 +35,13 @@ namespace config {
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint8_t cache_min_num_refresh_presence_to_include_node;
         uint16_t cache_node_strike_threshold;
+
+        /// Storage server version at or above which a swarm member is preferred, or nullopt to
+        /// treat every member alike.
+        ///
+        /// Deliberately a version rather than a reason: what the version *means* belongs to
+        /// whoever sets this, and this layer only has to order by it.
+        std::optional<std::array<uint16_t, 3>> prefer_min_version;
     };
 }  // namespace config
 

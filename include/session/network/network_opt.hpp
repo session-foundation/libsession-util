@@ -126,6 +126,18 @@ namespace opt {
         }
     };
 
+    /// Storage server version from which a service node is expected to be reachable over Session
+    /// Router, and so worth preferring when a swarm member is chosen in that mode.
+    ///
+    /// The storage server does not run the relay and says nothing about it; this is an inference
+    /// from how releases are packaged.  Every storage server at or above this version on the
+    /// network is paired with oxend 11.6.0, which requires a session-router relay beside it, so an
+    /// older one almost certainly cannot be reached that way.
+    ///
+    /// A preference rather than a requirement, because the relay is not enforced: a node can be new
+    /// enough and still not answer.  Revisit once it is, and whenever the packaging changes.
+    inline constexpr std::array<uint16_t, 3> MIN_SESSION_ROUTER_SS_VERSION = {2, 11, 1};
+
     /// Can be used to override the default (onion_requests) routing method for requests.
     struct router {
         enum class Type {
