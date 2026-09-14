@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cctype>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <oxen/log/format.hpp>
