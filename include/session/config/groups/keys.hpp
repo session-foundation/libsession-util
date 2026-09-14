@@ -644,6 +644,25 @@ class Keys : public ConfigSig {
     ///   exactly as for `pending_config()`.
     std::map<std::string, std::span<const unsigned char>> active_key_messages() const;
 
+    /// API: groups/Keys::active_key_message
+    ///
+    /// Returns the raw bytes of a single active keys message, by its message hash, or
+    /// `std::nullopt` if we retain nothing for that hash.  See `active_key_messages()` for what
+    /// the bytes are for and why a hash named by `active_hashes()` may legitimately have none.
+    ///
+    /// Prefer this over `active_key_messages()` when looking one hash up: the latter builds a new
+    /// map on every call.
+    ///
+    /// Inputs:
+    /// - `msg_hash` -- the message hash to look up
+    ///
+    /// Outputs:
+    /// - the message bytes, or `std::nullopt`.  The span points at data owned by this object and
+    ///   is invalidated by anything that modifies it (e.g. `load_key_message`, `rekey`), exactly
+    ///   as for `pending_config()`.
+    std::optional<std::span<const unsigned char>> active_key_message(
+            std::string_view msg_hash) const;
+
     /// API: groups/Keys::needs_rekey
     ///
     /// Returns true if the key list requires a new key to be generated and pushed to the server (by
