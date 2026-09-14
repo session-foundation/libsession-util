@@ -10,6 +10,7 @@
 #include <oxen/quic/loop.hpp>
 #include <session/attachments.hpp>
 #include <session/client.hpp>
+#include <session/client/error_codes.hpp>
 #include <session/config/contacts.hpp>
 #include <session/config/convo_info_volatile.hpp>
 #include <session/config/expiring.hpp>
@@ -652,7 +653,7 @@ bool Client::is_note_to_self(const ConversationId& id) {
 void Client::retry_send(
         int64_t message_id,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
-        std::function<void(std::optional<std::string>, bool)> cb) {
+        result_function<bool> cb) {
     _async(
             [this, message_id, on_upload = std::move(on_upload)] {
                 return _retry_send(message_id, on_upload);
@@ -670,8 +671,7 @@ bool Client::retry_send(int64_t message_id, await_t) {
     return retry_send(message_id, nullptr, await);
 }
 
-void Client::message_debug(
-        int64_t message_id, failable_function<void(std::optional<std::string>)> cb) {
+void Client::message_debug(int64_t message_id, result_function<std::optional<std::string>> cb) {
     _async([this, message_id] { return _message_debug(message_id); }, std::move(cb));
 }
 
@@ -679,7 +679,7 @@ std::optional<std::string> Client::message_debug(int64_t message_id, await_t) {
     return call_get([this, message_id] { return _message_debug(message_id); });
 }
 
-void Client::delete_message(int64_t message_id, failable_function<void(bool)> cb) {
+void Client::delete_message(int64_t message_id, result_function<bool> cb) {
     _async([this, message_id] { return _delete_message(message_id, Deletion::here); },
            std::move(cb));
 }
@@ -800,19 +800,18 @@ const b32& Client::_cache_encryption_key() {
 void Client::profile_picture(
         const ConversationId& id,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+        result_function<std::optional<std::vector<std::byte>>> cb) {
     call([this, id, on_progress = std::move(on_progress), cb = std::move(cb)]() mutable {
         try {
             _profile_picture(id, std::move(on_progress), std::move(cb));
         } catch (const std::exception& e) {
-            _report(cb, std::optional{std::string{e.what()}}, std::nullopt);
+            _fail<std::optional<std::vector<std::byte>>>(cb, error_from(e));
         }
     });
 }
 
 void Client::profile_picture(
-        const ConversationId& id,
-        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+        const ConversationId& id, result_function<std::optional<std::vector<std::byte>>> cb) {
     profile_picture(id, nullptr, std::move(cb));
 }
 
@@ -821,13 +820,13 @@ void Client::profile_picture(
 void Client::_profile_picture(
         const ConversationId& id,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-        failable_function<void(std::optional<std::vector<std::byte>>)> cb) {
+        result_function<std::optional<std::vector<std::byte>>> cb) {
 
     auto convo = _conversation(id);
     if (!convo || convo->picture().url.empty()) {
         // Nobody has told us of one, or it is a kind whose picture is not wired up yet.  Not an
         // error: there is simply nothing to show.
-        _report(cb, std::optional<std::string>{}, std::nullopt);
+        _report(cb, Expected<std::optional<std::vector<std::byte>>>{std::nullopt});
         return;
     }
 
@@ -839,14 +838,13 @@ void Client::_profile_picture(
 
     // A caller of this deals in an optional, because an absent picture is not an error -- but that
     // case was answered above, so from here anything that is not an error is a picture.
-    failable_function<void(std::vector<std::byte>)> bytes;
+    result_function<std::vector<std::byte>> bytes;
     if (cb)
-        bytes = [cb = std::move(cb)](
-                        std::optional<std::string> error, std::vector<std::byte> data) {
-            if (error)
-                cb(std::move(error), std::nullopt);
+        bytes = [cb = std::move(cb)](Expected<std::vector<std::byte>> r) {
+            if (r)
+                cb(std::optional{*std::move(r)});
             else
-                cb(std::nullopt, std::move(data));
+                cb(unexpected{std::move(r).error()});
         };
 
     _fetch_cached(
@@ -892,35 +890,33 @@ static void set_limit(core::Globals& g, std::string_view key, std::optional<int6
         g.erase(key);
 }
 
-void Client::set_attachment_cache_limit(
-        std::optional<int64_t> bytes, failable_function<void()> cb) {
+void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, result_function<> cb) {
     _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
 }
 void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, await_t) {
     call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
 }
-void Client::attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb) {
+void Client::attachment_cache_limit(result_function<std::optional<int64_t>> cb) {
     _async([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); }, std::move(cb));
 }
 std::optional<int64_t> Client::attachment_cache_limit(await_t) {
     return call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
-void Client::set_auto_download_max_size(
-        std::optional<int64_t> bytes, failable_function<void()> cb) {
+void Client::set_auto_download_max_size(std::optional<int64_t> bytes, result_function<> cb) {
     _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
 }
 void Client::set_auto_download_max_size(std::optional<int64_t> bytes, await_t) {
     call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
 }
-void Client::auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb) {
+void Client::auto_download_max_size(result_function<std::optional<int64_t>> cb) {
     _async([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); }, std::move(cb));
 }
 std::optional<int64_t> Client::auto_download_max_size(await_t) {
     return call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
 }
 
-void Client::display_name(failable_function<void(std::string)> cb) {
+void Client::display_name(result_function<std::string> cb) {
     _async([this] { return std::string{core.configs.user_profile().get_name().value_or("")}; },
            std::move(cb));
 }
@@ -930,7 +926,7 @@ std::string Client::display_name(await_t) {
             [this] { return std::string{core.configs.user_profile().get_name().value_or("")}; });
 }
 
-void Client::set_display_name(std::string_view name, failable_function<void()> cb) {
+void Client::set_display_name(std::string_view name, result_function<> cb) {
     _async([this, name = std::string{name}] { core.configs.user_profile().set_name(name); },
            std::move(cb));
 }
@@ -939,7 +935,7 @@ void Client::set_display_name(std::string_view name, await_t) {
     call_get([this, name] { core.configs.user_profile().set_name(name); });
 }
 
-void Client::notify_media_saved(failable_function<void(bool)> cb) {
+void Client::notify_media_saved(result_function<bool> cb) {
     _async([this] { return core.configs.user_profile().get_notify_media_saved(); }, std::move(cb));
 }
 
@@ -947,7 +943,7 @@ bool Client::notify_media_saved(await_t) {
     return call_get([this] { return core.configs.user_profile().get_notify_media_saved(); });
 }
 
-void Client::set_notify_media_saved(bool notify, failable_function<void()> cb) {
+void Client::set_notify_media_saved(bool notify, result_function<> cb) {
     _async([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); },
            std::move(cb));
 }
@@ -956,7 +952,7 @@ void Client::set_notify_media_saved(bool notify, await_t) {
     call_get([this, notify] { core.configs.user_profile().set_notify_media_saved(notify); });
 }
 
-void Client::delete_message_everywhere(int64_t message_id, failable_function<void(bool)> cb) {
+void Client::delete_message_everywhere(int64_t message_id, result_function<bool> cb) {
     _async([this, message_id] { return _delete_message_everywhere(message_id); }, std::move(cb));
 }
 
@@ -968,13 +964,13 @@ void Client::attachment_data(
         int64_t message_id,
         size_t index,
         std::function<void(const AttachmentProgress&)> on_progress,
-        failable_function<void(std::vector<std::byte>)> cb) {
+        result_function<std::vector<std::byte>> cb) {
     call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
         try {
             _attachment_data(message_id, index, std::move(on_progress), cb);
         } catch (const std::exception& e) {
             log_operation_failure(e);
-            _report(cb, std::optional{std::string{e.what()}}, std::vector<std::byte>{});
+            _fail<std::vector<std::byte>>(cb, error_from(e));
         }
     });
 }
@@ -983,7 +979,7 @@ void Client::_attachment_data(
         int64_t message_id,
         size_t index,
         std::function<void(const AttachmentProgress&)> on_progress,
-        failable_function<void(std::vector<std::byte>)> cb) {
+        result_function<std::vector<std::byte>> cb) {
 
     auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
 
@@ -1017,7 +1013,7 @@ void Client::_attachment_data(
 void Client::_fetch_cached(
         FetchTarget target,
         std::function<void(int64_t, int64_t, std::optional<int>)> progress,
-        failable_function<void(std::vector<std::byte>)> cb,
+        result_function<std::vector<std::byte>> cb,
         std::function<void(const std::string&)> on_hit,
         std::function<void(std::span<const std::byte>)> store) {
 
@@ -1030,7 +1026,7 @@ void Client::_fetch_cached(
             // flicker that means nothing.  The caller gets the bytes.
             if (on_hit)
                 on_hit(name);
-            _report(cb, std::optional<std::string>{}, std::move(*cached));
+            _report(cb, Expected<std::vector<std::byte>>{std::move(*cached)});
             return;
         }
     }
@@ -1078,7 +1074,7 @@ void Client::_fetch_cached(
                         p(done, total, r);
                 });
             },
-            [this, name, store = std::move(store)](std::optional<std::string> error) {
+            [this, name, store = std::move(store)](std::optional<Error> error) {
                 call([this, name, store, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
@@ -1097,12 +1093,14 @@ void Client::_fetch_cached(
                     _in_flight.erase(found);
 
                     for (const auto& w : entry.waiting)
-                        _report(w, error, error ? std::vector<std::byte>{} : *entry.plain);
+                        _report(w,
+                                error ? Expected<std::vector<std::byte>>{unexpected{*error}}
+                                      : Expected<std::vector<std::byte>>{*entry.plain});
                 });
             });
 }
 
-void Client::set_gallery(int64_t message_id, bool gallery, failable_function<void(bool)> cb) {
+void Client::set_gallery(int64_t message_id, bool gallery, result_function<bool> cb) {
     _async([this, message_id, gallery] { return _set_gallery(message_id, gallery); },
            std::move(cb));
 }
@@ -1111,7 +1109,7 @@ bool Client::set_gallery(int64_t message_id, bool gallery, await_t) {
     return call_get([this, message_id, gallery] { return _set_gallery(message_id, gallery); });
 }
 
-void Client::purge_deleted_message(int64_t message_id, failable_function<void(bool)> cb) {
+void Client::purge_deleted_message(int64_t message_id, result_function<bool> cb) {
     _async([this, message_id] { return _purge_deleted_message(message_id); }, std::move(cb));
 }
 
@@ -1123,7 +1121,7 @@ void Client::send_message(
         const ConversationId& id,
         OutgoingMessage msg,
         std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload,
-        std::function<void(std::optional<std::string>, int64_t)> cb) {
+        result_function<int64_t> cb) {
     _require_sendable("send_message", id, msg);
 
     _async(
@@ -1134,28 +1132,21 @@ void Client::send_message(
 }
 
 void Client::send_message(
-        const ConversationId& id,
-        OutgoingMessage msg,
-        std::function<void(std::optional<std::string>, int64_t)> cb) {
+        const ConversationId& id, OutgoingMessage msg, result_function<int64_t> cb) {
     send_message(id, std::move(msg), nullptr, std::move(cb));
 }
 
 // Callback forms: dispatch and return, delivering the result on the loop thread.
 
-void Client::conversations(
-        std::function<void(std::optional<std::string>, std::vector<AnyConversation>)> cb) {
+void Client::conversations(result_function<std::vector<AnyConversation>> cb) {
     _async([this] { return _conversations(); }, std::move(cb));
 }
 
-void Client::message_requests(
-        std::function<void(std::optional<std::string>, std::vector<AnyConversation>)> cb) {
+void Client::message_requests(result_function<std::vector<AnyConversation>> cb) {
     _async([this] { return _message_requests(); }, std::move(cb));
 }
 
-void Client::set_blocked(
-        const ConversationId& id,
-        bool blocked,
-        std::function<void(std::optional<std::string>)> cb) {
+void Client::set_blocked(const ConversationId& id, bool blocked, result_function<> cb) {
     _require_contact("set_blocked", id);
     _async([this, id, blocked] { _set_blocked(id, blocked); }, std::move(cb));
 }
@@ -1195,8 +1186,7 @@ int64_t Client::send_message(
 }
 
 void Client::conversation(
-        const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<AnyConversation>)> cb) {
+        const ConversationId& id, result_function<std::optional<AnyConversation>> cb) {
     _async([this, id] { return _conversation(id); }, std::move(cb));
 }
 
@@ -1210,9 +1200,7 @@ static std::optional<DM> as_dm(std::optional<AnyConversation> convo) {
     return std::nullopt;
 }
 
-void Client::dm(
-        const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
+void Client::dm(const ConversationId& id, result_function<std::optional<DM>> cb) {
     _require_dm("dm", id);
     _async([this, id] { return as_dm(_conversation(id)); }, std::move(cb));
 }
@@ -1222,9 +1210,7 @@ std::optional<DM> Client::dm(const ConversationId& id, await_t) {
     return call_get([this, id] { return as_dm(_conversation(id)); });
 }
 
-void Client::open_dm(
-        const ConversationId& id,
-        std::function<void(std::optional<std::string>, std::optional<DM>)> cb) {
+void Client::open_dm(const ConversationId& id, result_function<std::optional<DM>> cb) {
     _require_dm("open_dm", id);
     _async([this, id] { return as_dm(std::optional<AnyConversation>{_create_conversation(id)}); },
            std::move(cb));
@@ -1237,8 +1223,7 @@ DM Client::open_dm(const ConversationId& id, await_t) {
     });
 }
 
-void Client::message(
-        int64_t id, std::function<void(std::optional<std::string>, std::optional<Message>)> cb) {
+void Client::message(int64_t id, result_function<std::optional<Message>> cb) {
     _async([this, id] { return _message(id); }, std::move(cb));
 }
 
@@ -1247,7 +1232,7 @@ void Client::save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(const AttachmentProgress&)> on_progress,
-        failable_function<void(std::filesystem::path)> cb,
+        result_function<std::filesystem::path> cb,
         bool notify_sender,
         bool replace) {
 
@@ -1280,7 +1265,7 @@ void Client::save_attachment(
                     replace);
         } catch (const std::exception& e) {
             log_operation_failure(e);
-            _report(cb, std::optional{std::string{e.what()}}, std::filesystem::path{});
+            _fail<std::filesystem::path>(cb, error_from(e));
         }
     });
 }
@@ -4033,7 +4018,7 @@ void Client::_download_decrypted(
         std::optional<int64_t> claimed_size,
         std::function<void(std::span<const std::byte>)> on_plain,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-        std::function<void(std::optional<std::string>)> on_done) {
+        std::function<void(std::optional<Error>)> on_done) {
 
     auto info = network::file_server::parse_download_url(url);
     if (!info)
@@ -4171,10 +4156,10 @@ void Client::_download_decrypted(
                        digest = std::move(digest),
                        claimed_size](
                               std::variant<network::file_metadata, int16_t> result, bool timeout) {
-        auto fail = [&](std::string why, int code) {
+        auto fail = [&](std::string why, int code, std::string_view what = err::download_failed) {
             if (on_progress)
                 on_progress(0, 0, code);
-            on_done(std::move(why));
+            on_done(Error{what, std::move(why)});
         };
 
         if (auto* err = std::get_if<int16_t>(&result))
@@ -4352,7 +4337,7 @@ void Client::_save_attachment(
         size_t index,
         std::filesystem::path dest,
         std::function<void(const AttachmentProgress&)> on_progress,
-        failable_function<void(std::filesystem::path)> cb,
+        result_function<std::filesystem::path> cb,
         bool notify_sender,
         bool replace) {
 
@@ -4379,12 +4364,12 @@ void Client::_save_attachment(
     auto report = _dispatch_progress(std::move(identified));
 
     auto finish = [this, state, message_id, index, notify_sender, replace, cb](
-                          std::optional<std::string> error) {
-        auto fail = [&](std::string why) {
+                          std::optional<Error> error) {
+        auto fail = [&](Error why) {
             state->out.close();
             std::error_code ec;
             std::filesystem::remove(state->partial, ec);
-            _report(cb, std::optional{std::move(why)}, std::filesystem::path{});
+            _fail<std::filesystem::path>(cb, std::move(why));
         };
 
         if (error)
@@ -4401,10 +4386,10 @@ void Client::_save_attachment(
             state->saved_to = final_path(state->dest, replace);
             std::filesystem::rename(state->partial, state->saved_to);
         } catch (const std::exception& e) {
-            return fail(e.what());
+            return fail(Error{err::save_failed, e.what()});
         }
 
-        _report(cb, std::optional<std::string>{}, state->saved_to);
+        _report(cb, Expected<std::filesystem::path>{state->saved_to});
 
         // Both of these say the same thing -- that the recipient now has the file -- one to
         // ourselves and one to the sender, and neither is true until it is on disk under
@@ -4435,7 +4420,7 @@ void Client::_save_attachment(
     // Writes what was fetched to the destination and finishes as a completed download would, for
     // the two paths that hand over a whole buffer rather than streaming into it.
     auto write_and_finish =
-            [state, finish](std::optional<std::string> error, const std::vector<std::byte>& data) {
+            [state, finish](std::optional<Error> error, const std::vector<std::byte>& data) {
                 if (error)
                     return finish(std::move(error));
                 state->out.write(
@@ -4473,10 +4458,12 @@ void Client::_save_attachment(
             report(found->second.done, found->second.total, std::nullopt);
             found->second.progress.push_back(report);
         }
-        found->second.waiting.push_back(
-                [write_and_finish](std::optional<std::string> error, std::vector<std::byte> data) {
-                    write_and_finish(std::move(error), data);
-                });
+        found->second.waiting.push_back([write_and_finish](Expected<std::vector<std::byte>> r) {
+            if (r)
+                write_and_finish(std::nullopt, *r);
+            else
+                write_and_finish(std::move(r).error(), {});
+        });
         return;
     }
 

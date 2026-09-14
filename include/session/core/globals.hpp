@@ -110,7 +110,7 @@ class Globals final : detail::CoreComponent {
     ///
     /// @throws std::logic_error if this account already has an identity: adopting a second one
     /// would orphan every message and key already stored against the first.
-    void create_account(failable_function<void()> cb);
+    void create_account(result_function<> cb);
     void create_account(await_t);
 
     /// Adopts an existing account seed, as typed from a recovery phrase or transferred from
@@ -124,7 +124,7 @@ class Globals final : detail::CoreComponent {
     /// loop and zeroed with the job, rather than borrowed from a caller that has already returned.
     ///
     /// @throws std::logic_error if this account already has an identity.
-    void restore_account(predefined_seed seed, failable_function<void()> cb);
+    void restore_account(predefined_seed seed, result_function<> cb);
     void restore_account(const predefined_seed& seed, await_t);
 
     // Retrieval methods.  These query for the given key and, if the type matches, return the given

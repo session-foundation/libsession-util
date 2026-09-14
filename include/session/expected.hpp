@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -26,10 +27,9 @@ namespace session {
 /// sliced with no diagnostic at all.  If an error needs to carry more, it gets more fields here
 /// rather than a derived type.
 ///
-/// There is deliberately no `operator bool`.  Holding an `Error` already means something failed;
-/// the question "did this succeed" belongs to `Expected`, which is where it can be asked without
-/// making `Error` convertible to `bool` -- a conversion that would let `Expected<bool>{some_error}`
-/// quietly store a successful `true`.
+/// Must not become convertible to `bool`: that would make `Expected<bool>{some_error}` store a
+/// successful `true` rather than the error, silently, because `is_constructible_v<bool, Error>`
+/// decides which constructor wins.  Ask an `Expected` whether it succeeded, not an `Error`.
 class Error final {
   public:
     /// A stable identifier for what went wrong, dotted to keep them apart as they accumulate:
@@ -62,6 +62,47 @@ class Error final {
         requires std::same_as<std::remove_cvref_t<S>, std::string>
     Error(S&&, std::string) = delete;
 };
+
+/// Thrown by work whose failure will be reported through a handler, carrying the `Error` verbatim
+/// rather than flattening it to a string.
+///
+/// Deferred work cannot throw to its caller -- by the time it runs there is no caller left -- so
+/// the `async` wrappers catch whatever it throws and report that through the handler instead.
+/// Catching `std::exception` gets only `what()`, which would lose the code; this is how a thrower
+/// says what the code is.
+///
+/// Anything else that escapes still becomes a well-formed `Error` under
+/// `unexpected_exception_code`, so a helper deep in a call stack can go on throwing
+/// `std::runtime_error` and its caller still receives something a handler can act on.
+class error : public std::runtime_error {
+    Error _error;
+
+  public:
+    explicit error(Error e) : std::runtime_error{e.message}, _error{std::move(e)} {}
+
+    error(std::string_view code, std::string message) : error{Error{code, std::move(message)}} {}
+
+    /// Moving one out needs a non-const handler -- `catch (session::error& e)` and then
+    /// `std::move(e).err()`.  The usual `catch (const session::error&)` can only copy.
+    Error& err() & noexcept { return _error; }
+    const Error& err() const& noexcept { return _error; }
+    Error&& err() && noexcept { return std::move(_error); }
+};
+
+/// The code anything that was *not* a `session::error` is reported under.  Nothing should match on
+/// it beyond "this was not anticipated"; the message is the only part that says anything.
+inline constexpr std::string_view unexpected_exception_code = "internal.exception";
+
+/// The `Error` a caught exception should be reported as: its own, if it brought one, and otherwise
+/// a generic code carrying `what()`.
+///
+/// Shared so that every place converting a throw into a handler's failure does it the same way --
+/// there is more than one, and they would otherwise drift.
+inline Error error_from(const std::exception& e) {
+    if (auto* carried = dynamic_cast<const error*>(&e))
+        return carried->err();
+    return Error{unexpected_exception_code, e.what()};
+}
 
 #if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
 
@@ -122,11 +163,8 @@ namespace detail {
 /// in the project against the real thing.  A use that has drifted outside the subset fails there
 /// rather than waiting for whoever eventually raises the standard.
 ///
-/// What is left out -- `value()`, `value_or()`, `error_or()`, the monadic operations, comparisons,
-/// `swap`, `emplace`, the `in_place` constructors -- is left out because nothing here needs it, and
-/// adding a member later cannot break an existing caller.  `value()` is also the wrong shape for
-/// this codebase: it throws, and a handler must not, because Core catches and logs anything a
-/// handler throws.
+/// A subset: `value()`, `value_or()`, `error_or()`, the monadic operations, comparisons, `swap`,
+/// `emplace` and the `in_place` constructors are not provided.
 template <typename T, typename E = Error>
 class Expected {
     static_assert(!std::is_reference_v<T>, "Expected cannot hold a reference");

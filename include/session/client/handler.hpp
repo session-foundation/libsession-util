@@ -10,7 +10,10 @@ namespace session::client {
 /// cannot depend on Client.  See <session/handler.hpp> for what each one means.
 using session::await;
 using session::await_t;
-using session::failable_function;
+using session::Error;
+using session::Expected;
+using session::result_function;
+using session::unexpected;
 
 /// Runs a job on the application's own thread.
 ///

@@ -121,7 +121,7 @@ TEST_CASE(
 TEST_CASE("Error: a code must outlive the Error", "[expected][error]") {
     // A std::string code is rejected: the Error does not own it.  Constrained rather than a plain
     // deleted overload, which would make string literals ambiguous and reject those too.
-    static_assert(std::is_constructible_v<Error, const char (&)[6], std::string>);
+    static_assert(std::is_constructible_v<Error, const char(&)[6], std::string>);
     static_assert(!std::is_constructible_v<Error, std::string, std::string>);
     static_assert(!std::is_constructible_v<Error, std::string&, std::string>);
     static_assert(!std::is_constructible_v<Error, const std::string&, std::string>);

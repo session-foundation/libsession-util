@@ -223,7 +223,7 @@ class Devices final : detail::CoreComponent {
     //
     // Reads the device config, which the loop merges into, so it happens on the loop either way:
     // code already there uses the `await` form and pays nothing for it.
-    void device_info(failable_function<void(std::pair<device::Info, bool>)> cb);
+    void device_info(result_function<std::pair<device::Info, bool>> cb);
     std::pair<device::Info, bool> device_info(await_t);
 
     struct LinkRequestResult {
@@ -239,7 +239,7 @@ class Devices final : detail::CoreComponent {
     //
     // Reads the device config and writes the pending request, so it happens on the loop either
     // way; an application driving a linking screen is on its own thread and wants one of these.
-    void build_link_request(failable_function<void(LinkRequestResult)> cb);
+    void build_link_request(result_function<LinkRequestResult> cb);
     LinkRequestResult build_link_request(await_t);
 
   private:
@@ -254,7 +254,7 @@ class Devices final : detail::CoreComponent {
     // Filling these in is the application's job -- libsession establishes the group with them
     // blank -- and an application is on its own thread when it does.  The handler form takes the
     // info by value: it outlives the call.
-    void update_info(device::Info info, failable_function<void()> cb);
+    void update_info(device::Info info, result_function<> cb);
     void update_info(const device::Info& info, await_t);
 
     // Creates the account's device group with this device as its only member, if one is owed.

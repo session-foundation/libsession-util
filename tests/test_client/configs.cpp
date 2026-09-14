@@ -567,11 +567,13 @@ TEST_CASE("Client: no picture is nullopt rather than a failure", "[client][confi
     c->open_dm(id, await);
 
     std::optional<std::vector<std::byte>> got;
-    std::optional<std::string> err;
+    std::optional<Error> err;
     bool called = false;
-    c->profile_picture(id, [&](std::optional<std::string> e, auto pic) {
-        err = std::move(e);
-        got = std::move(pic);
+    c->profile_picture(id, [&](auto r) {
+        if (r)
+            got = *std::move(r);
+        else
+            err = std::move(r).error();
         called = true;
     });
     sync(*c);
