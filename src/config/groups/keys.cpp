@@ -879,8 +879,10 @@ void Keys::insert_key(
             // able to re-store this copy too.  Flag a dump only when something actually changed,
             // so re-loading a message we already know stays free.
             bool new_hash = active_msgs_[new_key.generation].emplace(msg_hash).second;
-            bool new_bytes =
-                    key_msgs_.try_emplace(std::string{msg_hash}, to_vector(msg_data)).second;
+            auto key = std::string{msg_hash};
+            bool new_bytes = !key_msgs_.contains(key);
+            if (new_bytes)
+                key_msgs_.emplace(std::move(key), to_vector(msg_data));
             if (new_hash || new_bytes)
                 needs_dump_ = true;
             return;
@@ -895,7 +897,10 @@ void Keys::insert_key(
         return;
 
     active_msgs_[new_key.generation].emplace(msg_hash);
-    key_msgs_.insert_or_assign(std::string{msg_hash}, to_vector(msg_data));
+    // A supplemental carries every key in `keys_`, so one message reaches this once per generation
+    // it brought that we didn't already hold -- same hash, same bytes each time.
+    if (auto key = std::string{msg_hash}; !key_msgs_.contains(key))
+        key_msgs_.emplace(std::move(key), to_vector(msg_data));
     keys_.insert(it, std::move(new_key));
     remove_expired();
     needs_dump_ = true;

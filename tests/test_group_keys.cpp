@@ -1371,3 +1371,81 @@ TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recover
         config_free(mem_conf);
     }
 }
+
+TEST_CASE("Group Keys - one message, several generations", "[config][groups][keys][recovery]") {
+
+    // `key_supplement` packs every key in `keys_`, so a member that can decrypt one ends up
+    // recording the same hash against each generation it carried.  Retained bytes are therefore
+    // shared between generations, and must outlive the *oldest* of them expiring -- pruning per
+    // dropped generation would strand a hash that is still active under a newer one.
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    auto rekey2 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash2", rekey2, t0 + 1000, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message(
+            "keyhash2", rekey2, t0 + 1000, member.info, member.members));
+
+    // Addressed to the member itself, so it decrypts and yields a key per generation the admin
+    // holds -- all of which the member already has, i.e. insert_key's early-return path, twice.
+    REQUIRE(admin.keys.size() == 2);
+    auto supp = admin.keys.key_supplement(member.session_id);
+    CHECK(member.keys.load_key_message("supphash", supp, t0 + 2000, member.info, member.members));
+
+    REQUIRE(member.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*member.keys.active_key_message("supphash"))) == to_hex(supp));
+
+    // A third generation far enough ahead to retire the first.
+    constexpr int64_t past_expiry = t0 + 1000 + 61 * 24 * 60 * 60 * 1000LL;
+    auto rekey3 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message(
+            "keyhash3", rekey3, past_expiry, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message(
+            "keyhash3", rekey3, past_expiry, member.info, member.members));
+
+    // The first generation's own message is gone...
+    CHECK_FALSE(member.keys.active_key_message("keyhash1"));
+
+    // ...but the supplemental is still named by a generation we keep, so its bytes must survive.
+    CHECK(member.keys.active_hashes().count("supphash"));
+    REQUIRE(member.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*member.keys.active_key_message("supphash"))) == to_hex(supp));
+
+    // The invariant, stated as the tests above state it: what we advertise is what we can re-store.
+    std::set<std::string> held;
+    for (const auto& [h, _] : member.keys.active_key_messages())
+        held.insert(h);
+    CHECK(held == as_set(member.keys.active_hashes()));
+
+    // And the same after a restart.
+    auto dump = member.keys.dump();
+    pseudo_client reloaded{
+            member_seed, false, group_pk.data(), std::nullopt, std::nullopt, std::nullopt, dump};
+    REQUIRE(reloaded.keys.active_key_message("supphash"));
+    CHECK(to_hex(session::to_vector(*reloaded.keys.active_key_message("supphash"))) ==
+          to_hex(supp));
+    CHECK_FALSE(reloaded.keys.active_key_message("keyhash1"));
+}
