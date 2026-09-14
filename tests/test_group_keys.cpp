@@ -1449,3 +1449,107 @@ TEST_CASE("Group Keys - one message, several generations", "[config][groups][key
           to_hex(supp));
     CHECK_FALSE(reloaded.keys.active_key_message("keyhash1"));
 }
+
+namespace {
+
+// Rebuilds a Keys dump with an extra "C" entry whose hash is not named in "A" -- the sort of orphan
+// a hand-written or corrupted dump can carry, and which nothing would ever prune again.
+std::vector<unsigned char> add_orphan_retained_message(
+        std::span<const unsigned char> dump, std::string_view hash) {
+    oxenc::bt_dict_consumer d{dump};
+    std::string out = "d";
+
+    REQUIRE(d.skip_until("A"));
+    out += "1:A";
+    out += d.consume_list_data();
+
+    std::map<std::string, std::string> msgs;
+    if (d.skip_until("C")) {
+        auto c = d.consume_dict_consumer();
+        while (!c.is_finished()) {
+            auto [h, v] = c.next_string();
+            msgs.emplace(h, v);
+        }
+    }
+    REQUIRE(msgs.emplace(hash, "not a keys message at all").second);
+    {
+        oxenc::bt_dict_producer c;
+        for (const auto& [h, v] : msgs)
+            c.append(h, v);
+        out += "1:C";
+        out += c.view();
+    }
+
+    REQUIRE(d.skip_until("L"));
+    out += "1:L";
+    out += d.consume_list_data();
+    if (d.skip_until("P")) {
+        out += "1:P";
+        out += d.consume_dict_data();
+    }
+    out += "e";
+    return session::to_vector(out);
+}
+
+}  // namespace
+
+TEST_CASE("Group Keys - orphaned retained messages", "[config][groups][keys][recovery]") {
+
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    SECTION("an orphan in the dump is dropped, and the cleaned dump is written back") {
+        auto tampered = add_orphan_retained_message(member.keys.dump(), "zorphanhash");
+        pseudo_client reloaded{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                tampered};
+
+        CHECK_FALSE(reloaded.keys.active_key_message("zorphanhash"));
+        CHECK(reloaded.keys.active_key_message("keyhash1"));
+
+        // Pruning it in memory is only half the job: the orphan is still on disk until something
+        // asks for a dump, and nothing else here would.
+        CHECK(reloaded.keys.needs_dump());
+
+        auto cleaned = reloaded.keys.dump();
+        pseudo_client again{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                cleaned};
+        CHECK_FALSE(again.keys.active_key_message("zorphanhash"));
+        CHECK(again.keys.active_key_message("keyhash1"));
+        // A dump with nothing to prune must not ask to be rewritten on every load.
+        CHECK_FALSE(again.keys.needs_dump());
+    }
+}

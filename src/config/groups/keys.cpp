@@ -197,8 +197,10 @@ void Keys::load_dump(std::span<const unsigned char> dump) {
     }
 
     // `key_msgs_` must never outlive the hashes in `active_msgs_`; enforce that on the way in too,
-    // so a hand-written or corrupted dump can't seed an entry that nothing will ever prune.
-    prune_key_msgs();
+    // so a hand-written or corrupted dump can't seed an entry that nothing will ever prune.  What
+    // we just pruned is still on disk, so the cleaned state has to be written back.
+    if (prune_key_msgs())
+        needs_dump_ = true;
 }
 
 bool Keys::prune_key_msgs() {
