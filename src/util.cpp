@@ -41,11 +41,11 @@ std::vector<std::string_view> split(std::string_view str, const std::string_view
     return results;
 }
 
-std::string format_as(human_size s) {
-    if (s.bytes < 1000)
-        return fmt::format("{} B", s.bytes);
+std::string human_size::str() const {
+    if (bytes < 1000)
+        return fmt::format("{} B", bytes);
     constexpr std::array prefixes = {'k', 'M', 'G', 'T'};
-    double b = s.bytes;
+    double b = bytes;
     for (auto prefix : prefixes) {
         b /= 1000.;
         if (b < 1000.)
