@@ -2152,9 +2152,9 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
         _attachment_data(
                 message_id,
                 a.index,
-                [this, convo_id](const AttachmentProgress& p) {
+                [this](const AttachmentProgress& p) {
                     if (const auto& h = _cbs->attachment_progress)
-                        h(convo_id, p);
+                        h(p);
                 },
                 nullptr);
     }

@@ -1187,11 +1187,9 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
 
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
     TempCacheDir dir;
-    std::vector<std::pair<ConversationId, AttachmentProgress>> progress;
+    std::vector<AttachmentProgress> progress;
     callbacks cbs;
-    cbs.attachment_progress = [&](const ConversationId& id, const AttachmentProgress& p) {
-        progress.emplace_back(id, p);
-    };
+    cbs.attachment_progress = [&](const AttachmentProgress& p) { progress.push_back(p); };
     TempClient c{cbs};
     SenderKeys peer;
     auto* net = attach_mock_network(c->core);
@@ -1297,9 +1295,8 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
 
         // Broadcast, since nobody asked for it and there is no caller to hand a report to.
         REQUIRE_FALSE(progress.empty());
-        CHECK(progress.back().first == convo);
-        CHECK(progress.back().second.conversation_id == convo);
-        CHECK(progress.back().second.result == 0);
+        CHECK(progress.back().conversation_id == convo);
+        CHECK(progress.back().result == 0);
 
         // In the cache, so opening the conversation costs nothing...
         CHECK(std::filesystem::exists(cache::path_for(
