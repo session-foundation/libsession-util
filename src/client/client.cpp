@@ -953,6 +953,19 @@ std::optional<int64_t> Client::attachment_cache_limit(await_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
+int64_t Client::_attachment_cache_size() {
+    return core.database()
+            .conn()
+            .prepared_get<std::optional<int64_t>>("SELECT sum(size) FROM attachment_cache")
+            .value_or(0);
+}
+void Client::attachment_cache_size(failable_function<void(int64_t)> cb) {
+    _async([this] { return _attachment_cache_size(); }, std::move(cb));
+}
+int64_t Client::attachment_cache_size(await_t) {
+    return loop.call_get([this] { return _attachment_cache_size(); });
+}
+
 void Client::set_auto_download_max_size(
         std::optional<int64_t> bytes, failable_function<void()> cb) {
     _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));

@@ -1427,6 +1427,59 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     CHECK(static_cast<size_t>(rows) == on_disk);
 }
 
+TEST_CASE("Client: the cache reports how much disk it is using", "[client][evict]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, await);
+    c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+
+    // Nothing cached is 0, not an absent answer: a limit can be unset, a usage cannot.
+    CHECK(c->attachment_cache_size(await) == 0);
+
+    auto seed = random::random(32);
+    int64_t on_disk = 0;
+    for (int i = 0; i < 2; i++) {
+        std::vector<std::byte> data(3000);
+        random::fill(data);
+        auto [ct, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+        auto file_id = "f{}"_format(i);
+        net->served[file_id] = ct;
+        auto url = network::file_server::generate_download_url(file_id, {}, true);
+
+        deliver(*c,
+                peer,
+                "",
+                from_epoch_ms(1000 + i),
+                "h{}"_format(i),
+                "",
+                std::nullopt,
+                [&, url](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(static_cast<uint64_t>(i + 1));
+                    a->set_url(url);
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(data.size());
+                    a->set_contenttype("image/png");
+                });
+        sync(*c);
+        REQUIRE(serve_downloads(*net, ct) == 1);
+        sync(*c);
+
+        on_disk += static_cast<int64_t>(
+                std::filesystem::file_size(TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, url)));
+        CHECK(c->attachment_cache_size(await) == on_disk);
+    }
+
+    // Bytes on disk rather than the attachments' own sizes, which is what makes it comparable with
+    // the limit: the cached copies are encrypted and padded, so they cost more than they contain.
+    CHECK(c->attachment_cache_size(await) > 2 * 3000);
+}
+
 TEST_CASE("Client: the sweep reconciles the cache with what the database says", "[client][evict]") {
     TempCacheDir dir;
     SenderKeys peer;
