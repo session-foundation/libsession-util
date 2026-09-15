@@ -85,6 +85,10 @@ void Core::init() {
     _comp_init.clear();
 
     _update_polling();
+
+    // Last: from here a poll can run and another thread can hold this Core, so a component
+    // touched from anywhere but the loop is misuse rather than construction.
+    _constructed = true;
 }
 
 void Core::register_comp_init(detail::CoreComponent* c) {
@@ -122,9 +126,12 @@ void Core::_update_polling() {
 void Core::set_poll_interval(std::chrono::milliseconds interval) {
     // Marshalled onto the loop rather than done here: this replaces the ticker, and creating or
     // stopping a libevent event from a thread that is not the loop's races the loop itself.  (Both
-    // `_poll_interval` and `_poll_ticker` are otherwise only touched there.)  `Loop::call` runs it
+    // `_poll_interval` and `_poll_ticker` are otherwise only touched there.)  `call` runs it
     // inline when we are already on the loop thread, so this costs nothing in that case.
-    _loop.call([this, interval] {
+    //
+    // On our own queue rather than the loop's, so that a interval change still in flight when Core
+    // goes away is dropped rather than run against a half-destroyed one.
+    _jq.call([this, interval] {
         _poll_interval = interval;
         if (_poll_ticker) {
             _poll_ticker->stop();
@@ -269,8 +276,19 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
                     return;
                 }
 
-                _handle_poll_response(
-                        std::move(node), std::move(namespaces), std::move(*body), round);
+                // Onto our own queue: this handler runs on the *network's* loop, which is a
+                // different thread entirely -- Network builds its own quic::Loop -- and handling a
+                // poll response merges configs and flushes their dumps, which is only safe on
+                // ours.  It also means a response landing after Core has gone is dropped rather
+                // than run against a Core that is being torn down.
+                _jq.call([this,
+                          node = std::move(node),
+                          namespaces = std::move(namespaces),
+                          body = std::move(*body),
+                          round]() mutable {
+                    _handle_poll_response(
+                            std::move(node), std::move(namespaces), std::move(body), round);
+                });
             });
 }
 

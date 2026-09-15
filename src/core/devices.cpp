@@ -3,6 +3,7 @@
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
 
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <concepts>
@@ -456,7 +457,16 @@ device::map Devices::devices(
     return devs;
 }
 
-std::pair<device::Info, bool> Devices::device_info() {
+void Devices::device_info(failable_function<void(std::pair<device::Info, bool>)> cb) {
+    async([this] { return _device_info(); }, std::move(cb));
+}
+
+std::pair<device::Info, bool> Devices::device_info(await_t) {
+    return jq().call_get([this] { return _device_info(); });
+}
+
+std::pair<device::Info, bool> Devices::_device_info() {
+    assert(on_loop());
     auto devs = devices(true, true, true, self_id);
     if (auto it = devs.find(self_id); it != devs.end()) {
         // Read the state out before the move: the elements of a braced-init-list are evaluated in
@@ -474,8 +484,17 @@ bool device::Info::same_user_fields(const Info& other) const {
     return fields(*this) == fields(other);
 }
 
-void Devices::update_info(const device::Info& info) {
-    auto [current, is_registered] = device_info();
+void Devices::update_info(device::Info info, failable_function<void()> cb) {
+    async([this, info = std::move(info)] { _update_info(info); }, std::move(cb));
+}
+
+void Devices::update_info(const device::Info& info, await_t) {
+    jq().call_get([this, &info] { _update_info(info); });
+}
+
+void Devices::_update_info(const device::Info& info) {
+    assert(on_loop());
+    auto [current, is_registered] = _device_info();
 
     // Early-exit if nothing changed: no seqno bump, no push triggered.
     // current.seqno == 0 means no row exists yet (default-init sentinel; real rows have seqno >=
@@ -1119,8 +1138,17 @@ void Devices::receive_device_group_message(std::span<const std::byte> data) {
     tx.commit();
 }
 
-Devices::LinkRequestResult Devices::build_link_request() {
-    auto [info, is_registered] = device_info();
+void Devices::build_link_request(failable_function<void(LinkRequestResult)> cb) {
+    async([this] { return _build_link_request(); }, std::move(cb));
+}
+
+Devices::LinkRequestResult Devices::build_link_request(await_t) {
+    return jq().call_get([this] { return _build_link_request(); });
+}
+
+Devices::LinkRequestResult Devices::_build_link_request() {
+    assert(on_loop());
+    auto [info, is_registered] = _device_info();
 
     if (is_registered)
         throw std::logic_error{
