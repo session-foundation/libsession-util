@@ -18,6 +18,30 @@ local default_deps_nocxx = [
 
 local default_deps = ['g++'] + default_deps_nocxx;
 
+// Everything we can link against rather than compiling our own copy of, for builds that are not
+// deliberately static (see `static_deps` in debian_build).  Two reasons: such a build is much
+// faster, and it is the only thing that tests us against the library versions distros actually
+// ship -- Debian 12's fmt 9, for instance, which our own code has to stay compatible with.
+//
+// liboxen-quic-dev pulls in liboxen-logging-dev, which is older than we accept
+// (OXEN_LOGGING_MIN_VERSION in external/CMakeLists.txt); the submodule is used for that one and
+// builds against the system fmt/spdlog, which is what puts fmt 9 in front of our code.
+//
+// A too-old system library is not an error: cmake falls back to building that one dependency.
+// libsodium is that case on Debian 12 and Ubuntu 22.04, which ship less than the 1.0.21 we need.
+local system_deps = [
+  'libevent-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'liboxenc-dev',
+  'libsodium-dev',
+  'libspdlog-dev',
+  'libsqlite3-dev',
+  'libutf8proc-dev',
+  'libzstd-dev',
+  'nettle-dev',
+];
+
 local default_test_deps = libngtcp2_deps;
 
 local docker_base = 'registry.oxen.rocks/';
@@ -102,6 +126,7 @@ local debian_build(name,
                    image,
                    arch='amd64',
                    deps=default_deps,
+                   static_deps=false/* build our own dependencies instead of using the distro's */,
                    test_deps=default_test_deps,
                    build_type='Release',
                    lto=false,
@@ -120,7 +145,7 @@ local debian_build(name,
   name,
   image,
   arch=arch,
-  deps=deps,
+  deps=deps + (if static_deps then [] else system_deps),
   stf_repo=stf_repo,
   kitware_repo=kitware_repo,
   allow_fail=allow_fail,
@@ -130,6 +155,7 @@ local debian_build(name,
     'cmake .. -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' ' +
     (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
     (if shared_libs then '-DBUILD_SHARED_LIBS=ON ' else '') +
+    '-DBUILD_STATIC_DEPS=' + (if static_deps then 'ON ' else 'OFF ') +
     '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
@@ -444,6 +470,10 @@ local static_build(name,
   debian_build('Debian 12', docker_base + 'debian-bookworm'),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
   debian_build('Ubuntu LTS', docker_base + 'ubuntu-lts'),
+  // The one build that compiles every dependency itself rather than taking the distro's, on the
+  // oldest distro we support: what the release artifacts do, and the only thing that notices when
+  // a dependency we vendor stops building.
+  debian_build('Ubuntu 22.04 (static deps)', docker_base + 'ubuntu-jammy', static_deps=true),
 
   // ARM builds (ARM64 and armhf)
   debian_build('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', jobs=4),
