@@ -24,7 +24,6 @@
 #include <session/session_protocol.hpp>
 #include <session/util.hpp>
 #include <session/xed25519.hpp>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "core/swarm_request.hpp"
@@ -238,16 +237,16 @@ std::optional<retrieved_namespace> decode_retrieved(const nlohmann::json& res, i
 
 }  // namespace
 
-/// One distinct answer to the profile fetch, and how many members gave it.
+/// The answer a fetch settled on, and the member that gave it.
+///
+/// The member is kept with it because the retrieve cursor is written against the node that
+/// produced the messages and no other.
 struct Core::ProfileAnswer {
-    size_t agreed = 0;
-    /// The member whose answer this is -- the first to give it.  Kept because the retrieve cursor
-    /// is written against the node that produced the messages and no other.
     network::ed25519_pubkey node;
     retrieved_namespace answer;
 };
 
-/// What a fan-out has heard so far.
+/// How much of a fan-out is still outstanding.
 ///
 /// Shared between every in-flight request and touched only on Core's loop, which is what makes a
 /// plain count safe here: the responses arrive on the network's threads and are marshalled across
@@ -256,27 +255,7 @@ struct Core::ProfileFanOut {
     std::function<void(bool)> done;
     size_t outstanding = 0;
     bool settled = false;
-    /// Keyed by the hashes the answer carried, so agreement is a count rather than a comparison of
-    /// every answer against every other.
-    std::unordered_map<std::string, ProfileAnswer> heard;
 };
-
-namespace {
-
-/// What two members have to agree on before their answer is taken.
-///
-/// The hashes, sorted: the storage server returns messages in its own order, and two members
-/// holding the same config are not obliged to list it identically.
-std::string answer_digest(const retrieved_namespace& got) {
-    std::vector<std::string_view> hashes;
-    hashes.reserve(got.messages.size());
-    for (const auto& m : got.messages)
-        hashes.emplace_back(m.hash);
-    std::ranges::sort(hashes);
-    return "{}"_format(fmt::join(hashes, "\n"));
-}
-
-}  // namespace
 
 void Core::_poll() {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
@@ -298,15 +277,6 @@ void Core::_poll() {
         _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
     });
 }
-
-/// How many members have to give the same answer before it is taken without waiting for the rest.
-///
-/// Two, which is the smallest number that is more than one member's word -- and it gates *having*
-/// the config, not the wait.  **Absence never settles this fetch early**, however many members
-/// report it: presence is not a majority property.  The case this whole thing exists for is a
-/// config that has reached one member of a swarm and not the others, so counting "I do not have it"
-/// against the one member that does would be the original fault with more steps in it.
-static constexpr size_t PROFILE_FETCH_QUORUM = 2;
 
 void Core::fetch_user_profile(std::function<void(bool found)> done) {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
@@ -395,7 +365,7 @@ std::vector<std::byte> Core::_profile_retrieve_body() {
     return to_vector(nlohmann::json{{"requests", std::move(requests)}}.dump());
 }
 
-/// One member's answer, tallied against the others.
+/// One member's answer.  The first that carries a config ends the fetch.
 void Core::_handle_profile_response(
         ProfileFanOut& state,
         const network::service_node& node,
@@ -413,18 +383,9 @@ void Core::_handle_profile_response(
             if (it != json.end() && it->is_array() && !it->empty()) {
                 if (auto got = decode_retrieved(
                             (*it)[0], static_cast<int16_t>(config::Namespace::UserProfile))) {
-                    auto& entry = state.heard[answer_digest(*got)];
-                    if (entry.agreed == 0) {
-                        entry.node = node.remote_pubkey;
-                        entry.answer = std::move(*got);
-                    }
-                    entry.agreed += 1;
-
-                    // Seconded, and carrying something: nothing better is going to arrive, so the
-                    // remaining members are not waited on.  An empty answer never takes this exit
-                    // however many members give it -- see PROFILE_FETCH_QUORUM.
-                    if (!entry.answer.messages.empty() && entry.agreed >= PROFILE_FETCH_QUORUM) {
-                        _settle_profile_fetch(state, &entry);
+                    if (!got->messages.empty()) {
+                        ProfileAnswer taken{node.remote_pubkey, std::move(*got)};
+                        _settle_profile_fetch(state, &taken);
                         return;
                     }
                 }
@@ -440,28 +401,13 @@ void Core::_handle_profile_response(
                 timed_out ? "timed out" : "request failed");
     }
 
-    if (state.outstanding > 0)
-        return;
-
-    // Everyone has answered and no answer was seconded.  **Any member that had the config still
-    // wins**, because the alternative is not a safer answer but no answer at all -- and the
-    // ordinary poll, which is what runs instead, believes a single member without asking anyone
-    // else.  Members reporting nothing are not counted against it at all: they are the condition
-    // being routed around, not evidence.
-    //
-    // Among answers that do carry something, the most-agreed wins, and among equals the one
-    // carrying the most messages -- a member holding part of a config is further along than one
-    // holding less of it.
-    ProfileAnswer* best = nullptr;
-    for (auto& [digest, entry] : state.heard) {
-        if (entry.answer.messages.empty())
-            continue;
-        if (!best || entry.agreed > best->agreed ||
-            (entry.agreed == best->agreed &&
-             entry.answer.messages.size() > best->answer.messages.size()))
-            best = &entry;
-    }
-    _settle_profile_fetch(state, best);
+    // Nothing from this one.  An empty answer never ends the fetch, however many members give it:
+    // the case this exists for is a config that has reached one member and not the others, so a
+    // member saying it has nothing is the condition being routed around rather than evidence
+    // against the member that has it.  Only when every member has answered is there nothing left
+    // to wait for.
+    if (state.outstanding == 0)
+        _settle_profile_fetch(state, nullptr);
 }
 
 /// Ends the fan-out, merging `taken` if there is one.  Called exactly once per fetch.
