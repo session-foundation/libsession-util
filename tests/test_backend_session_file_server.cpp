@@ -287,13 +287,17 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     CHECK(*parsed->port == 8000);
 }
 
-TEST_CASE("Default file server onion pubkey", "[backend][session_file_server]") {
+TEST_CASE("Built-in file server onion pubkeys", "[backend][session_file_server]") {
     // A download url carries the file server's ED25519 key, while an onion request needs the X25519
     // form, so every request derives one from the other. Pinned here because the two forms are 32
     // bytes either way: using the wrong one produces a perfectly well-formed key that simply never
     // decrypts, and the only symptom is the file server rejecting the request without naming a key.
-    const auto derived =
-            compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex));
+    // Storing the derived form in `pubkey_hex` is louder but no easier to spot from the outside: it
+    // is not a valid Ed25519 point, so the derivation throws and every upload fails before it ever
+    // reaches the network.
+    CHECK(compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex))
+                  .hex() == "09324794aa9c11948189762d198c618148e9136ac9582068180661208927ef34");
 
-    CHECK(derived.hex() == "09324794aa9c11948189762d198c618148e9136ac9582068180661208927ef34");
+    CHECK(compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::TESTNET_CONFIG.pubkey_hex))
+                  .hex() == "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d");
 }

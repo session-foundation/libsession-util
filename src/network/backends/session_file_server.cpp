@@ -3,6 +3,7 @@
 #include <fmt/ranges.h>
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
+#include <oxenc/hex.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -34,24 +35,18 @@ const config::FileServer DEFAULT_CONFIG = {
         .scheme = "http",
         .host = "filev2.getsession.org",
         .port = 80,
-        // ED25519. `p=` in a download url carries the Ed form on every client, and the X25519 form
-        // for onion requests is derived from it.
-        //
         // NOT the file server's X25519-only key (`da21e1d886c6...ee59`), which cannot be used here:
         // it has no Ed private key and cannot be given one, since deriving Ed from X would mean
         // reversing a hash. A file server has to publish a real Ed keypair to be addressable this
         // way.
-        .pubkey_hex = "b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371",
+        .pubkey_hex = oxenc::to_hex(QUIC_FS_ED_PUBKEY_MAINNET),
         .max_file_size = 10'000'000};
 
-// Testnet file server config.  The X25519 pubkey is derived from the Ed25519 key
-// 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602 via
-// crypto_sign_ed25519_pk_to_curve25519.
 const config::FileServer TESTNET_CONFIG = {
         .scheme = "http",
         .host = "superduperfiles.oxen.io",
         .port = 80,
-        .pubkey_hex = "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d",
+        .pubkey_hex = oxenc::to_hex(QUIC_FS_ED_PUBKEY_TESTNET),
         .max_file_size = 10'000'000};
 
 constexpr std::string_view HEADER_CONTENT_TYPE = "Content-Type";
