@@ -23,6 +23,7 @@
 #include <session/sqlite.hpp>
 #include <set>
 #include <stdexcept>
+#include <system_error>
 #include <tuple>
 
 #include "download_cache.hpp"
@@ -905,6 +906,65 @@ void Client::attachment_cache_limit(failable_function<void(std::optional<int64_t
 }
 std::optional<int64_t> Client::attachment_cache_limit(await_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
+}
+
+std::vector<AttachmentStatus> Client::_attachment_transfers(
+        const std::vector<int64_t>& message_ids) {
+    std::vector<AttachmentStatus> out;
+
+    for (auto message_id : message_ids) {
+        auto msg = _message(message_id);
+        if (!msg)
+            continue;
+
+        for (const auto& a : msg->attachments) {
+            // An outgoing attachment that has not uploaded has nothing on a server to fetch, and
+            // _attachment_pointer would throw for it.  Left out rather than reported idle.
+            if (!a.uploaded)
+                continue;
+
+            std::string url;
+            try {
+                url = _attachment_pointer(message_id, a.index).url;
+            } catch (const std::exception&) {
+                // A sender who described an attachment but gave no url.  Nothing to fetch, so
+                // nothing to say about it.
+                continue;
+            }
+
+            AttachmentStatus status{msg->conversation, message_id, a.index};
+
+            auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url);
+            // The file rather than its index row: what decides whether the next fetch answers
+            // from disk is the file being there, and the two can disagree until a sweep.
+            std::error_code ignored;
+            status.cached = !_cache_dir.empty() && std::filesystem::exists(file, ignored);
+
+            auto name = file.filename().string();
+            if (auto found = _in_flight.find(name); found != _in_flight.end()) {
+                status.transferring = true;
+                status.done = found->second.done;
+                status.total = found->second.total;
+            }
+
+            out.push_back(std::move(status));
+        }
+    }
+
+    return out;
+}
+
+void Client::attachment_transfers(
+        std::vector<int64_t> message_ids,
+        failable_function<void(std::vector<AttachmentStatus>)> cb) {
+    _async([this, ids = std::move(message_ids)] { return _attachment_transfers(ids); },
+           std::move(cb));
+}
+
+std::vector<AttachmentStatus> Client::attachment_transfers(
+        std::vector<int64_t> message_ids, await_t) {
+    return loop.call_get(
+            [this, ids = std::move(message_ids)] { return _attachment_transfers(ids); });
 }
 
 void Client::set_auto_download_max_size(

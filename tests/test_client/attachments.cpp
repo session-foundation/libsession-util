@@ -1427,6 +1427,83 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     CHECK(static_cast<size_t>(rows) == on_disk);
 }
 
+TEST_CASE("Client: a transfer can be asked what it is doing", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(900, std::byte{3});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(3000),
+            "h3",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/9#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            44);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    // Nothing has asked for it, and it is still reported: "nobody is fetching this" is what a row
+    // offering to fetch it needs to hear, and is not the same as having nothing to fetch.
+    {
+        auto idle = c->attachment_transfers({msg_id}, await);
+        REQUIRE(idle.size() == 1);
+        CHECK(idle[0].conversation_id == convo);
+        CHECK(idle[0].message_id == msg_id);
+        CHECK(idle[0].index == 0);
+        CHECK_FALSE(idle[0].cached);
+        CHECK_FALSE(idle[0].transferring);
+    }
+
+    // Asked for, but the server has not answered: the state a client that missed the reports has
+    // no other way of learning.
+    auto bytes = std::make_shared<std::promise<std::optional<std::string>>>();
+    c->attachment_data(msg_id, 0, nullptr, [bytes](std::optional<std::string> err, auto) {
+        bytes->set_value(std::move(err));
+    });
+    sync(*c);
+    {
+        auto running = c->attachment_transfers({msg_id}, await);
+        REQUIRE(running.size() == 1);
+        CHECK(running[0].transferring);
+        CHECK_FALSE(running[0].cached);
+    }
+
+    auto waiter = bytes->get_future();
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+    sync(*c);
+
+    // Finished: in the cache, and no longer moving.
+    {
+        auto done = c->attachment_transfers({msg_id}, await);
+        REQUIRE(done.size() == 1);
+        CHECK(done[0].cached);
+        CHECK_FALSE(done[0].transferring);
+    }
+
+    // A message nobody has is left out rather than reported as an attachment with nothing doing.
+    CHECK(c->attachment_transfers({msg_id + 9999}, await).empty());
+}
+
 TEST_CASE("Client: the sweep reconciles the cache with what the database says", "[client][evict]") {
     TempCacheDir dir;
     SenderKeys peer;
