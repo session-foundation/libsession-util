@@ -239,14 +239,15 @@ TEST_CASE(
     CHECK_FALSE(std::filesystem::exists(dest.string() + ".part"));
 
     // Progress reported as a send does: an opening 0/0 that says it has begun, then exactly one
-    // terminal result.  Each report says which attachment of which message it is about, since a
-    // caller may be watching several.
+    // terminal result.  Each report says which attachment of which message of which conversation it
+    // is about, since a caller may be watching several.
     REQUIRE(reports.size() >= 2);
     CHECK_FALSE(reports.front().result.has_value());
     CHECK(reports.front().done == 0);
     CHECK(reports.front().total == 0);
     CHECK(reports.back().result == 0);
     for (const auto& r : reports) {
+        CHECK(r.conversation_id == ConversationId::dm(peer.session_id));
         CHECK(r.message_id == msg_id);
         CHECK(r.index == 0);
     }
@@ -1181,6 +1182,7 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     // The save was told how the transfer it joined was going, not left silent until it finished.
     CHECK_FALSE(saw.empty());
     CHECK(saw.back().result == 0);
+    CHECK(saw.back().conversation_id == ConversationId::dm(peer.session_id));
 }
 
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
@@ -1296,6 +1298,7 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         // Broadcast, since nobody asked for it and there is no caller to hand a report to.
         REQUIRE_FALSE(progress.empty());
         CHECK(progress.back().first == convo);
+        CHECK(progress.back().second.conversation_id == convo);
         CHECK(progress.back().second.result == 0);
 
         // In the cache, so opening the conversation costs nothing...
