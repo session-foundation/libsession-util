@@ -96,6 +96,9 @@ struct callbacks {
     /// to a server, carrying 0 of 0 — so a row can show that a fetch is beginning rather than
     /// appearing to do nothing until the first bytes land.  Exactly one report carries a `result`.
     ///
+    /// The `ConversationId` argument and `AttachmentProgress::conversation_id` are the same value:
+    /// redundant, but not worth changing every handler's signature over.
+    ///
     /// Reports are rate limited (see `set_dispatch_interval`) to keep the cost off the
     /// application's thread.  That is all the limiting is for: how often a spinner turns is the
     /// application's own business, and it should not be reading motion into the arrival of these.

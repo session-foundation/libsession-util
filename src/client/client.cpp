@@ -986,15 +986,16 @@ void Client::_attachment_data(
         std::function<void(const AttachmentProgress&)> on_progress,
         failable_function<void(std::vector<std::byte>)> cb) {
 
-    auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
+    auto [convo_id, url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
 
     // The caller's own progress reporting, identified and hopped out to their thread.
     std::function<void(int64_t, int64_t, std::optional<int>)> progress;
     if (on_progress)
-        progress = _dispatch_progress([on_progress = std::move(on_progress), message_id, index](
-                                              int64_t done, int64_t total, std::optional<int> r) {
-            on_progress(AttachmentProgress{message_id, index, done, total, r});
-        });
+        progress = _dispatch_progress(
+                [on_progress = std::move(on_progress), convo_id, message_id, index](
+                        int64_t done, int64_t total, std::optional<int> r) {
+                    on_progress(AttachmentProgress{convo_id, message_id, index, done, total, r});
+                });
 
     std::function<void(std::span<const std::byte>)> store;
     if (!_cache_dir.empty())
@@ -4229,36 +4230,46 @@ void Client::_download_decrypted(
 }
 
 Client::StoredPointer Client::_attachment_pointer(int64_t message_id, size_t index) {
-    StoredPointer p;
+    auto c = core.database().conn();
+
+    std::string url;
+    std::vector<std::byte> key, digest;
+    std::optional<int64_t> size;
+    int64_t convo_row;
     {
-        auto c = core.database().conn();
         // `key` and `digest` vary in length -- 32 bytes for the stream scheme, 64 for legacy -- so
         // they are read as blob views from a live statement and copied out before it steps.
         auto st = c.prepared_bind(
-                "SELECT url, key, digest, size FROM message_attachments WHERE message = ? AND idx"
-                " = ?",
+                "SELECT a.url, a.key, a.digest, a.size, m.conversation FROM message_attachments a"
+                " JOIN messages m ON m.id = a.message WHERE a.message = ? AND a.idx = ?",
                 message_id,
                 static_cast<int64_t>(index));
         if (!st->executeStep())
             throw std::runtime_error{"Message {} has no attachment {}"_format(message_id, index)};
 
-        auto [u, k, d, sz] = sqlite::get<
+        auto [u, k, d, sz, convo] = sqlite::get<
                 std::optional<std::string>,
                 std::optional<sqlite::blob>,
                 std::optional<sqlite::blob>,
-                std::optional<int64_t>>(*st);
+                std::optional<int64_t>,
+                int64_t>(*st);
         if (!u)
             throw std::runtime_error{
                     "Attachment {} of message {} cannot be fetched: its sender gave no url"_format(
                             index, message_id)};
-        p.url = std::move(*u);
+        url = std::move(*u);
         if (k)
-            p.key.assign(k->begin(), k->end());
+            key.assign(k->begin(), k->end());
         if (d)
-            p.digest.assign(d->begin(), d->end());
-        p.size = sz;
+            digest.assign(d->begin(), d->end());
+        size = sz;
+        convo_row = convo;
     }
-    return p;
+    return {conversation_id_at(c, convo_row),
+            std::move(url),
+            std::move(key),
+            std::move(digest),
+            size};
 }
 
 void Client::_cache_attachment(
@@ -4346,7 +4357,7 @@ void Client::_save_attachment(
         bool notify_sender,
         bool replace) {
 
-    auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
+    auto [convo_id, url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
 
     // Written to a temporary name beside the destination and renamed only once it is whole, so an
     // interrupted save leaves nothing that looks finished.
@@ -4362,9 +4373,9 @@ void Client::_save_attachment(
     // the identity is filled in before the shared hop.
     std::function<void(int64_t, int64_t, std::optional<int>)> identified;
     if (on_progress)
-        identified = [on_progress = std::move(on_progress), message_id, index](
+        identified = [on_progress = std::move(on_progress), convo_id, message_id, index](
                              int64_t done, int64_t total, std::optional<int> r) {
-            on_progress(AttachmentProgress{message_id, index, done, total, r});
+            on_progress(AttachmentProgress{convo_id, message_id, index, done, total, r});
         };
     auto report = _dispatch_progress(std::move(identified));
 

@@ -731,8 +731,11 @@ class Client {
     };
     std::unordered_map<std::string, InFlight> _in_flight;
 
-    // What an attachment row says about where its file is and how to open it.
+    // What an attachment row says about where its file is and how to open it, along with the
+    // conversation its message sits in -- which every progress report carries and the attachment
+    // row itself does not know.
     struct StoredPointer {
+        ConversationId conversation_id;
         std::string url;
         std::vector<std::byte> key, digest;
         std::optional<int64_t> size;

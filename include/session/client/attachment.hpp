@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <session/client/conversation_id.hpp>
 #include <session/clock.hpp>
 #include <string>
 
@@ -77,6 +78,11 @@ enum class AutoDownload : int {
 /// `save_attachment`, and — for a download nobody asked for — broadcast through
 /// `callbacks::attachment_progress`, since a background fetch has no caller to hand anything to.
 struct AttachmentProgress {
+    /// The conversation the transfer's message belongs to.  Carried rather than left to be looked
+    /// up, because a report reaches a display whose first question is whether this is about
+    /// anything it is showing.
+    ConversationId conversation_id;
+
     int64_t message_id;
     size_t index;
 
