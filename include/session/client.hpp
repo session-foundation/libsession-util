@@ -568,6 +568,26 @@ class Client {
     void attachment_cache_size(failable_function<void(int64_t)> cb);
     int64_t attachment_cache_size(await_t);
 
+    /// What each of these messages' attachments is doing, without starting anything.
+    ///
+    /// The one way back to the truth about a transfer.  Nothing about one is stored: a client that
+    /// was not listening -- it had not started yet, the conversation was not open, its process was
+    /// restarted -- cannot learn from the reports what it missed, and asking for the bytes to find
+    /// out would be a download rather than a question.
+    ///
+    /// Takes a page's worth rather than one attachment because that is how a transcript reads: the
+    /// answer arrives with the messages it describes, and a row never has to draw a state it is
+    /// about to correct.  Messages that do not exist, and attachments with nothing to fetch -- an
+    /// outgoing one that has not uploaded, or an incoming one whose sender gave no url -- are left
+    /// out rather than reported as idle: there is a difference between "not being fetched" and
+    /// "not fetchable", and only the first is worth a row that offers to fetch it.
+    ///
+    /// Order is unspecified and the result may be shorter than the attachments asked about.
+    void attachment_transfers(
+            std::vector<int64_t> message_ids,
+            failable_function<void(std::vector<AttachmentStatus>)> cb);
+    std::vector<AttachmentStatus> attachment_transfers(std::vector<int64_t> message_ids, await_t);
+
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
     ///
     /// Compared against the size in the pointer, which is the file's own length — so a limit of 2MB
@@ -776,6 +796,7 @@ class Client {
 
     // What the cache index says its files add up to, in bytes on disk.
     int64_t _attachment_cache_size();
+    std::vector<AttachmentStatus> _attachment_transfers(const std::vector<int64_t>& message_ids);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {

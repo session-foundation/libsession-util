@@ -100,6 +100,33 @@ struct AttachmentProgress {
     std::optional<int> result;
 };
 
+/// What one attachment's bytes are doing on this device, right now.
+///
+/// A snapshot, and the point of it is that it can be asked for: a transfer has no stored state of
+/// its own, so a client that missed the reports -- it was not running, its window was not open --
+/// has no other way back to the truth.  Nothing here starts anything.
+struct AttachmentStatus {
+    ConversationId conversation_id;
+    int64_t message_id;
+    size_t index;
+
+    /// The decrypted file is in the cache, so asking for the bytes would answer from disk without
+    /// a request.  A strong hint rather than a promise: the cache can be swept or the directory
+    /// emptied between this answer and the next fetch, and a fetch that misses simply downloads.
+    bool cached = false;
+
+    /// A transfer is running, and `done`/`total` are where it has got to -- the same figures, in
+    /// the same encrypted bytes, that `AttachmentProgress` carries, so a bar seeded from this and
+    /// then fed by reports does not jump.  `total` is 0 until the server has said how big it is.
+    ///
+    /// Only transfers that accumulate are visible here, which is everything except a save: a save
+    /// streams to its destination and keeps nothing, so there is nothing to join or to report a
+    /// position in.
+    bool transferring = false;
+    int64_t done = 0;
+    int64_t total = 0;
+};
+
 struct Attachment {
     /// Position within the message's attachment list.  This is the index `send_message`'s upload
     /// handler reports progress against, and what `save_attachment` takes.
