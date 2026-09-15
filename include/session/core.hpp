@@ -571,10 +571,15 @@ class Core {
     /// Asks every member concurrently, and is deliberately asymmetric about what it will conclude
     /// from what they say.  **Having the config is not a majority property**: one member holding it
     /// is the whole answer, and the others not having it yet is the condition being routed around
-    /// rather than evidence against it.  So an answer carrying the config, seconded by a second
-    /// member, ends the fetch early; an empty answer never does, however many members give it, and
-    /// when everyone has answered any member that had the config still wins.  Concluding that there
-    /// is no config is the expensive direction, and it waits for the whole swarm.
+    /// rather than evidence against it.  So the first answer carrying a config ends the fetch, and
+    /// an empty answer never does however many members give it -- only every member having answered
+    /// concludes that there is nothing to find.
+    ///
+    /// **No agreement is required of the answer that wins**, on purpose.  A config is merged rather
+    /// than assigned, so a stale one taken from a member behind its swarm is corrected by the next
+    /// ordinary poll rather than stuck; waiting for a second member to say the same thing buys
+    /// protection against something that already repairs itself, and costs a round trip in front of
+    /// somebody watching a progress indicator.
     ///
     /// `done` is called exactly once, on Core's loop, with whether a config was merged.  Safe to
     /// call without waiting on it: what it finds is merged into `configs` like anything a poll
