@@ -24,6 +24,7 @@
 #include <session/session_protocol.hpp>
 #include <session/util.hpp>
 #include <session/xed25519.hpp>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "core/swarm_request.hpp"
@@ -159,6 +160,124 @@ static constexpr std::array POLL_NAMESPACES = {
 // fewer; this exists so that a node whose `more` never goes false cannot poll indefinitely.
 static constexpr int POLL_MAX_ROUNDS = 20;
 
+/// One namespace's slice of a batch retrieve response, decoded but not yet handled.
+///
+/// The decoded bytes are kept beside the messages because `SwarmMessage::data` spans into them:
+/// the messages are only usable while this object is.
+struct retrieved_namespace {
+    std::vector<std::vector<std::byte>> data;
+    std::vector<SwarmMessage> messages;
+    /// The node says it is holding more past what it returned.  A retrieve is capped by the
+    /// storage server, so this is how a namespace reports that one round did not exhaust it.
+    bool more = false;
+};
+
+namespace {
+
+/// Decodes one result of a batch retrieve, or nothing where the node did not answer it.
+///
+/// **Nothing and an empty answer are different**, and the difference is load-bearing: a namespace
+/// that failed or answered malformedly is not reported to its handler at all, while one that
+/// answered with nothing is -- "we asked and there is nothing" is an answer, and some handlers act
+/// on it.
+///
+/// Takes no node and touches no database, deliberately. Which node an answer came from matters to
+/// whoever called: the retrieve cursor is kept per node and has to stay with the one that produced
+/// it, and a decoder that knew about nodes is the shape in which one node's cursor gets written
+/// from another node's response -- silently, because each node's cursor is individually plausible.
+std::optional<retrieved_namespace> decode_retrieved(const nlohmann::json& res, int16_t ns_val) {
+    auto code_it = res.find("code");
+    if (code_it == res.end() || code_it->get<int>() != 200) {
+        log::warning(cat, "Retrieve of namespace {} failed: {}", ns_val, res.dump());
+        return std::nullopt;
+    }
+    auto body_it = res.find("body");
+    if (body_it == res.end())
+        return std::nullopt;
+    auto msgs_it = body_it->find("messages");
+    if (msgs_it == body_it->end() || !msgs_it->is_array())
+        return std::nullopt;
+
+    retrieved_namespace got;
+    if (auto m = body_it->find("more"); m != body_it->end() && m->is_boolean())
+        got.more = m->get<bool>();
+
+    log::debug(cat, "Retrieved {} message(s) from namespace {}", msgs_it->size(), ns_val);
+
+    for (const auto& msg : *msgs_it) {
+        auto data_it = msg.find("data");
+        if (data_it == msg.end() || !data_it->is_string())
+            continue;
+        auto& decoded = got.data.emplace_back();
+        auto b64 = data_it->get<std::string_view>();
+        decoded.reserve(oxenc::from_base64_size(b64.size()));
+        oxenc::from_base64(b64.begin(), b64.end(), std::back_inserter(decoded));
+
+        SwarmMessage swarm_msg;
+        swarm_msg.data = {decoded.data(), decoded.size()};
+
+        if (auto h = msg.find("hash"); h != msg.end() && h->is_string())
+            swarm_msg.hash = h->get<std::string>();
+
+        if (auto t = msg.find("timestamp"); t != msg.end() && t->is_number_integer())
+            swarm_msg.timestamp = from_epoch_ms(t->get<int64_t>());
+
+        if (auto e = msg.find("expiry"); e != msg.end() && e->is_number_integer())
+            swarm_msg.expiry = from_epoch_ms(e->get<int64_t>());
+
+        got.messages.push_back(std::move(swarm_msg));
+    }
+
+    // A node claiming more while returning nothing cannot be continued: there is no new hash to
+    // move the cursor to, so another round would ask the same question and get the same answer.
+    // Reported as finished instead, or a handler waiting on `is_final` would wait for one that
+    // never comes.
+    got.more = got.more && !got.messages.empty();
+    return got;
+}
+
+}  // namespace
+
+/// One distinct answer to the profile fetch, and how many members gave it.
+struct Core::ProfileAnswer {
+    size_t agreed = 0;
+    /// The member whose answer this is -- the first to give it.  Kept because the retrieve cursor
+    /// is written against the node that produced the messages and no other.
+    network::ed25519_pubkey node;
+    retrieved_namespace answer;
+};
+
+/// What a fan-out has heard so far.
+///
+/// Shared between every in-flight request and touched only on Core's loop, which is what makes a
+/// plain count safe here: the responses arrive on the network's threads and are marshalled across
+/// before any of this is read.
+struct Core::ProfileFanOut {
+    std::function<void(bool)> done;
+    size_t outstanding = 0;
+    bool settled = false;
+    /// Keyed by the hashes the answer carried, so agreement is a count rather than a comparison of
+    /// every answer against every other.
+    std::unordered_map<std::string, ProfileAnswer> heard;
+};
+
+namespace {
+
+/// What two members have to agree on before their answer is taken.
+///
+/// The hashes, sorted: the storage server returns messages in its own order, and two members
+/// holding the same config are not obliged to list it identically.
+std::string answer_digest(const retrieved_namespace& got) {
+    std::vector<std::string_view> hashes;
+    hashes.reserve(got.messages.size());
+    for (const auto& m : got.messages)
+        hashes.emplace_back(m.hash);
+    std::ranges::sort(hashes);
+    return "{}"_format(fmt::join(hashes, "\n"));
+}
+
+}  // namespace
+
 void Core::_poll() {
     // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
     // could make the loop thread the last owner and run ~Network there.
@@ -178,6 +297,198 @@ void Core::_poll() {
 
         _send_poll(net, swarm.front(), {POLL_NAMESPACES.begin(), POLL_NAMESPACES.end()}, 0);
     });
+}
+
+/// How many members have to give the same answer before it is taken without waiting for the rest.
+///
+/// Two, which is the smallest number that is more than one member's word -- and it gates *having*
+/// the config, not the wait.  **Absence never settles this fetch early**, however many members
+/// report it: presence is not a majority property.  The case this whole thing exists for is a
+/// config that has reached one member of a swarm and not the others, so counting "I do not have it"
+/// against the one member that does would be the original fault with more steps in it.
+static constexpr size_t PROFILE_FETCH_QUORUM = 2;
+
+void Core::fetch_user_profile(std::function<void(bool found)> done) {
+    // Non-owning: the Network is ours alone, and callbacks below must not keep it alive -- doing so
+    // could make the loop thread the last owner and run ~Network there.
+    auto* net = _network.get();
+    if (!net || !globals.have_account()) {
+        if (done)
+            done(false);
+        return;
+    }
+
+    auto state = std::make_shared<Core::ProfileFanOut>();
+    state->done = std::move(done);
+
+    net->get_swarm(globals.pubkey_x25519(), false, [this, net, state](auto, auto swarm) {
+        _loop.call([this, net, state, swarm = std::move(swarm)] {
+            if (state->settled)
+                return;
+            if (swarm.empty()) {
+                // Not an error worth failing loudly over: the ordinary poll still runs, and this
+                // was only ever an attempt to get there sooner.  A swarm of one is still worth
+                // asking -- one member holding the config is the whole answer.
+                log::warning(cat, "Cannot fan out a profile fetch: no swarm members available");
+                _settle_profile_fetch(*state, nullptr);
+                return;
+            }
+
+            auto body = _profile_retrieve_body();
+            state->outstanding = swarm.size();
+
+            for (const auto& node : swarm) {
+                net->send_request(
+                        swarm_request(node, globals.pubkey_x25519(), "batch", body),
+                        [this, state, node](
+                                bool success,
+                                bool timeout,
+                                int16_t /*status_code*/,
+                                std::vector<std::pair<std::string, std::string>> /*headers*/,
+                                std::optional<std::string> body) {
+                            // Marshalled rather than handled here: these arrive on the network's
+                            // threads, several at once by design, and everything they touch --
+                            // the tally, the config merge, the cursor -- belongs to Core's loop.
+                            _loop.call([this,
+                                        state,
+                                        node,
+                                        success,
+                                        timeout,
+                                        body = std::move(body)]() mutable {
+                                _handle_profile_response(
+                                        *state,
+                                        node,
+                                        (success && body) ? std::move(body) : std::nullopt,
+                                        timeout);
+                            });
+                        });
+            }
+        });
+    });
+}
+
+/// The body of a profile retrieve: one namespace, and no cursor.
+///
+/// **No `last_hash`, deliberately.** A cursor says "everything after what I already have", and the
+/// point of this fetch is to get the config from a member that may never have been asked before --
+/// resuming from another member's position would ask the wrong question.  The same body goes to
+/// every member, which is also what makes their answers comparable.
+std::vector<std::byte> Core::_profile_retrieve_body() {
+    auto now_ms = epoch_ms(clock_now_ms());
+    auto ns_val = static_cast<int16_t>(config::Namespace::UserProfile);
+
+    nlohmann::json params = {
+            {"pubkey", globals.session_id_hex()},
+            {"namespace", ns_val},
+    };
+
+    if (retrieve_requires_auth(ns_val)) {
+        auto seed = globals.account_seed();
+        auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
+        params["pubkey_ed25519"] = globals.pubkey_ed25519().hex();
+        params["timestamp"] = now_ms;
+        params["signature"] = "{:b}"_format(ed25519::sign(seed.ed25519_secret(), to_span(to_sign)));
+    }
+
+    nlohmann::json requests = nlohmann::json::array();
+    requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});
+    return to_vector(nlohmann::json{{"requests", std::move(requests)}}.dump());
+}
+
+/// One member's answer, tallied against the others.
+void Core::_handle_profile_response(
+        ProfileFanOut& state,
+        const network::service_node& node,
+        std::optional<std::string> body,
+        bool timed_out) {
+    if (state.settled)
+        return;
+
+    state.outstanding -= 1;
+
+    if (body) {
+        try {
+            auto json = nlohmann::json::parse(*body);
+            auto it = json.find("results");
+            if (it != json.end() && it->is_array() && !it->empty()) {
+                if (auto got = decode_retrieved(
+                            (*it)[0], static_cast<int16_t>(config::Namespace::UserProfile))) {
+                    auto& entry = state.heard[answer_digest(*got)];
+                    if (entry.agreed == 0) {
+                        entry.node = node.remote_pubkey;
+                        entry.answer = std::move(*got);
+                    }
+                    entry.agreed += 1;
+
+                    // Seconded, and carrying something: nothing better is going to arrive, so the
+                    // remaining members are not waited on.  An empty answer never takes this exit
+                    // however many members give it -- see PROFILE_FETCH_QUORUM.
+                    if (!entry.answer.messages.empty() && entry.agreed >= PROFILE_FETCH_QUORUM) {
+                        _settle_profile_fetch(state, &entry);
+                        return;
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            log::warning(cat, "Failed to parse profile fetch response: {}", e.what());
+        }
+    } else {
+        log::warning(
+                cat,
+                "Profile fetch from {} failed: {}",
+                node.remote_pubkey.hex(),
+                timed_out ? "timed out" : "request failed");
+    }
+
+    if (state.outstanding > 0)
+        return;
+
+    // Everyone has answered and no answer was seconded.  **Any member that had the config still
+    // wins**, because the alternative is not a safer answer but no answer at all -- and the
+    // ordinary poll, which is what runs instead, believes a single member without asking anyone
+    // else.  Members reporting nothing are not counted against it at all: they are the condition
+    // being routed around, not evidence.
+    //
+    // Among answers that do carry something, the most-agreed wins, and among equals the one
+    // carrying the most messages -- a member holding part of a config is further along than one
+    // holding less of it.
+    ProfileAnswer* best = nullptr;
+    for (auto& [digest, entry] : state.heard) {
+        if (entry.answer.messages.empty())
+            continue;
+        if (!best || entry.agreed > best->agreed ||
+            (entry.agreed == best->agreed &&
+             entry.answer.messages.size() > best->answer.messages.size()))
+            best = &entry;
+    }
+    _settle_profile_fetch(state, best);
+}
+
+/// Ends the fan-out, merging `taken` if there is one.  Called exactly once per fetch.
+void Core::_settle_profile_fetch(ProfileFanOut& state, ProfileAnswer* taken) {
+    if (state.settled)
+        return;
+    state.settled = true;
+
+    bool found = taken && !taken->answer.messages.empty();
+
+    if (taken && !taken->answer.messages.empty()) {
+        auto configs_held = configs.batch();
+        // Final, even where the member said it was holding more.  This is a one-shot fetch rather
+        // than a poll that continues: the cursor recorded below is what lets the ordinary poll pick
+        // up anything left, and a handler told to wait for a final that never comes would wait for
+        // ever.
+        receive_messages(taken->answer.messages, config::Namespace::UserProfile, true);
+        _record_swarm_cursor(taken->node, config::Namespace::UserProfile, taken->answer.messages);
+    }
+
+    log::info(
+            cat,
+            "Profile fetch settled: {}",
+            found ? "config merged" : "nothing held by the swarm");
+
+    if (state.done)
+        state.done(found);
 }
 
 void Core::_send_poll(
@@ -292,6 +603,74 @@ SELECT h.hash FROM swarm_hashes h JOIN swarm_nodes n ON n.id = h.node
             });
 }
 
+/// Records where this node's next retrieve of `ns` should resume from.
+///
+/// **The node is a parameter and not something read from the surroundings, deliberately.** The
+/// cursor is kept per (namespace, node) -- the swarm filters a retrieve on a hash that particular
+/// member still holds -- so writing one node's cursor from another node's answer is a silent fault:
+/// each cursor is individually plausible, and what it costs shows up much later as a namespace that
+/// re-fetches for ever or one that skips past messages, depending which way it landed.
+///
+/// Called only once the batch has been handled: the swarm filters on last_hash, so advancing past
+/// messages that threw would drop them permanently.  Handling and then dying before this point
+/// re-delivers the batch instead, which is why message handlers must tolerate seeing a message
+/// twice.
+void Core::_record_swarm_cursor(
+        const network::ed25519_pubkey& node_pubkey,
+        config::Namespace ns,
+        std::span<const SwarmMessage> messages) {
+    if (messages.empty())
+        return;
+
+    auto ns_val = static_cast<int16_t>(ns);
+    auto conn = db.conn();
+
+    // Every hash goes in, not just the ones that produced something we kept: the cursor is a
+    // position in what this node returned, so leaving out what we ignored would park it behind
+    // those and fetch them again on every poll.  Insertion order is the order the node returned
+    // them, which is what `id DESC` reads back.
+    conn.prepared_exec(
+            "INSERT INTO swarm_nodes (pubkey) VALUES (?) ON CONFLICT DO NOTHING", node_pubkey);
+    auto node_id =
+            conn.prepared_get<int64_t>("SELECT id FROM swarm_nodes WHERE pubkey = ?", node_pubkey);
+
+    for (const auto& m : messages) {
+        if (m.hash.empty())
+            continue;
+        conn.prepared_exec(
+                R"(
+INSERT INTO swarm_hashes (namespace, node, hash, expiry) VALUES (?, ?, ?, ?)
+ON CONFLICT(namespace, node, hash) DO UPDATE SET expiry = max(expiry, excluded.expiry)
+)",
+                ns_val,
+                node_id,
+                m.hash,
+                m.expiry.time_since_epoch().count() > 0 ? std::optional{epoch_ms(m.expiry)}
+                                                        : std::nullopt);
+    }
+
+    // An expired hash is not a cursor: the node no longer holds the message to measure from.
+    conn.prepared_exec(
+            "DELETE FROM swarm_hashes WHERE expiry IS NOT NULL AND expiry <= ?",
+            epoch_ms(clock_now_ms()));
+
+    // And a cap on top of that, because expiry alone bounds this at every message in the retention
+    // window.  Only the newest entry is ever read; the rest exist solely to walk back past hashes
+    // deleted from the swarm, so keeping more than a run of deletions could plausibly cover buys
+    // nothing but disk.
+    conn.prepared_exec(
+            R"(
+DELETE FROM swarm_hashes
+ WHERE namespace = ?1 AND node = ?2
+   AND id NOT IN (SELECT id FROM swarm_hashes
+                   WHERE namespace = ?1 AND node = ?2
+                   ORDER BY id DESC LIMIT ?3)
+)",
+            ns_val,
+            node_id,
+            SWARM_HASH_HISTORY);
+}
+
 void Core::_handle_poll_response(
         network::service_node node,
         std::vector<config::Namespace> namespaces,
@@ -316,129 +695,20 @@ void Core::_handle_poll_response(
         auto configs_held = configs.batch();
 
         auto& results = *it;
-        auto conn = db.conn();
         for (size_t i = 0; i < namespaces.size() && i < results.size(); ++i) {
             auto ns = namespaces[i];
             auto ns_val = static_cast<int16_t>(ns);
 
-            const auto& res = results[i];
-            auto code_it = res.find("code");
-            if (code_it == res.end() || code_it->get<int>() != 200) {
-                log::warning(cat, "Retrieve of namespace {} failed: {}", ns_val, res.dump());
-                continue;
-            }
-            auto body_it = res.find("body");
-            if (body_it == res.end())
-                continue;
-            auto msgs_it = body_it->find("messages");
-            if (msgs_it == body_it->end() || !msgs_it->is_array())
+            auto got = decode_retrieved(results[i], ns_val);
+            if (!got)
                 continue;
 
-            // A retrieve is capped, so this says whether the node is holding more past what it
-            // returned.  Everything above `continue`s instead, which is the distinction that
-            // matters: a namespace that failed or answered malformedly is not reported to its
-            // handler at all, while one that answered with nothing is -- "we asked and there is
-            // nothing" is an answer, and some handlers act on it.
-            bool more = false;
-            if (auto m = body_it->find("more"); m != body_it->end() && m->is_boolean())
-                more = m->get<bool>();
-
-            log::debug(cat, "Retrieved {} message(s) from namespace {}", msgs_it->size(), ns_val);
-
-            // Decode each message; keep the decoded bytes alive until after
-            // receive_messages() returns, since SwarmMessage::data spans
-            // into them.
-            std::vector<std::vector<std::byte>> messages_data;
-            std::vector<SwarmMessage> swarm_messages;
-
-            for (const auto& msg : *msgs_it) {
-                auto data_it = msg.find("data");
-                if (data_it == msg.end() || !data_it->is_string())
-                    continue;
-                auto& decoded = messages_data.emplace_back();
-                auto b64 = data_it->get<std::string_view>();
-                decoded.reserve(oxenc::from_base64_size(b64.size()));
-                oxenc::from_base64(b64.begin(), b64.end(), std::back_inserter(decoded));
-
-                SwarmMessage swarm_msg;
-                swarm_msg.data = {decoded.data(), decoded.size()};
-
-                if (auto h = msg.find("hash"); h != msg.end() && h->is_string())
-                    swarm_msg.hash = h->get<std::string>();
-
-                if (auto t = msg.find("timestamp"); t != msg.end() && t->is_number_integer())
-                    swarm_msg.timestamp = from_epoch_ms(t->get<int64_t>());
-
-                if (auto e = msg.find("expiry"); e != msg.end() && e->is_number_integer())
-                    swarm_msg.expiry = from_epoch_ms(e->get<int64_t>());
-
-                swarm_messages.push_back(std::move(swarm_msg));
-            }
-
-            // A node claiming more while returning nothing cannot be continued: there is no new
-            // hash to move the cursor to, so another round would ask the same question and get the
-            // same answer.  Treat the namespace as finished instead, or a handler waiting on
-            // `is_final` would wait for one that never comes.
-            more = more && !swarm_messages.empty();
-
-            receive_messages(swarm_messages, ns, !more);
-            if (more)
+            const auto& swarm_messages = got->messages;
+            receive_messages(swarm_messages, ns, !got->more);
+            if (got->more)
                 unfinished.push_back(ns);
 
-            if (!swarm_messages.empty()) {
-                // Only advance the cursor once the batch has been handled: the swarm filters on
-                // last_hash, so advancing past messages that threw would drop them permanently.
-                // Handling then dying before this point re-delivers the batch instead, so message
-                // handlers must tolerate seeing a message twice.
-                //
-                // Every hash goes in, not just the ones that produced something we kept: the cursor
-                // is a position in what this node returned, so leaving out what we ignored would
-                // park it behind those and fetch them again on every poll.  Insertion order is the
-                // order the node returned them, which is what `id DESC` reads back.
-                conn.prepared_exec(
-                        "INSERT INTO swarm_nodes (pubkey) VALUES (?) ON CONFLICT DO NOTHING",
-                        sn_pubkey);
-                auto node_id = conn.prepared_get<int64_t>(
-                        "SELECT id FROM swarm_nodes WHERE pubkey = ?", sn_pubkey);
-
-                for (const auto& m : swarm_messages) {
-                    if (m.hash.empty())
-                        continue;
-                    conn.prepared_exec(
-                            R"(
-INSERT INTO swarm_hashes (namespace, node, hash, expiry) VALUES (?, ?, ?, ?)
-ON CONFLICT(namespace, node, hash) DO UPDATE SET expiry = max(expiry, excluded.expiry)
-)",
-                            ns_val,
-                            node_id,
-                            m.hash,
-                            m.expiry.time_since_epoch().count() > 0
-                                    ? std::optional{epoch_ms(m.expiry)}
-                                    : std::nullopt);
-                }
-
-                // An expired hash is not a cursor: the node no longer holds the message to measure
-                // from.
-                conn.prepared_exec(
-                        "DELETE FROM swarm_hashes WHERE expiry IS NOT NULL AND expiry <= ?",
-                        epoch_ms(clock_now_ms()));
-
-                // And a cap on top of that, because expiry alone bounds this at every message in
-                // the retention window.  Only the newest entry is ever read; the rest exist solely
-                // to walk back past hashes deleted from the swarm, so keeping more than a run of
-                // deletions could plausibly cover buys nothing but disk.
-                conn.prepared_exec(
-                        R"(
-DELETE FROM swarm_hashes
- WHERE namespace = ?1 AND node = ?2
-   AND id NOT IN (SELECT id FROM swarm_hashes
-                   WHERE namespace = ?1 AND node = ?2
-                   ORDER BY id DESC LIMIT ?3)
-)",
-                        ns_val,
-                        node_id,
-                        SWARM_HASH_HISTORY);
-            }
+            _record_swarm_cursor(sn_pubkey, ns, swarm_messages);
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse poll response: {}", e.what());
