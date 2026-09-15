@@ -546,6 +546,23 @@ class Client {
     void attachment_cache_limit(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> attachment_cache_limit(await_t);
 
+    /// How much disk the cached attachments occupy at the moment, in bytes.
+    ///
+    /// The same measure as the limit, and the same total eviction compares against it: bytes on
+    /// disk, which is more than the attachments themselves are, since what is cached is encrypted
+    /// and padded.  Being the same measure is what makes the two worth showing together.
+    ///
+    /// Display pictures are excluded, exactly as they are from the limit: they are not counted
+    /// towards it and are never evicted for it.
+    ///
+    /// Read from the index rather than by walking the directory, so it costs a query -- and is
+    /// exact only for as long as the index is.  A file deleted from under us still counts until the
+    /// sweep that `set_cache_dir` starts finds it gone.
+    ///
+    /// 0 when nothing is cached, which includes having no cache directory at all.
+    void attachment_cache_size(result_function<int64_t> cb);
+    int64_t attachment_cache_size(await_t);
+
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
     ///
     /// Compared against the size in the pointer, which is the file's own length — so a limit of 2MB
@@ -859,6 +876,9 @@ class Client {
 
     // Every message whose attachment names cache entry `id`.
     std::vector<int64_t> _messages_cached_as(sqlite::Connection& c, int64_t id);
+
+    // What the cache index says its files add up to, in bytes on disk.
+    int64_t _attachment_cache_size();
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
