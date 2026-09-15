@@ -108,20 +108,16 @@ TEST_CASE("Download url rejects an unusable pubkey", "[backend][session_file_ser
     // `p=` says which key to encrypt the request to, so a url carrying one we cannot use is not a
     // url we can fall back on: ignoring the fragment would keep the url's host but quietly
     // substitute our own file server's key, sending the request to a host that cannot read it.
+    // What makes a key usable is [ed25519][pubkey]'s subject; this only has to show the check is
+    // reached, alongside the shapes the url parser turns away before the key is even decoded.
     auto rejected = GENERATE(
-            // Right length, valid hex, but not a point on the curve
+            // Well-formed hex of the right length, but not a point on the curve
             "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv,
-            // A point on the curve, but outside the prime-order subgroup (order 8)
-            "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"sv,
-            // The identity, and the rest of the small-order points
-            "0000000000000000000000000000000000000000000000000000000000000000"sv,
-            "0100000000000000000000000000000000000000000000000000000000000000"sv,
-            // The file server's X25519 key, which is what shipped in TESTNET_CONFIG by mistake
-            "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d"sv,
-            // Too short, too long, and not hex at all
+            // Too short, too long, not hex, and absent -- `p=` with nothing after it
             "abc123"sv,
             "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da2900"sv,
-            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"sv);
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"sv,
+            ""sv);
 
     INFO("pubkey: " << rejected);
     CHECK_FALSE(file_server::parse_download_url(
