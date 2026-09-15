@@ -76,6 +76,10 @@ b32 sk_to_pk(const PrivKeySpan& sk) {
     return pk;
 }
 
+bool is_valid_pubkey(std::span<const std::byte, 32> pk) {
+    return crypto_core_ed25519_is_valid_point(to_unsigned(pk.data())) == 1;
+}
+
 void pk_to_x25519(std::span<std::byte, 32> out, std::span<const std::byte, 32> pk) {
     if (0 != crypto_sign_ed25519_pk_to_curve25519(to_unsigned(out.data()), to_unsigned(pk.data())))
         throw std::runtime_error{"Failed to convert Ed25519 pubkey to X25519: invalid key"};
