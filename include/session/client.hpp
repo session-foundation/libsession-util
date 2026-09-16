@@ -738,6 +738,13 @@ class Client {
     /// is why they are members rather than the file-local helpers they used to be.
     AttachmentAvailability _attachment_availability(sqlite::Connection& c, std::string_view url);
 
+    /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
+    /// every message showing that file.
+    ///
+    /// More than one message routinely shows the same file -- forwarded, or quoted -- which is
+    /// also why the cache is keyed on the file rather than on the message that wanted it.
+    void _emit_attachment_availability(std::string_view url);
+
     // How deep a read goes when a message turns out to be a reply.
     enum class ReplyDepth {
         // Load the replied-to message, so a caller can draw the reply from one read.
