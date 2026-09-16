@@ -1613,6 +1613,115 @@ TEST_CASE("Client: a text-only message previews no attachments", "[client][attac
 }
 
 TEST_CASE(
+        "Client: an attachment says whether its bytes are already here",
+        "[client][attachments][availability]") {
+    // What a display needs before it can decide between drawing the file, drawing a bar, and
+    // drawing something to press -- and it has to come with the message, since a client that asked
+    // per attachment would cross the language boundary once for every file on the page.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(20000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("here", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            42);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto att = [&] { return c->conversation(convo, await)->messages(await)[0].attachments[0]; };
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    // Nobody has asked for it, so the decision is the user's.
+    CHECK(att().availability == AttachmentAvailability::absent);
+    CHECK(att().fetch_done == 0);
+    CHECK(att().fetch_total == 0);
+
+    c->attachment_data(msg_id, 0, nullptr, [](auto) {});
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+
+    // A transfer is running before a single byte of it has arrived, which is what keeps a download
+    // button from being drawn over the top of one that is already going.
+    CHECK(att().availability == AttachmentAvailability::fetching);
+
+    std::span<const std::byte> whole{ciphertext};
+    network::file_metadata meta{"here", static_cast<int64_t>(ciphertext.size()), {}, {}};
+    auto half = ciphertext.size() / 2;
+    net->downloads[0].on_data(meta, whole.first(half));
+    sync(*c);
+
+    // Half of it is here.  The reports went to whoever started the fetch, so a conversation opened
+    // now has nowhere else to learn where it has reached.
+    CHECK(att().availability == AttachmentAvailability::fetching);
+    CHECK(att().fetch_done == static_cast<int64_t>(half));
+    CHECK(att().fetch_total == static_cast<int64_t>(ciphertext.size()));
+
+    net->downloads[0].on_data(meta, whole.subspan(half));
+    net->downloads[0].on_complete(meta, false);
+    net->downloads.clear();
+    sync(*c);
+
+    // Finished: the bytes can be had without a request, and there is no longer a transfer to say
+    // anything about.
+    CHECK(att().availability == AttachmentAvailability::cached);
+    CHECK(att().fetch_done == 0);
+    CHECK(att().fetch_total == 0);
+
+    // And when the cache gives that copy up to make room for another file, the decision goes back
+    // to the user -- which is the whole reason this is read from the cache each time rather than
+    // recorded on the message when the download finished.
+    c->set_attachment_cache_limit(1, await);
+    net->served["other"] = ciphertext;
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(2000),
+            "h2",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(2);
+                a->set_url(network::file_server::generate_download_url("other", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            43);
+    sync(*c);
+    auto newer = c->conversation(convo, await)->messages(await)[0].id;
+    c->attachment_data(newer, 0, nullptr, [](auto) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    CHECK(c->conversation(convo, await)->messages(await)[1].attachments[0].availability ==
+          AttachmentAvailability::absent);
+}
+
+TEST_CASE(
         "Client: a file that cannot be fetched is marked unavailable",
         "[client][attachments][unavailable]") {
     // Two messages naming one file, which is the case the column exists for: what a fetch discovers

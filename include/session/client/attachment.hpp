@@ -207,6 +207,19 @@ struct Attachment {
     /// "can I draw this without a download" has one answer regardless of direction.
     AttachmentAvailability availability = AttachmentAvailability::absent;
 
+    /// How far the transfer has got, when `availability` is `fetching`; both 0 otherwise.
+    ///
+    /// The same figures, counting the same encrypted bytes, that `AttachmentProgress` carries, so
+    /// a bar drawn from these and then fed by progress reports continues rather than jumping.
+    /// `fetch_total` is 0 until the server has said how big it is, which is not known when a
+    /// transfer starts.
+    ///
+    /// What these are for is a conversation opened while a download is already running: the
+    /// reports went to whoever started it, and a display that missed them has no other way back to
+    /// where it has reached.
+    int64_t fetch_done = 0;
+    int64_t fetch_total = 0;
+
     /// When the *recipient* of this message last saved this attachment -- us, on an incoming one,
     /// and the other party on one we sent.  The same fact from either end, so it does not have to
     /// be read differently depending on `Message::outgoing`.

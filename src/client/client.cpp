@@ -3149,6 +3149,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
         if (found == by_id.end())
             continue;
 
+        auto status = url ? _attachment_availability(c, *url) : CacheStatus{};
         found->second->attachments.push_back(Attachment{
                 .index = static_cast<size_t>(idx),
                 .content_type = std::move(ctype),
@@ -3162,8 +3163,9 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                 // identifies its cached copy -- so one column answers both questions.
                 .uploaded = url.has_value(),
                 .unavailable = unavailable,
-                .availability =
-                        url ? _attachment_availability(c, *url) : AttachmentAvailability::absent,
+                .availability = status.availability,
+                .fetch_done = status.done,
+                .fetch_total = status.total,
                 .saved_at = saved_at ? std::optional{from_epoch_ms(*saved_at)} : std::nullopt});
     }
 }
@@ -3421,27 +3423,26 @@ void Client::_set_attachment_unavailable(
     _emit_messages_showing(c, changed);
 }
 
-AttachmentAvailability Client::_attachment_availability(
-        sqlite::Connection& c, std::string_view url) {
+Client::CacheStatus Client::_attachment_availability(sqlite::Connection& c, std::string_view url) {
     // No cache configured means nothing is ever kept, so every file is a download away.
     if (_cache_dir.empty())
-        return AttachmentAvailability::absent;
+        return {};
 
     auto name = _cache_name(url);
 
     // In flight first: a transfer under way has no cache row yet -- that is written when it
     // finishes -- and answering `absent` while the bytes are arriving is what puts a download
     // button over the top of a progress bar.
-    if (_in_flight.count(name))
-        return AttachmentAvailability::fetching;
+    if (auto found = _in_flight.find(name); found != _in_flight.end())
+        return {AttachmentAvailability::fetching, found->second.done, found->second.total};
 
     // A point lookup on the primary key, reusing one prepared statement for every attachment on
     // the page.  Deliberately not batched into an `IN`: that would cost a distinct statement per
     // number-of-attachments, and attachment counts vary far more widely than the page sizes
     // `_load_attachments` already pays that for.
-    return c.prepared_maybe_get<int64_t>("SELECT 1 FROM attachment_cache WHERE name = ?"s, name)
-                 ? AttachmentAvailability::cached
-                 : AttachmentAvailability::absent;
+    if (c.prepared_maybe_get<int64_t>("SELECT 1 FROM attachment_cache WHERE name = ?"s, name))
+        return {AttachmentAvailability::cached, 0, 0};
+    return {};
 }
 
 std::optional<Message> Client::_message(int64_t id) {
