@@ -407,14 +407,39 @@ CREATE TABLE message_attachments (
     -- the other end volunteering a DataExtractionNotification, which many clients do not.
     saved_at INTEGER,
 
+    -- What the last attempt to fetch this file found, when what it found was that it could not be
+    -- fetched: the file server does not hold it -- which is also how an expired upload answers --
+    -- or the bytes arrived and failed to authenticate.
+    --
+    -- A cached answer rather than a fact about the url, which is what decides its lifetime.  An
+    -- attachment url is a hash of the encrypted body and the encryption is deterministic, so the
+    -- same file sent again by the same account lands at the *same* url.  That is the repair path:
+    -- the recipient is told it could not be fetched, asks for it again, and the sender's re-upload
+    -- puts those bytes back where they were.  A flag that never cleared would block precisely the
+    -- action that fixes the problem.
+    --
+    -- Set across every row naming a url when a fetch of it fails; cleared across every row naming
+    -- that url when a new attachment row quoting it arrives.  The old rows are cleared too, not
+    -- only the new one: it is the same file, and showing one message's copy as broken and
+    -- another's as fine would be showing the same bytes two ways.
+    --
+    -- The value is *why*: the file server's status for a server answer -- 404 for an upload it
+    -- does not hold -- and `ATTACHMENT_UNREADABLE` for bytes that arrived and could not be turned
+    -- back into the file they claimed to be.  Only the first is worth telling the user to ask for
+    -- a resend about.
+    --
+    -- NULL means only that nothing has proved otherwise.
+    unavailable INTEGER,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
 
 -- Which messages show a given file.  Every question the attachment cache asks of this table is
--- that one -- reporting a transfer starting, finishing or being evicted -- and more than one
--- message routinely quotes the same file, because an attachment url is a hash of the encrypted
--- body: the same file sent twice by the same account lands at the same url.  Without this, each of
--- those answers scans the whole table to touch a handful of rows.
+-- that one -- marking a file unfetchable, clearing it again on a resend, reporting a transfer
+-- starting, finishing or being evicted -- and more than one message routinely quotes the same
+-- file, because an attachment url is a hash of the encrypted body: the same file sent twice by the
+-- same account lands at the same url.  Without this, each of those answers scans the whole table
+-- to touch a handful of rows.
 --
 -- Partial because a row with no url has nothing to fetch and is never the subject of any of them:
 -- an outgoing attachment before its upload finishes, which on a sending-heavy account is a large

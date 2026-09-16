@@ -740,6 +740,26 @@ class Client {
     /// also why the cache is keyed on the file rather than on the message that wanted it.
     void _emit_attachment_availability(std::string_view url);
 
+    /// Every message showing the file at `url`, as (message id, conversation rowid), and the
+    /// `message_updated` for each of them.
+    ///
+    /// Two halves rather than one call because a caller with a condition of its own does the query
+    /// itself; and collected rather than streamed because every caller goes on to write the table
+    /// it is reading, and the emits can call back in.
+    std::vector<std::pair<int64_t, int64_t>> _messages_showing(
+            sqlite::Connection& c, std::string_view url);
+    void _emit_messages_showing(
+            sqlite::Connection& c, const std::vector<std::pair<int64_t, int64_t>>& messages);
+
+    /// Records why the file at `url` could not be fetched, or -- with nullopt -- that something
+    /// has happened to make it worth trying again.
+    ///
+    /// Applied to every message showing that file, in both directions: they are the same bytes, so
+    /// a transcript must not show one message's copy as broken and another's as fine.  See
+    /// `Attachment::unavailable` for why this is a cached answer rather than a permanent one.
+    void _set_attachment_unavailable(
+            std::string_view url, std::optional<AttachmentUnavailable> code);
+
     // How deep a read goes when a message turns out to be a reply.
     enum class ReplyDepth {
         // Load the replied-to message, so a caller can draw the reply from one read.
@@ -965,7 +985,8 @@ class Client {
             std::optional<int64_t> claimed_size,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            std::function<void(std::optional<Error> error)> on_done);
+            std::function<void(std::optional<Error> error,
+                               std::optional<AttachmentUnavailable> permanent)> on_done);
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {

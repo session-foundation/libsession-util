@@ -1088,8 +1088,9 @@ void Client::_fetch_cached(
                 });
             },
             [this, name, dir = target.dir, url = target.url, store = std::move(store)](
-                    std::optional<Error> error) {
-                call([this, name, dir, url, store, error = std::move(error)]() mutable {
+                    std::optional<Error> error,
+                    std::optional<AttachmentUnavailable> permanent) {
+                call([this, name, dir, url, store, permanent, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1109,8 +1110,16 @@ void Client::_fetch_cached(
                     // Whichever way it went, the answer changed: `cached` if the file is now here,
                     // back to `absent` if the download failed.  Before the waiters, so that one of
                     // them reading a message finds the settled state rather than the old one.
-                    if (dir == cache::ATTACHMENT_DIR)
-                        _emit_attachment_availability(url);
+                    //
+                    // A failure the file itself explains is recorded instead, which emits for the
+                    // same messages and says more: not merely that nothing is here, but that
+                    // asking again is pointless and why.
+                    if (dir == cache::ATTACHMENT_DIR) {
+                        if (permanent)
+                            _set_attachment_unavailable(url, permanent);
+                        else
+                            _emit_attachment_availability(url);
+                    }
 
                     for (const auto& w : entry.waiting)
                         _report(w,
@@ -3103,7 +3112,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
     auto st = c.prepared_st(
             R"(
         SELECT message, idx, content_type, filename, caption, flags, width, height,
-               size, url, saved_at
+               size, url, unavailable, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(sqlite::placeholders(msgs.size())));
 
@@ -3121,6 +3130,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  height,
                  size,
                  url,
+                 unavailable,
                  saved_at] :
          sqlite::IterableStatementWrapper<
                  int64_t,
@@ -3133,6 +3143,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  std::optional<int>,
                  std::optional<int64_t>,
                  std::optional<std::string>,
+                 std::optional<AttachmentUnavailable>,
                  std::optional<int64_t>>{std::move(st)}) {
         auto found = by_id.find(message);
         if (found == by_id.end())
@@ -3150,8 +3161,9 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                 // A url is what says it reached the file server, and is also the only thing that
                 // identifies its cached copy -- so one column answers both questions.
                 .uploaded = url.has_value(),
-                .availability = url ? _attachment_availability(c, *url)
-                                    : AttachmentAvailability::absent,
+                .unavailable = unavailable,
+                .availability =
+                        url ? _attachment_availability(c, *url) : AttachmentAvailability::absent,
                 .saved_at = saved_at ? std::optional{from_epoch_ms(*saved_at)} : std::nullopt});
     }
 }
@@ -3347,7 +3359,14 @@ std::vector<Message> Client::_messages(
 
 void Client::_emit_attachment_availability(std::string_view url) {
     auto c = core.database().conn();
-    std::vector<std::pair<int64_t, int64_t>> affected;  // message id, conversation rowid
+    _emit_messages_showing(c, _messages_showing(c, url));
+}
+
+std::vector<std::pair<int64_t, int64_t>> Client::_messages_showing(
+        sqlite::Connection& c, std::string_view url) {
+    // Collected rather than acted on as they are read: callers go on to write the table this is
+    // reading, and the emits at the end can call back in.
+    std::vector<std::pair<int64_t, int64_t>> found;  // message id, conversation rowid
     for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
                  R"(
             SELECT DISTINCT a.message, m.conversation
@@ -3355,13 +3374,51 @@ void Client::_emit_attachment_availability(std::string_view url) {
             WHERE a.url = ?
          )"s,
                  url))
-        affected.emplace_back(message, convo);
+        found.emplace_back(message, convo);
+    return found;
+}
 
-    // Collected before emitting rather than emitted as they are read: a handler is free to call
-    // back in, and doing so with this statement still open would be reading the table it is
-    // iterating.
-    for (const auto& [message, convo] : affected)
+void Client::_emit_messages_showing(
+        sqlite::Connection& c, const std::vector<std::pair<int64_t, int64_t>>& messages) {
+    for (const auto& [message, convo] : messages)
         _emit_message(false, conversation_id_at(c, convo), message);
+}
+
+void Client::_set_attachment_unavailable(
+        std::string_view url, std::optional<AttachmentUnavailable> code) {
+    auto c = core.database().conn();
+
+    // Only the rows this would actually change, which is what keeps a repeated report from
+    // re-announcing anything: a failure is reported afresh every time something asks for the file,
+    // and a resend arrives once per message rather than once per file.  A *different* code is a
+    // change -- what to tell the user about it has changed -- so it is not filtered out.
+    std::vector<std::pair<int64_t, int64_t>> changed;
+    for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
+                 R"(
+            SELECT DISTINCT a.message, m.conversation
+            FROM message_attachments a JOIN messages m ON m.id = a.message
+            WHERE a.url = ?1 AND a.unavailable IS NOT ?2
+         )"s,
+                 url,
+                 code))
+        changed.emplace_back(message, convo);
+
+    if (changed.empty())
+        return;
+
+    // `IS NOT` rather than `!=`, here and above: one side is NULL in every case that matters --
+    // setting a code on a row that has none, or clearing one back to NULL -- and `!=` answers NULL
+    // for those rather than true, so nothing would ever be updated.
+    c.prepared_exec(
+            "UPDATE message_attachments SET unavailable = ?2 WHERE url = ?1 AND unavailable IS NOT "
+            "?2",
+            url,
+            code);
+
+    // By url rather than by row, so every message quoting this file is answered at once rather
+    // than each discovering it in turn -- and in both directions: a resend makes the file
+    // fetchable again for the message that first failed, not only for the one that carried it.
+    _emit_messages_showing(c, changed);
 }
 
 AttachmentAvailability Client::_attachment_availability(
@@ -4066,7 +4123,7 @@ void Client::_download_decrypted(
         std::optional<int64_t> claimed_size,
         std::function<void(std::span<const std::byte>)> on_plain,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-        std::function<void(std::optional<Error>)> on_done) {
+        std::function<void(std::optional<Error>, std::optional<AttachmentUnavailable>)> on_done) {
 
     auto info = network::file_server::parse_download_url(url);
     if (!info)
@@ -4207,7 +4264,18 @@ void Client::_download_decrypted(
         auto fail = [&](std::string why, int code, std::string_view what = err::download_failed) {
             if (on_progress)
                 on_progress(0, 0, code);
-            on_done(Error{what, std::move(why)});
+
+            // Classified here, where the code is still a code and its meaning is still known.
+            // Only a failure the file itself explains is worth recording: a timeout, a connection
+            // failure or a server error says nothing about the file, and the next attempt may well
+            // succeed, so those are reported and forgotten.
+            std::optional<AttachmentUnavailable> permanent;
+            if (code == 404)
+                permanent = AttachmentUnavailable::not_found;
+            else if (code == ATTACHMENT_UNREADABLE)
+                permanent = AttachmentUnavailable::unreadable;
+
+            on_done(Error{what, std::move(why)}, permanent);
         };
 
         if (auto* err = std::get_if<int16_t>(&result))
@@ -4265,7 +4333,7 @@ void Client::_download_decrypted(
 
         if (on_progress)
             on_progress(state->received, state->received, 0);
-        on_done(std::nullopt);
+        on_done(std::nullopt, std::nullopt);
     };
 
     net->download(std::move(req));
@@ -4411,8 +4479,16 @@ void Client::_save_attachment(
         };
     auto report = _dispatch_progress(std::move(identified));
 
-    auto finish = [this, state, message_id, index, notify_sender, replace, cb](
-                          std::optional<Error> error) {
+    auto finish = [this, state, url = url, message_id, index, notify_sender, replace, cb](
+                          std::optional<Error> error,
+                          std::optional<AttachmentUnavailable> permanent) {
+        // A save is as good a witness as a background fetch: the file server said this url is gone,
+        // or the bytes did not authenticate, and that is true for every message quoting it and not
+        // just the one whose save provoked the attempt.  Onto the loop like the rest of this
+        // lambda's state changes, since this arrives on the network thread.
+        if (permanent)
+            call([this, url, permanent] { _set_attachment_unavailable(url, permanent); });
+
         auto fail = [&](Error why) {
             state->out.close();
             std::error_code ec;
@@ -4466,15 +4542,16 @@ void Client::_save_attachment(
     };
 
     // Writes what was fetched to the destination and finishes as a completed download would, for
-    // the two paths that hand over a whole buffer rather than streaming into it.
+    // the two paths that hand over a whole buffer rather than streaming into it.  Neither can carry
+    // a permanent failure: a cache hit did not fail, and a transfer this joined records its own.
     auto write_and_finish =
             [state, finish](std::optional<Error> error, const std::vector<std::byte>& data) {
                 if (error)
-                    return finish(std::move(error));
+                    return finish(std::move(error), std::nullopt);
                 state->out.write(
                         reinterpret_cast<const char*>(data.data()),
                         static_cast<std::streamsize>(data.size()));
-                finish(std::nullopt);
+                finish(std::nullopt, std::nullopt);
             };
 
     // Served from the cache when it is there.  Indistinguishable to everyone else: the file lands
@@ -4860,8 +4937,13 @@ void Client::_fail_attachment_send(int64_t client_id, bool permanent) {
 // alternative -- dropping the unusable ones -- would make a message of three files look like a
 // message of two, which is a worse lie than a row that cannot be saved: the count and the ordering
 // are what a reader is being shown, and they should match what was actually sent.
-static void store_incoming_attachments(
+//
+// Returns the distinct urls it stored, which the caller needs once the transaction is over: a
+// pointer arriving for a url we had written off is the only evidence available that the file is
+// back on the file server, and clearing that verdict is what lets it be fetched again.
+static std::vector<std::string> store_incoming_attachments(
         sqlite::Connection& c, int64_t message_id, const SessionProtos::DataMessage& data) {
+    std::vector<std::string> urls;
     for (int i = 0; i < data.attachments_size(); i++) {
         const auto& ptr = data.attachments(i);
 
@@ -4894,7 +4976,11 @@ static void store_incoming_attachments(
                 static_cast<int>(ptr.flags()),
                 ptr.has_width() ? std::optional<int64_t>{ptr.width()} : std::nullopt,
                 ptr.has_height() ? std::optional<int64_t>{ptr.height()} : std::nullopt);
+
+        if (ptr.has_url() && std::find(urls.begin(), urls.end(), ptr.url()) == urls.end())
+            urls.push_back(ptr.url());
     }
+    return urls;
 }
 
 void Client::_on_message_received(core::ReceivedMessage&& msg) {
@@ -5005,6 +5091,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
     bool created = false, inserted = false, renamed = false, contact_changed = false,
          approved_them = false;
     int64_t client_id = 0;
+    std::vector<std::string> arrived_urls;
     {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
@@ -5107,7 +5194,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
                     client_id,
                     std::span<const std::byte>{msg.content});
 
-            store_incoming_attachments(c, client_id, data);
+            arrived_urls = store_incoming_attachments(c, client_id, data);
 
             // Whether an arrival is unread is this layer's decision, not the trigger's.  Today
             // that is just "newer than the watermark"; mutes and message requests will land here.
@@ -5143,6 +5230,14 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _emit_conversation_added(convo_id);
     if (inserted) {
         _reveal_note_to_self(convo_id);
+
+        // A resend is how a file that could not be fetched becomes fetchable again, and this is the
+        // moment it arrives.  Before the auto-download so the fetch it may start is not the one
+        // this verdict was about, and before the announcement so the older messages quoting the
+        // same file are corrected in the same breath as the new one appearing.
+        for (const auto& url : arrived_urls)
+            _set_attachment_unavailable(url, std::nullopt);
+
         // Before the message is announced, so that a display reacting to it already sees whether
         // this is a gallery rather than being told once and corrected a moment later.
         _auto_download(convo_id, client_id);
