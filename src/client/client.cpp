@@ -937,17 +937,13 @@ void Client::_mark_attachment_unavailable(const std::string& url) {
         // A row already marked is not collected, which is what keeps a repeated failure from
         // re-announcing anything -- this is reached from a report, which arrives repeatedly.
         std::vector<std::pair<int64_t, int64_t>> affected;
-        {
-            auto st = c.prepared_bind(
-                    "SELECT DISTINCT a.message, m.conversation FROM message_attachments a"
-                    " JOIN messages m ON m.id = a.message"
-                    " WHERE a.url = ? AND a.unavailable = 0",
-                    url);
-            while (st->executeStep()) {
-                auto [message_id, conversation] = sqlite::get<int64_t, int64_t>(*st);
-                affected.emplace_back(message_id, conversation);
-            }
-        }
+        for (auto&& [message_id, conversation] : c.prepared_results<int64_t, int64_t>(
+                     "SELECT DISTINCT a.message, m.conversation FROM message_attachments a"
+                     " JOIN messages m ON m.id = a.message"
+                     " WHERE a.url = ? AND a.unavailable = 0",
+                     url))
+            affected.emplace_back(message_id, conversation);
+
         if (affected.empty())
             return;
 
