@@ -1045,6 +1045,11 @@ void Client::_fetch_cached(
     }
 
     auto& entry = _in_flight[name];
+    // A transfer starting is a change to what every message showing this file can offer: `absent`
+    // a moment ago, `fetching` now.  Attachments only -- a display picture belongs to a
+    // conversation rather than to a message, and has its own progress handler to say so.
+    if (target.dir == cache::ATTACHMENT_DIR)
+        _emit_attachment_availability(target.url);
     entry.plain = std::make_shared<std::vector<std::byte>>();
     if (progress)
         entry.progress.push_back(std::move(progress));
@@ -1074,8 +1079,9 @@ void Client::_fetch_cached(
                         p(done, total, r);
                 });
             },
-            [this, name, store = std::move(store)](std::optional<Error> error) {
-                call([this, name, store, error = std::move(error)]() mutable {
+            [this, name, dir = target.dir, url = target.url, store = std::move(store)](
+                    std::optional<Error> error) {
+                call([this, name, dir, url, store, error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1091,6 +1097,12 @@ void Client::_fetch_cached(
                     // about to be erased.
                     auto entry = std::move(found->second);
                     _in_flight.erase(found);
+
+                    // Whichever way it went, the answer changed: `cached` if the file is now here,
+                    // back to `absent` if the download failed.  Before the waiters, so that one of
+                    // them reading a message finds the settled state rather than the old one.
+                    if (dir == cache::ATTACHMENT_DIR)
+                        _emit_attachment_availability(url);
 
                     for (const auto& w : entry.waiting)
                         _report(w,
@@ -3323,6 +3335,25 @@ std::vector<Message> Client::_messages(
             epoch_ms(before->timestamp),
             before->id,
             limit);
+}
+
+void Client::_emit_attachment_availability(std::string_view url) {
+    auto c = core.database().conn();
+    std::vector<std::pair<int64_t, int64_t>> affected;  // message id, conversation rowid
+    for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
+                 R"(
+            SELECT DISTINCT a.message, m.conversation
+            FROM message_attachments a JOIN messages m ON m.id = a.message
+            WHERE a.url = ?
+         )"s,
+                 url))
+        affected.emplace_back(message, convo);
+
+    // Collected before emitting rather than emitted as they are read: a handler is free to call
+    // back in, and doing so with this statement still open would be reading the table it is
+    // iterating.
+    for (const auto& [message, convo] : affected)
+        _emit_message(false, conversation_id_at(c, convo), message);
 }
 
 AttachmentAvailability Client::_attachment_availability(
