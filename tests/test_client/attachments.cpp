@@ -1527,6 +1527,62 @@ TEST_CASE(
     CHECK(c->attachment_transfers({msgs[0].id}, await).empty());
 }
 
+TEST_CASE(
+        "Client: a save of a file the server has dropped records it too", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(600, std::byte{4});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(8000),
+            "v1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/dropped#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            81);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    // A save never reads what a fetch would have cached, so this is the path a person hits by
+    // tapping save on an attachment they never opened in the conversation.
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg_id,
+            0,
+            dir.path / "dropped.bin",
+            nullptr,
+            [&done](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
+    sync(*c);
+
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    CHECK(c->message(msg_id, await)->attachments[0].unavailable);
+}
+
 TEST_CASE("Client: a file the server does not have is recorded as gone", "[client][attachments]") {
     TempCacheDir dir;
     std::vector<int64_t> announced;
