@@ -78,7 +78,7 @@ class TestSnodePool : public SnodePool {
         });
     }
 
-    // Every strike on record, expired or not - which is what the decision sites used to count
+    // Every strike on record, expired or not
     size_t debug_recorded_strikes(const ed25519_pubkey& key) {
         return _loop->call_get([this, &key] {
             auto it = _snode_strikes.find(key);

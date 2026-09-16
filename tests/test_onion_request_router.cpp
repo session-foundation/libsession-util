@@ -906,14 +906,12 @@ TEST_CASE("Network", "[network][onion_request_router][cached_edge_nodes]") {
     TestOnionRequestRouter::set_cached_edge_nodes(
             router, {cached_edge_node{healthy, now}, cached_edge_node{struck, now}});
 
-    // Both are well inside `edge_node_cache_duration`, which is the only thing that used to matter
+    // Both are well inside `edge_node_cache_duration`, so only a strike can drop them
     TestOnionRequestRouter::drop_struck_cached_edge_nodes(router);
     CHECK(TestOnionRequestRouter::cached_edge_nodes(router).size() == 2);
 
-    // A cached edge node is forced as a path's first hop without going through `get_unused_nodes`,
-    // so nothing else would apply the strike filter to it.  Striking it out has to cost it the
-    // cached-edge role outright - skipping it while keeping the entry would hand the role back when
-    // the strikes expire, long after we moved to another edge node.
+    // Erasing rather than skipping is what stops a struck-out node reclaiming the cached-edge
+    // role when its strikes expire.
     snode_pool->SnodePool::record_node_failure(struck, true);
     REQUIRE(snode_pool->node_struck_out(struck));
 

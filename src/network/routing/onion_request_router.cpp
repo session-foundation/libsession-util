@@ -595,15 +595,9 @@ void OnionRequestRouter::_finish_setup() {
     }
 }
 
-// A cached edge node is handed to `_build_path` as a forced first hop, so it is the one node in a
-// path that never passes the strike filter `get_unused_nodes` applies to the rest, and the only
-// thing that dropped it was `edge_node_cache_duration` (10 days).
-//
-// Being struck out costs it the cached-edge-node role, not its place in the pool: it stays a node
-// like any other and `get_unused_nodes` can pick it again once its strikes expire.  Keeping the
-// entry and merely skipping it would hand the role back at that expiry, by which point we have been
-// running on a different edge node for two days - that is a second change of first hop, not a
-// return to a stable one.
+// A cached edge node is forced as a path's first hop, so it never passes the strike filter
+// `get_unused_nodes` applies to the rest; erasing rather than skipping is what stops it reclaiming
+// the role when its strikes expire.
 void OnionRequestRouter::_drop_struck_cached_edge_nodes() {
     auto snode_pool = _snode_pool.lock();
 

@@ -122,8 +122,8 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     std::vector<std::vector<std::byte>> _snode_refresh_results;
     std::vector<std::function<void()>> _after_snode_cache_refresh;
 
-    // Counts a node's strikes that haven't expired yet.  `record_node_failure` only appends, so the
-    // raw vector answers a different question - every strike the node has ever collected.
+    // Strikes are only pruned when the node collects a new one, so the stored vector can still
+    // hold expired stamps - count them out before deciding anything.
     size_t _active_strike_count(const ed25519_pubkey& key) const;
     bool _node_struck_out(const ed25519_pubkey& key) const;
 
