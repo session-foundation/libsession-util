@@ -926,12 +926,43 @@ static std::string cache_name(const std::filesystem::path& dir, std::string_view
 }
 
 void Client::_mark_attachment_unavailable(const std::string& url) {
-    // By url rather than by row: two messages quoting one attachment share a transfer, so the
-    // answer settles it for both.  Guarded on the current value so a repeated failure is not a
-    // write, since this is reached from a progress report.
-    core.database().conn().prepared_exec(
-            "UPDATE message_attachments SET unavailable = 1 WHERE url = ? AND unavailable = 0",
-            url);
+    std::vector<std::pair<ConversationId, int64_t>> changed;
+    {
+        auto c = core.database().conn();
+
+        // Read before the write, because afterwards nothing matches the predicate any more.  By
+        // url rather than by row: two messages quoting one attachment share the transfer that
+        // discovered this, so the answer settles it for both.  A row already marked is not
+        // collected, which is what keeps a repeated failure from re-announcing anything -- this is
+        // reached from a progress report, which arrives repeatedly.
+        std::vector<std::pair<int64_t, int64_t>> affected;
+        {
+            auto st = c.prepared_bind(
+                    "SELECT DISTINCT a.message, m.conversation FROM message_attachments a"
+                    " JOIN messages m ON m.id = a.message"
+                    " WHERE a.url = ? AND a.unavailable = 0",
+                    url);
+            while (st->executeStep()) {
+                auto [message_id, conversation] = sqlite::get<int64_t, int64_t>(*st);
+                affected.emplace_back(message_id, conversation);
+            }
+        }
+        if (affected.empty())
+            return;
+
+        c.prepared_exec(
+                "UPDATE message_attachments SET unavailable = 1 WHERE url = ? AND unavailable = 0",
+                url);
+
+        for (auto [message_id, conversation] : affected)
+            changed.emplace_back(conversation_id_at(c, conversation), message_id);
+    }
+
+    // Announced like any other stored change to an attachment -- `_record_saved` does the same for
+    // `saved_at` -- so a transcript that is open when a background fetch gives up stops offering a
+    // download that cannot work.
+    for (const auto& [conversation, message_id] : changed)
+        _emit_message(false, conversation, message_id);
 }
 
 std::vector<AttachmentStatus> Client::_attachment_transfers(
@@ -963,15 +994,20 @@ std::vector<AttachmentStatus> Client::_attachment_transfers(
 
     struct Row {
         int64_t message_id, idx, conversation;
-        std::string url;
     };
     std::vector<Row> rows;
+    // The cache's name for each row, hashed as the row is read rather than again when it is
+    // answered.  Kept beside `rows` rather than in it so that binding the lookup below does not
+    // mean walking them a second time.
+    std::vector<std::string> names;
 
     // Read out before anything else is asked of the connection: resolving a conversation is itself
     // a query, and this one is still stepping.
     for (auto&& [message_id, idx, url, conversation] :
-         sqlite::IterableStatementWrapper<int64_t, int64_t, std::string, int64_t>{std::move(st)})
-        rows.push_back({message_id, idx, conversation, std::move(url)});
+         sqlite::IterableStatementWrapper<int64_t, int64_t, std::string, int64_t>{std::move(st)}) {
+        rows.push_back({message_id, idx, conversation});
+        names.push_back(cache_name(_cache_dir, url));
+    }
 
     // What the index says it holds, asked once for the page.  Read from the index rather than by
     // stat-ing each file: the two can disagree until a sweep reconciles them, and either way round
@@ -979,14 +1015,14 @@ std::vector<AttachmentStatus> Client::_attachment_transfers(
     // download bytes already here, or one that offers to open bytes that turn out to need
     // fetching.  Neither is worth a syscall per attachment.
     std::unordered_set<std::string> cached;
-    if (!_cache_dir.empty() && !rows.empty()) {
-        auto names = c.prepared_st("SELECT name FROM attachment_cache WHERE name IN ({})"_format(
-                sqlite::placeholders(rows.size())));
+    if (!_cache_dir.empty() && !names.empty()) {
+        auto held = c.prepared_st("SELECT name FROM attachment_cache WHERE name IN ({})"_format(
+                sqlite::placeholders(names.size())));
         int at = 1;
-        for (const auto& row : rows)
-            names->bind(at++, cache_name(_cache_dir, row.url));
+        for (const auto& name : names)
+            held->bind(at++, name);
 
-        for (auto&& name : sqlite::IterableStatementWrapper<std::string>{std::move(names)})
+        for (auto&& name : sqlite::IterableStatementWrapper<std::string>{std::move(held)})
             cached.insert(std::move(name));
     }
 
@@ -994,15 +1030,16 @@ std::vector<AttachmentStatus> Client::_attachment_transfers(
     std::unordered_map<int64_t, ConversationId> conversations;
 
     out.reserve(rows.size());
-    for (auto& row : rows) {
+    for (size_t at = 0; at < rows.size(); at++) {
+        const auto& row = rows[at];
+        const auto& name = names[at];
+
         auto known = conversations.find(row.conversation);
         if (known == conversations.end())
             known = conversations.emplace(row.conversation, conversation_id_at(c, row.conversation))
                             .first;
 
         AttachmentStatus status{known->second, row.message_id, static_cast<size_t>(row.idx)};
-
-        auto name = cache_name(_cache_dir, row.url);
         status.cached = cached.contains(name);
 
         if (auto found = _in_flight.find(name); found != _in_flight.end()) {

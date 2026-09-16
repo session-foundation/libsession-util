@@ -1429,7 +1429,10 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
 
 TEST_CASE("Client: a file the server does not have is recorded as gone", "[client][attachments]") {
     TempCacheDir dir;
-    TempClient c;
+    std::vector<int64_t> announced;
+    callbacks cbs;
+    cbs.message_updated = [&](ConversationId&&, Message&& m) { announced.push_back(m.id); };
+    TempClient c{cbs};
     SenderKeys peer;
     auto* net = attach_mock_network(c->core);
     TestHelper::seed_pfs_nak(c->core, peer.session_id);
@@ -1471,6 +1474,25 @@ TEST_CASE("Client: a file the server does not have is recorded as gone", "[clien
     // Both rows, because the fact is about the file rather than about one message's mention of it.
     for (const auto& m : c->conversation(convo, await)->messages(await))
         CHECK(m.attachments[0].unavailable);
+
+    // And both announced, so a transcript already on screen stops offering the download.  A save
+    // reports itself the same way; this is a stored change to an attachment like any other.
+    CHECK(announced.size() == 2);
+    CHECK(std::ranges::find(announced, msgs[0].id) != announced.end());
+    CHECK(std::ranges::find(announced, msgs[1].id) != announced.end());
+
+    // A second failure has nothing left to say: the rows already carry it.
+    announced.clear();
+    std::promise<std::optional<std::string>> again;
+    auto retry = again.get_future();
+    c->attachment_data(msgs[1].id, 0, nullptr, [&again](std::optional<std::string> err, auto) {
+        again.set_value(std::move(err));
+    });
+    sync(*c);
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(retry.wait_for(5s) == std::future_status::ready);
+    sync(*c);
+    CHECK(announced.empty());
 }
 
 TEST_CASE(
