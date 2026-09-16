@@ -3072,7 +3072,7 @@ static bool gallery_viewable(const std::vector<Attachment>& attachments) {
 // on every render, so the per-message alternative pays its cost there.  The placeholder list makes
 // this a distinct query string per page size, and so one prepared-statement cache entry per limit
 // an application actually asks for -- few, since a page size is normally fixed.
-static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) {
+void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) {
     if (msgs.empty())
         return;
 
@@ -3083,7 +3083,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     auto st = c.prepared_st(
             R"(
         SELECT message, idx, content_type, filename, caption, flags, width, height,
-               size, url IS NOT NULL, saved_at
+               size, url, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(sqlite::placeholders(msgs.size())));
 
@@ -3100,7 +3100,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                  width,
                  height,
                  size,
-                 uploaded,
+                 url,
                  saved_at] :
          sqlite::IterableStatementWrapper<
                  int64_t,
@@ -3112,7 +3112,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                  std::optional<int>,
                  std::optional<int>,
                  std::optional<int64_t>,
-                 int,
+                 std::optional<std::string>,
                  std::optional<int64_t>>{std::move(st)}) {
         auto found = by_id.find(message);
         if (found == by_id.end())
@@ -3127,34 +3127,20 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                 .width = width ? std::optional{static_cast<uint32_t>(*width)} : std::nullopt,
                 .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
                 .size = size,
-                .uploaded = uploaded != 0,
+                // A url is what says it reached the file server, and is also the only thing that
+                // identifies its cached copy -- so one column answers both questions.
+                .uploaded = url.has_value(),
+                .availability = url ? _attachment_availability(c, *url)
+                                    : AttachmentAvailability::absent,
                 .saved_at = saved_at ? std::optional{from_epoch_ms(*saved_at)} : std::nullopt});
     }
 }
 
-// How deep a read goes when a message turns out to be a reply.
-enum class ReplyDepth {
-    // Load the replied-to message, so a caller can draw the reply from one read.
-    with_target,
-    // Resolve the reference but leave `Reply::message` null.  This is what a *nested* message gets,
-    // and is the whole of the depth limit: without it, reading one message could walk a chain of
-    // replies of unbounded length.
-    reference_only,
-};
-
 // How many distinct reply targets a page may have before its lookup stops being worth caching a
-// compiled statement for; see `load_reply_targets`.
+// compiled statement for; see `_load_reply_targets`.
 static constexpr size_t REPLY_TARGET_CACHE_MAX = 4;
 
-static void load_reply_targets(
-        sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
-
-// Turns a bound statement over MESSAGE_COLUMNS into whole Messages: attachments loaded, gallery
-// decided, and replied-to messages filled in unless this is already a nested read.
-//
-// Takes a bare statement rather than a `StatementWrapper` so that it serves both a cached statement
-// and a one-off; see `load_reply_targets` for why one of its callers cannot use the cache.
-static std::vector<Message> build_messages(
+std::vector<Message> Client::_build_messages(
         sqlite::Connection& c,
         const ConversationId& convo,
         ReplyDepth depth,
@@ -3216,7 +3202,7 @@ static std::vector<Message> build_messages(
 
     // Done here rather than by each caller so that every path that produces Messages produces whole
     // ones: a Message with its attachments silently missing is worse than no accessor at all.
-    load_attachments(c, out);
+    _load_attachments(c, out);
 
     // Only now can the question be answered, since it is about the attachments.  A stored decision
     // that the current rule no longer supports is dropped rather than honoured -- and dropped in
@@ -3231,13 +3217,13 @@ static std::vector<Message> build_messages(
     }
 
     if (depth == ReplyDepth::with_target)
-        load_reply_targets(c, convo, out);
+        _load_reply_targets(c, convo, out);
 
     return out;
 }
 
 template <typename... Bind>
-static std::vector<Message> query_messages(
+std::vector<Message> Client::_query_messages(
         sqlite::Connection& c,
         const ConversationId& convo,
         ReplyDepth depth,
@@ -3245,10 +3231,10 @@ static std::vector<Message> query_messages(
         const Bind&... bind) {
     auto st = c.prepared_st(query);
     bind_oneshot(st, bind...);
-    return build_messages(c, convo, depth, *st);
+    return _build_messages(c, convo, depth, *st);
 }
 
-static void load_reply_targets(
+void Client::_load_reply_targets(
         sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs) {
     // Deduplicated: a conversation where several people answer the same message should read it
     // once, and then share the one copy rather than each holding its own.
@@ -3285,7 +3271,7 @@ static void load_reply_targets(
     // `reference_only`, which is the depth limit: these targets keep the reference to whatever
     // *they* replied to, but not the message, so one read cannot walk a chain.
     std::map<int64_t, std::shared_ptr<const Message>> loaded;
-    for (auto& t : build_messages(c, convo, ReplyDepth::reference_only, st)) {
+    for (auto& t : _build_messages(c, convo, ReplyDepth::reference_only, st)) {
         auto id = t.id;
         loaded.emplace(id, std::make_shared<const Message>(std::move(t)));
     }
@@ -3312,7 +3298,7 @@ std::vector<Message> Client::_messages(
     auto visible = include_deleted ? ""sv : "AND m.deleted IS NULL"sv;
 
     if (!before)
-        return query_messages(
+        return _query_messages(
                 c,
                 id,
                 ReplyDepth::with_target,
@@ -3324,7 +3310,7 @@ std::vector<Message> Client::_messages(
 
     // Strictly-older-than comparison on (timestamp, id), spelled out rather than as an SQL row
     // value so this does not depend on the SQLite version's row-value support.
-    return query_messages(
+    return _query_messages(
             c,
             id,
             ReplyDepth::with_target,
@@ -3339,6 +3325,29 @@ std::vector<Message> Client::_messages(
             limit);
 }
 
+AttachmentAvailability Client::_attachment_availability(
+        sqlite::Connection& c, std::string_view url) {
+    // No cache configured means nothing is ever kept, so every file is a download away.
+    if (_cache_dir.empty())
+        return AttachmentAvailability::absent;
+
+    auto name = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url).filename().string();
+
+    // In flight first: a transfer under way has no cache row yet -- that is written when it
+    // finishes -- and answering `absent` while the bytes are arriving is what puts a download
+    // button over the top of a progress bar.
+    if (_in_flight.count(name))
+        return AttachmentAvailability::fetching;
+
+    // A point lookup on the primary key, reusing one prepared statement for every attachment on
+    // the page.  Deliberately not batched into an `IN`: that would cost a distinct statement per
+    // number-of-attachments, and attachment counts vary far more widely than the page sizes
+    // `_load_attachments` already pays that for.
+    return c.prepared_maybe_get<int64_t>("SELECT 1 FROM attachment_cache WHERE name = ?"s, name)
+                 ? AttachmentAvailability::cached
+                 : AttachmentAvailability::absent;
+}
+
 std::optional<Message> Client::_message(int64_t id) {
     auto c = core.database().conn();
     auto convo =
@@ -3346,7 +3355,7 @@ std::optional<Message> Client::_message(int64_t id) {
     if (!convo)
         return std::nullopt;
 
-    auto found = query_messages(
+    auto found = _query_messages(
             c,
             conversation_id_at(c, *convo),
             ReplyDepth::with_target,
