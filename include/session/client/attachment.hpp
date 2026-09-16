@@ -94,6 +94,30 @@ struct AttachmentProgress {
     std::optional<int> result;
 };
 
+/// Whether an attachment's bytes are already here, on their way, or neither.
+///
+/// What this is for is deciding what to *draw*: show the file, show a progress indicator, or show
+/// something the user can press to fetch it.  It says nothing the caller could not eventually find
+/// out by asking for the bytes -- `attachment_data` does the right thing in all three cases -- but
+/// asking is how you start a download, and a client with auto-download off needs to know before it
+/// decides whether to.
+///
+/// It is a *hint about what the next call will do*, not a promise about the file.  A `cached` that
+/// is evicted before you ask for it just means `attachment_data` fetches instead of reading, which
+/// is correct and merely slower.  Changes to it are reported as `message_updated`, since this is
+/// part of the message.
+enum class AttachmentAvailability {
+    /// In the local cache: `attachment_data` will read it from disk without touching the network.
+    cached,
+    /// A transfer is already under way, whoever started it -- an auto-download, another message
+    /// quoting the same file, or another part of the application.  `attachment_data` joins it
+    /// rather than starting a second one, and reports progress from wherever it has reached.
+    fetching,
+    /// Neither, so `attachment_data` would start a download.  With auto-download off, that is the
+    /// case where the decision belongs to the user.
+    absent,
+};
+
 struct Attachment {
     /// Position within the message's attachment list.  This is the index `send_message`'s upload
     /// handler reports progress against, and what `save_attachment` takes.
@@ -125,7 +149,19 @@ struct Attachment {
     /// Where the file is *locally* is deliberately not here.  A local path is an argument to
     /// sending or saving, not a property of the attachment: the application chose it and knows it,
     /// and anything recorded here would go stale as soon as the file was moved.
+    ///
+    /// `availability` is not an exception to that.  The cache is ours, at a path derived from the
+    /// url rather than chosen by anybody, so it is a fact about this attachment and not about
+    /// somewhere the application happens to have put a copy.
     bool uploaded = false;
+
+    /// Whether the bytes are already here, on their way, or neither -- see
+    /// `AttachmentAvailability`.
+    ///
+    /// Reported the same way for an outgoing attachment as an incoming one: what we send is put in
+    /// the cache on upload under the same policy that would have fetched it had it arrived, so
+    /// "can I draw this without a download" has one answer regardless of direction.
+    AttachmentAvailability availability = AttachmentAvailability::absent;
 
     /// When the *recipient* of this message last saved this attachment -- us, on an incoming one,
     /// and the other party on one we sent.  The same fact from either end, so it does not have to

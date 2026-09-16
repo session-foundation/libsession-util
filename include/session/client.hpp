@@ -731,6 +731,45 @@ class Client {
     };
     std::unordered_map<std::string, InFlight> _in_flight;
 
+    /// What to tell a reader about an attachment's local copy.
+    ///
+    /// The one thing the message builders below need that is not in the database: it depends on
+    /// the cache directory and on which transfers are running, and both of those are ours.  Which
+    /// is why they are members rather than the file-local helpers they used to be.
+    AttachmentAvailability _attachment_availability(sqlite::Connection& c, std::string_view url);
+
+    // How deep a read goes when a message turns out to be a reply.
+    enum class ReplyDepth {
+        // Load the replied-to message, so a caller can draw the reply from one read.
+        with_target,
+        // Resolve the reference but leave `Reply::message` null.  This is what a *nested* message
+        // gets, and is the whole of the depth limit: without it, reading one message could walk a
+        // chain of replies of unbounded length.
+        reference_only,
+    };
+
+    // Turns a bound statement over MESSAGE_COLUMNS into whole Messages: attachments loaded,
+    // gallery decided, and replied-to messages filled in unless this is already a nested read.
+    //
+    // Takes a bare statement rather than a `StatementWrapper` so that it serves both a cached
+    // statement and a one-off; see `_load_reply_targets` for why one of its callers cannot use the
+    // cache.
+    std::vector<Message> _build_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            SQLite::Statement& st);
+    template <typename... Bind>
+    std::vector<Message> _query_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            const std::string& query,
+            const Bind&... bind);
+    void _load_attachments(sqlite::Connection& c, std::vector<Message>& msgs);
+    void _load_reply_targets(
+            sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
+
     // What an attachment row says about where its file is and how to open it.
     struct StoredPointer {
         std::string url;
