@@ -778,6 +778,8 @@ class Client {
     void _evict_cache(const std::string& keep);
 
     std::vector<AttachmentStatus> _attachment_transfers(const std::vector<int64_t>& message_ids);
+    // Records that a file will not be fetched successfully, against every row naming its url.
+    void _mark_attachment_unavailable(const std::string& url);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {

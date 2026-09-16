@@ -908,10 +908,30 @@ std::optional<int64_t> Client::attachment_cache_limit(await_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
+// Whether a failed download will fail the same way next time.
+//
+// 404 and 410 are the file server saying it does not hold the file, which will not change: an
+// attachment url names one upload and is never reissued.  ATTACHMENT_UNREADABLE is the bytes
+// arriving and not being what they claimed, which is settled for the same reason -- the same bytes
+// are there next time.  Everything else, a timeout or a negative network code or a server error,
+// is worth another go and must not be recorded as final.
+static bool permanently_gone(int code) {
+    return code == 404 || code == 410 || code == ATTACHMENT_UNREADABLE;
+}
+
 // The cache's name for an attachment url: the hash `_in_flight` and `attachment_cache` are both
 // keyed by, so one spelling serves the lookup and the index query alike.
 static std::string cache_name(const std::filesystem::path& dir, std::string_view url) {
     return cache::path_for(dir, cache::ATTACHMENT_DIR, url).filename().string();
+}
+
+void Client::_mark_attachment_unavailable(const std::string& url) {
+    // By url rather than by row: two messages quoting one attachment share a transfer, so the
+    // answer settles it for both.  Guarded on the current value so a repeated failure is not a
+    // write, since this is reached from a progress report.
+    core.database().conn().prepared_exec(
+            "UPDATE message_attachments SET unavailable = 1 WHERE url = ? AND unavailable = 0",
+            url);
 }
 
 std::vector<AttachmentStatus> Client::_attachment_transfers(
@@ -1172,8 +1192,14 @@ void Client::_fetch_cached(
             },
             // Onto the loop before touching the registry -- this arrives on the network thread, and
             // `_in_flight` is ours.
-            [this, name](int64_t done, int64_t total, std::optional<int> r) {
-                loop.call([this, name, done, total, r] {
+            [this, name, url = target.url, attachment = target.dir == cache::ATTACHMENT_DIR](
+                    int64_t done, int64_t total, std::optional<int> r) {
+                loop.call([this, name, url, attachment, done, total, r] {
+                    // Recorded before anyone is told, so a display reacting to the report finds
+                    // the row already saying the file is not coming.
+                    if (attachment && r && permanently_gone(*r))
+                        _mark_attachment_unavailable(url);
+
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -3192,7 +3218,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
     auto st = c.prepared_st(
             R"(
         SELECT message, idx, content_type, filename, caption, flags, width, height,
-               size, url IS NOT NULL, saved_at
+               size, url IS NOT NULL, unavailable, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(sqlite::placeholders(msgs.size())));
 
@@ -3210,6 +3236,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                  height,
                  size,
                  uploaded,
+                 unavailable,
                  saved_at] :
          sqlite::IterableStatementWrapper<
                  int64_t,
@@ -3221,6 +3248,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                  std::optional<int>,
                  std::optional<int>,
                  std::optional<int64_t>,
+                 int,
                  int,
                  std::optional<int64_t>>{std::move(st)}) {
         auto found = by_id.find(message);
@@ -3237,6 +3265,7 @@ static void load_attachments(sqlite::Connection& c, std::vector<Message>& msgs) 
                 .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
                 .size = size,
                 .uploaded = uploaded != 0,
+                .unavailable = unavailable != 0,
                 .saved_at = saved_at ? std::optional{from_epoch_ms(*saved_at)} : std::nullopt});
     }
 }

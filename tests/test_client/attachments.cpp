@@ -1427,6 +1427,102 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     CHECK(static_cast<size_t>(rows) == on_disk);
 }
 
+TEST_CASE("Client: a file the server does not have is recorded as gone", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(700, std::byte{5});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    // Two messages quoting the same url, which is what a forward produces.
+    auto add = [&](SessionProtos::DataMessage& data) {
+        auto* a = data.add_attachments();
+        a->set_id(1);
+        a->set_url("http://fs.example/file/gone#d");
+        a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+        a->set_size(plaintext.size());
+    };
+    deliver(*c, peer, "", from_epoch_ms(4000), "g1", "", std::nullopt, add, 51);
+    deliver(*c, peer, "", from_epoch_ms(4001), "g2", "", std::nullopt, add, 52);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 2);
+    for (const auto& m : msgs)
+        CHECK_FALSE(m.attachments[0].unavailable);
+
+    std::promise<std::optional<std::string>> outcome;
+    auto waiter = outcome.get_future();
+    c->attachment_data(msgs[0].id, 0, nullptr, [&outcome](std::optional<std::string> err, auto) {
+        outcome.set_value(std::move(err));
+    });
+    sync(*c);
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    // Both rows, because the fact is about the file rather than about one message's mention of it.
+    for (const auto& m : c->conversation(convo, await)->messages(await))
+        CHECK(m.attachments[0].unavailable);
+}
+
+TEST_CASE(
+        "Client: a download that merely failed is not recorded as gone", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(700, std::byte{6});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(5000),
+            "s1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/flaky#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            53);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    std::promise<std::optional<std::string>> outcome;
+    auto waiter = outcome.get_future();
+    c->attachment_data(msg_id, 0, nullptr, [&outcome](std::optional<std::string> err, auto) {
+        outcome.set_value(std::move(err));
+    });
+    sync(*c);
+    // A server that is having a bad day, not one that has lost the file: another attempt is
+    // exactly what this should leave available.
+    REQUIRE(fail_downloads(*net, 503) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    CHECK_FALSE(c->message(msg_id, await)->attachments[0].unavailable);
+}
+
 TEST_CASE("Client: a transfer can be asked what it is doing", "[client][attachments]") {
     TempCacheDir dir;
     TempClient c;

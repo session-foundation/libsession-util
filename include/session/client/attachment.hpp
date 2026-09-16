@@ -161,6 +161,19 @@ struct Attachment {
     /// and anything recorded here would go stale as soon as the file was moved.
     bool uploaded = false;
 
+    /// A download of this file has failed in a way that will not come out differently: the file
+    /// server answered that it does not hold it, or the bytes arrived and were not what they
+    /// claimed to be.  Offering to fetch it again is offering the same failure.
+    ///
+    /// Not the opposite of `cached`, and not a transfer state: this is a fact about the file,
+    /// which is why it is here rather than on `AttachmentStatus`.  It survives a restart, it is
+    /// true for everyone, and it is never cleared -- an attachment url names one upload and is
+    /// never reissued.
+    ///
+    /// False means only that nothing has proved otherwise.  An attachment nobody has tried to
+    /// fetch is indistinguishable from one that will succeed.
+    bool unavailable = false;
+
     /// When the *recipient* of this message last saved this attachment -- us, on an incoming one,
     /// and the other party on one we sent.  The same fact from either end, so it does not have to
     /// be read differently depending on `Message::outgoing`.
