@@ -1281,8 +1281,8 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         CHECK(progress.back().second.result == 0);
 
         // In the cache, so opening the conversation costs nothing...
-        CHECK(std::filesystem::exists(cache::path_for(
-                dir.path,
+        CHECK(std::filesystem::exists(TestHelper::cache_path(
+                *c,
                 cache::ATTACHMENT_DIR,
                 network::file_server::generate_download_url("img", {}, true))));
 
@@ -1345,7 +1345,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     }
 
     auto cached = [&](const std::string& url) {
-        return std::filesystem::exists(cache::path_for(dir.path, cache::ATTACHMENT_DIR, url));
+        return std::filesystem::exists(TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, url));
     };
     for (const auto& u : urls)
         REQUIRE(cached(u));
@@ -1358,7 +1358,8 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
 
     // Now a limit that only two of the three fit under.
     auto one =
-            std::filesystem::file_size(cache::path_for(dir.path, cache::ATTACHMENT_DIR, urls[0]));
+            std::filesystem::file_size(
+                    TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, urls[0]));
     c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), await);
 
     // Nothing happens until something is added, which is the only moment the total can grow.
@@ -1447,12 +1448,12 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     REQUIRE(serve_downloads(*net, ct) == 1);
     sync(*c);
 
-    auto real_name = cache::path_for(dir.path, cache::ATTACHMENT_DIR, url).filename().string();
+    auto real_name = TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, url).filename().string();
     REQUIRE(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / real_name));
 
     // What a crash between writing a file and recording it leaves: a file no row names.
     auto orphan_name =
-            cache::path_for(dir.path, cache::ATTACHMENT_DIR, "http://fs.example/file/ghost")
+            TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, "http://fs.example/file/ghost")
                     .filename()
                     .string();
     std::ofstream{dir.path / cache::ATTACHMENT_DIR / orphan_name, std::ios::binary}

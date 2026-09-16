@@ -34,18 +34,29 @@ namespace session::client::cache {
 inline constexpr std::string_view PROFILE_DIR = "profile";
 inline constexpr std::string_view ATTACHMENT_DIR = "attachments";
 
-/// Where `url`'s cached file lives beneath `dir`.
+/// The name `url`'s cached file takes, and where that file lives beneath `dir`.
 ///
-/// Named for a hash of the url with any query string and fragment removed.  Those are not part of
-/// which file this is: the fragment carries what is needed to *reach* and unpack the bytes -- the
-/// server's key, connection details, decompression hints -- while the bytes at the base url are the
-/// bytes.  Two references differing only there name the same file, and hashing the whole thing
-/// would cache it twice.
+/// Named for a keyed hash of the url with any query string and fragment removed.  Those are not
+/// part of which file this is: the fragment carries what is needed to *reach* and unpack the bytes
+/// -- the server's key, connection details, decompression hints -- while the bytes at the base url
+/// are the bytes.  Two references differing only there name the same file, and hashing the whole
+/// thing would cache it twice.
 ///
 /// Hashed rather than escaped because a url is not a filename: it is long, it contains separators,
 /// and its length is unbounded.  A fixed-width hex name is none of those things.
+///
+/// **Keyed**, and that is not optional.  An unkeyed name is a function of public information, so
+/// the directory answers "did this account download *this* url" to anyone who can read it and
+/// guess a url -- which encryption does nothing about, the question being settled by the filename
+/// before any file is opened.  `key` is `client:cache_key`, the same secret the files are encrypted
+/// under, kept apart from that use by the personalisation rather than by luck.
+std::string name_for(std::span<const std::byte, 32> key, std::string_view url);
+
 std::filesystem::path path_for(
-        const std::filesystem::path& dir, std::string_view kind, std::string_view url);
+        const std::filesystem::path& dir,
+        std::string_view kind,
+        std::span<const std::byte, 32> key,
+        std::string_view url);
 
 /// Reads and decrypts a cached file, or nullopt if it is not there.
 ///
