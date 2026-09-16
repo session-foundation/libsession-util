@@ -731,12 +731,17 @@ class Client {
     };
     std::unordered_map<std::string, InFlight> _in_flight;
 
-    /// What to tell a reader about an attachment's local copy.
+    /// What to tell a reader about an attachment's local copy: the `Attachment` fields that report
+    /// it, filled in together because they come from one lookup.
     ///
     /// The one thing the message builders below need that is not in the database: it depends on
     /// the cache directory and on which transfers are running, and both of those are ours.  Which
     /// is why they are members rather than the file-local helpers they used to be.
-    AttachmentAvailability _attachment_availability(sqlite::Connection& c, std::string_view url);
+    struct CacheStatus {
+        AttachmentAvailability availability = AttachmentAvailability::absent;
+        int64_t done = 0, total = 0;
+    };
+    CacheStatus _attachment_availability(sqlite::Connection& c, std::string_view url);
 
     /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
     /// every message showing that file.
