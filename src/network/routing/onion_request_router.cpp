@@ -1748,8 +1748,7 @@ void OnionRequestRouter::_handle_transport_response(
                         for (const auto& node : path.nodes) {
                             auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
 
-                            if (snode_pool->node_strike_count(node_key) >=
-                                _config.node_strike_threshold)
+                            if (snode_pool->node_struck_out(node_key))
                                 nodes_to_repair.push_back(node_key);
                         }
 

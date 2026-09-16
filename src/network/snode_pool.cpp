@@ -1210,8 +1210,8 @@ void SnodePool::get_swarm(
             // Partition into below-threshold and above-thresold.  This keeps the shuffled order of
             // each set:
             auto over_nodes = std::ranges::stable_partition(
-                    nodes.begin(), nodes.end(), [&](const auto& node) {
-                        return get_strike_count(node) < _config.cache_node_strike_threshold;
+                    nodes.begin(), nodes.end(), [this](const auto& node) {
+                        return !_node_struck_out(node.remote_pubkey);
                     });
 
             auto under_count = nodes.size() - over_nodes.size();
