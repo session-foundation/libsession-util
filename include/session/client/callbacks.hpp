@@ -96,14 +96,20 @@ struct callbacks {
     /// to a server, carrying 0 of 0 — so a row can show that a fetch is beginning rather than
     /// appearing to do nothing until the first bytes land.  Exactly one report carries a `result`.
     ///
+    /// Which conversation it belongs to is on the report, as `AttachmentProgress::conversation_id`,
+    /// rather than beside it: a handler that files these by conversation needs it wherever a report
+    /// comes from, and the one handed to `attachment_data` or `save_attachment` has no second
+    /// argument to carry it.
+    ///
     /// Reports are rate limited (see `set_dispatch_interval`) to keep the cost off the
     /// application's thread.  That is all the limiting is for: how often a spinner turns is the
     /// application's own business, and it should not be reading motion into the arrival of these.
-    std::function<void(const ConversationId&, const AttachmentProgress&)> attachment_progress;
+    std::function<void(const AttachmentProgress&)> attachment_progress;
 
     /// The same, for a display picture, which belongs to a conversation rather than to a message —
     /// so it carries no message or index and gets its own handler rather than a struct with two
-    /// fields that are never filled in.
+    /// fields that are never filled in.  Its conversation is a parameter for want of a struct to
+    /// put it on.
     ///
     /// Display pictures are always fetched, with no setting to turn that off, so this fires for
     /// every one that is not already cached.

@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <session/client/conversation_id.hpp>
 #include <session/clock.hpp>
 #include <string>
 
@@ -77,6 +78,11 @@ enum class AutoDownload : int {
 /// `save_attachment`, and — for a download nobody asked for — broadcast through
 /// `callbacks::attachment_progress`, since a background fetch has no caller to hand anything to.
 struct AttachmentProgress {
+    /// The conversation the transfer's message belongs to.  Carried rather than left to be looked
+    /// up, because a report reaches a display whose first question is whether this is about
+    /// anything it is showing.
+    ConversationId conversation_id;
+
     int64_t message_id;
     size_t index;
 
@@ -92,6 +98,34 @@ struct AttachmentProgress {
     /// Unset while it is running, 0 once the file is here and verified, and otherwise the status of
     /// whatever went wrong.  Exactly one report per transfer carries a value.
     std::optional<int> result;
+};
+
+/// What one attachment's bytes are doing on this device, right now.
+///
+/// A snapshot, and the point of it is that it can be asked for: a transfer has no stored state of
+/// its own, so a client that missed the reports -- it was not running, its window was not open --
+/// has no other way back to the truth.  Nothing here starts anything.
+struct AttachmentStatus {
+    ConversationId conversation_id;
+    int64_t message_id;
+    size_t index;
+
+    /// The cache index holds this file, so asking for the bytes would answer from disk without a
+    /// request.  A strong hint rather than a promise, and in both directions: the index and the
+    /// files can disagree until a sweep reconciles them, so a fetch may find bytes this did not
+    /// predict, or find none and simply download.  Either way the fetch is what settles it.
+    bool cached = false;
+
+    /// A transfer is running, and `done`/`total` are where it has got to -- the same figures, in
+    /// the same encrypted bytes, that `AttachmentProgress` carries, so a bar seeded from this and
+    /// then fed by reports does not jump.  `total` is 0 until the server has said how big it is.
+    ///
+    /// Only transfers that accumulate are visible here, which is everything except a save: a save
+    /// streams to its destination and keeps nothing, so there is nothing to join or to report a
+    /// position in.
+    bool transferring = false;
+    int64_t done = 0;
+    int64_t total = 0;
 };
 
 struct Attachment {
@@ -126,6 +160,21 @@ struct Attachment {
     /// sending or saving, not a property of the attachment: the application chose it and knows it,
     /// and anything recorded here would go stale as soon as the file was moved.
     bool uploaded = false;
+
+    /// A download of this file has failed in a way that will not come out differently: the file
+    /// server answered that it does not hold it, or the bytes arrived and were not what they
+    /// claimed to be.  Offering to fetch it again is offering the same failure.
+    ///
+    /// Not the opposite of `cached`, and not a transfer state: this is a fact about the file,
+    /// which is why it is here rather than on `AttachmentStatus`.  It survives a restart, and it
+    /// is never cleared -- an attachment url names one upload and is never reissued.
+    ///
+    /// Set on every message quoting the url at the moment the download failed, and on no others: a
+    /// message carrying the same url that arrives later starts false and learns the same way.
+    ///
+    /// False means only that nothing has proved otherwise.  An attachment nobody has tried to
+    /// fetch is indistinguishable from one that will succeed.
+    bool unavailable = false;
 
     /// When the *recipient* of this message last saved this attachment -- us, on an incoming one,
     /// and the other party on one we sent.  The same fact from either end, so it does not have to

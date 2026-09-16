@@ -407,5 +407,19 @@ CREATE TABLE message_attachments (
     -- the other end volunteering a DataExtractionNotification, which many clients do not.
     saved_at INTEGER,
 
+    -- Set once a download has failed in a way that will not come out differently: the file server
+    -- answered that it does not hold the file, or the bytes arrived and were not what they claimed
+    -- to be.  Never cleared, because an attachment url names one upload and is never reissued --
+    -- what failed this way is gone rather than currently unreachable.
+    --
+    -- Written against the url rather than one row because what failed is the file: every message
+    -- already quoting it is answered at once, and one arriving later starts false.
+    unavailable INTEGER NOT NULL DEFAULT 0,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
+
+-- What a failed download marks, which is the one thing that looks a row up by url: the primary key
+-- is (message, idx).  Partial, because a row with no url is one there is nothing to fetch for and
+-- no query looks for it.
+CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;

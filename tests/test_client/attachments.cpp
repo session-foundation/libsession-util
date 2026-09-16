@@ -1,3 +1,5 @@
+#include <fstream>
+
 #include "../../src/client/download_cache.hpp"
 #include "../utils.hpp"
 #include "common.hpp"
@@ -239,14 +241,15 @@ TEST_CASE(
     CHECK_FALSE(std::filesystem::exists(dest.string() + ".part"));
 
     // Progress reported as a send does: an opening 0/0 that says it has begun, then exactly one
-    // terminal result.  Each report says which attachment of which message it is about, since a
-    // caller may be watching several.
+    // terminal result.  Each report says which attachment of which message of which conversation it
+    // is about, since a caller may be watching several.
     REQUIRE(reports.size() >= 2);
     CHECK_FALSE(reports.front().result.has_value());
     CHECK(reports.front().done == 0);
     CHECK(reports.front().total == 0);
     CHECK(reports.back().result == 0);
     for (const auto& r : reports) {
+        CHECK(r.conversation_id == ConversationId::dm(peer.session_id));
         CHECK(r.message_id == msg_id);
         CHECK(r.index == 0);
     }
@@ -1181,15 +1184,14 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     // The save was told how the transfer it joined was going, not left silent until it finished.
     CHECK_FALSE(saw.empty());
     CHECK(saw.back().result == 0);
+    CHECK(saw.back().conversation_id == ConversationId::dm(peer.session_id));
 }
 
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
     TempCacheDir dir;
-    std::vector<std::pair<ConversationId, AttachmentProgress>> progress;
+    std::vector<AttachmentProgress> progress;
     callbacks cbs;
-    cbs.attachment_progress = [&](const ConversationId& id, const AttachmentProgress& p) {
-        progress.emplace_back(id, p);
-    };
+    cbs.attachment_progress = [&](const AttachmentProgress& p) { progress.push_back(p); };
     TempClient c{cbs};
     SenderKeys peer;
     auto* net = attach_mock_network(c->core);
@@ -1295,8 +1297,8 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
 
         // Broadcast, since nobody asked for it and there is no caller to hand a report to.
         REQUIRE_FALSE(progress.empty());
-        CHECK(progress.back().first == convo);
-        CHECK(progress.back().second.result == 0);
+        CHECK(progress.back().conversation_id == convo);
+        CHECK(progress.back().result == 0);
 
         // In the cache, so opening the conversation costs nothing...
         CHECK(std::filesystem::exists(cache::path_for(
@@ -1425,6 +1427,355 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
         if (!e.path().filename().string().ends_with(cache::PARTIAL_SUFFIX))
             on_disk++;
     CHECK(static_cast<size_t>(rows) == on_disk);
+}
+
+TEST_CASE(
+        "Client: a page answers for every attachment it can fetch and no others",
+        "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(400, std::byte{9});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    // Two attachments on one message, so the answer is longer than the list of ids it was asked
+    // about and every row is addressed by its own index rather than by its message's.
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(6000),
+            "p1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                for (int i = 0; i < 2; i++) {
+                    auto* a = data.add_attachments();
+                    a->set_id(static_cast<uint64_t>(i + 1));
+                    a->set_url("http://fs.example/file/two{}#d"_format(i));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                }
+            },
+            61);
+    // A second message, so the conversation is resolved once and reused rather than per row.
+    deliver(*c, peer, "hello", from_epoch_ms(6001), "p2", "", std::nullopt, nullptr, 62);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 2);
+
+    std::vector<int64_t> ids;
+    for (const auto& m : msgs)
+        ids.push_back(m.id);
+
+    auto status = c->attachment_transfers(ids, await);
+    REQUIRE(status.size() == 2);
+    for (const auto& st : status) {
+        CHECK(st.conversation_id == convo);
+        CHECK_FALSE(st.cached);
+        CHECK_FALSE(st.transferring);
+    }
+    CHECK(status[0].index == 0);
+    CHECK(status[1].index == 1);
+    // The message with no attachments contributes nothing rather than an empty answer.
+    CHECK(status[0].message_id == status[1].message_id);
+}
+
+TEST_CASE(
+        "Client: an attachment with nothing to fetch is not reported at all",
+        "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    // A sender who described an attachment and gave no url.  There is nothing to fetch, which is
+    // not the same as nothing happening to it: a row offering to fetch this would be offering
+    // something that cannot be done.
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(7000),
+            "n1",
+            "",
+            std::nullopt,
+            [](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_contenttype("image/png");
+                a->set_size(100);
+            },
+            71);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 1);
+
+    // Whether such a pointer is kept at all is libsession's own business; what this pins is that
+    // nothing offers to fetch it.
+    for (const auto& a : msgs[0].attachments)
+        CHECK_FALSE(a.uploaded);
+    CHECK(c->attachment_transfers({msgs[0].id}, await).empty());
+}
+
+TEST_CASE(
+        "Client: a save of a file the server has dropped records it too", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(600, std::byte{4});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(8000),
+            "v1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/dropped#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            81);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    // A save never reads what a fetch would have cached, so this is the path a person hits by
+    // tapping save on an attachment they never opened in the conversation.
+    std::promise<std::optional<std::string>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(
+            msg_id,
+            0,
+            dir.path / "dropped.bin",
+            nullptr,
+            [&done](std::optional<std::string> err, std::filesystem::path) {
+                done.set_value(std::move(err));
+            });
+    sync(*c);
+
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    CHECK(c->message(msg_id, await)->attachments[0].unavailable);
+}
+
+TEST_CASE("Client: a file the server does not have is recorded as gone", "[client][attachments]") {
+    TempCacheDir dir;
+    std::vector<int64_t> announced;
+    callbacks cbs;
+    cbs.message_updated = [&](ConversationId&&, Message&& m) { announced.push_back(m.id); };
+    TempClient c{cbs};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(700, std::byte{5});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    // Two messages quoting the same url, which is what a forward produces.
+    auto add = [&](SessionProtos::DataMessage& data) {
+        auto* a = data.add_attachments();
+        a->set_id(1);
+        a->set_url("http://fs.example/file/gone#d");
+        a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+        a->set_size(plaintext.size());
+    };
+    deliver(*c, peer, "", from_epoch_ms(4000), "g1", "", std::nullopt, add, 51);
+    deliver(*c, peer, "", from_epoch_ms(4001), "g2", "", std::nullopt, add, 52);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 2);
+    for (const auto& m : msgs)
+        CHECK_FALSE(m.attachments[0].unavailable);
+
+    std::promise<std::optional<std::string>> outcome;
+    auto waiter = outcome.get_future();
+    c->attachment_data(msgs[0].id, 0, nullptr, [&outcome](std::optional<std::string> err, auto) {
+        outcome.set_value(std::move(err));
+    });
+    sync(*c);
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    // Both rows, because the fact is about the file rather than about one message's mention of it.
+    for (const auto& m : c->conversation(convo, await)->messages(await))
+        CHECK(m.attachments[0].unavailable);
+
+    // And both announced, so a transcript already on screen stops offering the download.  A save
+    // reports itself the same way; this is a stored change to an attachment like any other.
+    CHECK(announced.size() == 2);
+    CHECK(std::ranges::find(announced, msgs[0].id) != announced.end());
+    CHECK(std::ranges::find(announced, msgs[1].id) != announced.end());
+
+    // A second failure has nothing left to say: the rows already carry it.
+    announced.clear();
+    std::promise<std::optional<std::string>> again;
+    auto retry = again.get_future();
+    c->attachment_data(msgs[1].id, 0, nullptr, [&again](std::optional<std::string> err, auto) {
+        again.set_value(std::move(err));
+    });
+    sync(*c);
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    REQUIRE(retry.wait_for(5s) == std::future_status::ready);
+    sync(*c);
+    CHECK(announced.empty());
+}
+
+TEST_CASE(
+        "Client: a download that merely failed is not recorded as gone", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(700, std::byte{6});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(5000),
+            "s1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/flaky#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            53);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    std::promise<std::optional<std::string>> outcome;
+    auto waiter = outcome.get_future();
+    c->attachment_data(msg_id, 0, nullptr, [&outcome](std::optional<std::string> err, auto) {
+        outcome.set_value(std::move(err));
+    });
+    sync(*c);
+    // A server that is having a bad day, not one that has lost the file: another attempt is
+    // exactly what this should leave available.
+    REQUIRE(fail_downloads(*net, 503) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK(waiter.get().has_value());
+    sync(*c);
+
+    CHECK_FALSE(c->message(msg_id, await)->attachments[0].unavailable);
+}
+
+TEST_CASE("Client: a transfer can be asked what it is doing", "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    TestHelper::seed_pfs_nak(c->core, peer.session_id);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(900, std::byte{3});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(3000),
+            "h3",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url("http://fs.example/file/9#d");
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+            },
+            44);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msg_id = c->conversation(convo, await)->messages(await)[0].id;
+
+    // Nothing has asked for it, and it is still reported: "nobody is fetching this" is what a row
+    // offering to fetch it needs to hear, and is not the same as having nothing to fetch.
+    {
+        auto idle = c->attachment_transfers({msg_id}, await);
+        REQUIRE(idle.size() == 1);
+        CHECK(idle[0].conversation_id == convo);
+        CHECK(idle[0].message_id == msg_id);
+        CHECK(idle[0].index == 0);
+        CHECK_FALSE(idle[0].cached);
+        CHECK_FALSE(idle[0].transferring);
+    }
+
+    // Asked for, but the server has not answered: the state a client that missed the reports has
+    // no other way of learning.
+    auto bytes = std::make_shared<std::promise<std::optional<std::string>>>();
+    c->attachment_data(msg_id, 0, nullptr, [bytes](std::optional<std::string> err, auto) {
+        bytes->set_value(std::move(err));
+    });
+    sync(*c);
+    {
+        auto running = c->attachment_transfers({msg_id}, await);
+        REQUIRE(running.size() == 1);
+        CHECK(running[0].transferring);
+        CHECK_FALSE(running[0].cached);
+    }
+
+    auto waiter = bytes->get_future();
+    REQUIRE(serve_downloads(*net, ciphertext) == 1);
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+    sync(*c);
+
+    // Finished: in the cache, and no longer moving.
+    {
+        auto done = c->attachment_transfers({msg_id}, await);
+        REQUIRE(done.size() == 1);
+        CHECK(done[0].cached);
+        CHECK_FALSE(done[0].transferring);
+    }
+
+    // A message nobody has is left out rather than reported as an attachment with nothing doing.
+    CHECK(c->attachment_transfers({msg_id + 9999}, await).empty());
 }
 
 TEST_CASE("Client: the sweep reconciles the cache with what the database says", "[client][evict]") {
