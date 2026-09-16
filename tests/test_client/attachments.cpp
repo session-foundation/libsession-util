@@ -1376,8 +1376,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
 
     // Now a limit that only two of the three fit under.
     auto one =
-            std::filesystem::file_size(
-                    TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, urls[0]));
+            std::filesystem::file_size(TestHelper::cache_path(*c, cache::ATTACHMENT_DIR, urls[0]));
     c->set_attachment_cache_limit(static_cast<int64_t>(one * 2 + one / 2), await);
 
     // Nothing happens until something is added, which is the only moment the total can grow.
@@ -1629,4 +1628,105 @@ TEST_CASE("Client: a text-only message previews no attachments", "[client][attac
     CHECK(convos[0].last_preview()->filenames.empty());
     CHECK_FALSE(convos[0].last_preview()->all_images);
     CHECK_FALSE(convos[0].last_preview()->voice_message);
+}
+
+TEST_CASE(
+        "Client: a file that cannot be fetched is marked unavailable",
+        "[client][attachments][unavailable]") {
+    // Two messages naming one file, which is the case the column exists for: what a fetch discovers
+    // is about the *file*, so a verdict reached while fetching for one of them has to reach the
+    // other as well, or a transcript shows the same bytes as broken in one place and fine in
+    // another.
+    TempCacheDir dir;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(2000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    auto url = network::file_server::generate_download_url("expired", {}, true);
+
+    int64_t next_msgid = 41;
+    auto arrive = [&](std::string hash, int64_t ts) {
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(ts),
+                std::move(hash),
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& data) {
+                    auto* a = data.add_attachments();
+                    a->set_id(static_cast<uint64_t>(next_msgid));
+                    a->set_url(url);
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                next_msgid++);
+        sync(*c);
+    };
+    arrive("h1", 1000);
+    arrive("h2", 2000);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto verdicts = [&] {
+        std::vector<std::optional<AttachmentUnavailable>> found;
+        for (const auto& m : c->conversation(convo, await)->messages(await)) {
+            REQUIRE(m.attachments.size() == 1);
+            found.push_back(m.attachments[0].unavailable);
+        }
+        return found;
+    };
+
+    using V = std::vector<std::optional<AttachmentUnavailable>>;
+    CHECK(verdicts() == V{std::nullopt, std::nullopt});
+
+    // Asks for the bytes and answers the download `status`; the error it produces is not the point
+    // of any of these, only what the row is left saying afterwards.
+    auto try_fetch = [&](auto&& answer) {
+        c->attachment_data(
+                c->conversation(convo, await)->messages(await).back().id,
+                0,
+                nullptr,
+                [](std::optional<std::string>, std::vector<std::byte>) {});
+        sync(*c);
+        REQUIRE(net->downloads.size() == 1);
+        answer();
+        sync(*c);
+    };
+
+    // A server error says nothing about the file -- the next attempt may well work -- so nothing is
+    // recorded and the fetch stays on offer.
+    try_fetch([&] { REQUIRE(fail_downloads(*net, 500) == 1); });
+    CHECK(verdicts() == V{std::nullopt, std::nullopt});
+
+    r.msg_updated.clear();
+
+    // 404 is how the file server answers for an upload it no longer holds, which is what an expired
+    // one looks like: worth recording, and recorded for both messages rather than the one that
+    // asked.
+    try_fetch([&] { REQUIRE(fail_downloads(*net, 404) == 1); });
+    CHECK(verdicts() == V{AttachmentUnavailable::not_found, AttachmentUnavailable::not_found});
+    CHECK(r.msg_updated.size() >= 2);
+
+    // The repair: the sender sends the same file again, which -- the url being a hash of the
+    // encrypted body -- lands at the same url.  That clears the verdict for the messages that
+    // already carried it, not only for the new arrival, so all three are fetchable again.
+    arrive("h3", 3000);
+    CHECK(verdicts() == V{std::nullopt, std::nullopt, std::nullopt});
+
+    // Bytes that arrive and do not authenticate are the other permanent failure, and a different
+    // thing to tell a user: a resend would reproduce them, so asking for one is no use.
+    auto corrupt = ciphertext;
+    corrupt[corrupt.size() / 2] ^= std::byte{0xff};
+    try_fetch([&] { REQUIRE(serve_downloads(*net, corrupt) == 1); });
+    CHECK(verdicts() == V{AttachmentUnavailable::unreadable,
+                          AttachmentUnavailable::unreadable,
+                          AttachmentUnavailable::unreadable});
 }

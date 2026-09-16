@@ -118,6 +118,29 @@ enum class AttachmentAvailability {
     absent,
 };
 
+/// Why a fetch of an attachment failed, when it failed in a way that trying again will not fix.
+///
+/// An int under the names rather than a closed set: what is recorded is the code the failure
+/// actually carried, so a status nothing here anticipated is kept as itself instead of being
+/// flattened into "some other problem".  **A switch over this needs a default**, and a client that
+/// does not recognise a value should say the file could not be fetched rather than guess why.
+///
+/// What is *not* here is anything transient.  A timeout, a connection failure or a server error
+/// says nothing about the file and the next attempt may well succeed, so those are never recorded:
+/// the question this answers is why a retry would be pointless.
+enum class AttachmentUnavailable : int {
+    /// The file server does not hold it.  Usually an upload that has expired, which is the case
+    /// that makes this worth reporting at all: the fix is in the sender's hands, so a display
+    /// should say to ask them for it again rather than offer a button that cannot work.
+    not_found = 404,
+
+    /// It arrived and was not the file it claimed to be -- it failed to authenticate, or its
+    /// sender described it wrongly.  A url is a hash of the encrypted body and the encryption is
+    /// deterministic, so a resend of the same file reproduces these same bytes and this same
+    /// failure; only a genuinely different file would come out differently.
+    unreadable = ATTACHMENT_UNREADABLE,
+};
+
 struct Attachment {
     /// Position within the message's attachment list.  This is the index `send_message`'s upload
     /// handler reports progress against, and what `save_attachment` takes.
@@ -154,6 +177,27 @@ struct Attachment {
     /// url rather than chosen by anybody, so it is a fact about this attachment and not about
     /// somewhere the application happens to have put a copy.
     bool uploaded = false;
+
+    /// The last attempt to fetch this file failed in a way that looked permanent: the file server
+    /// does not hold it -- which is also how an expired upload answers -- or the bytes arrived and
+    /// failed to authenticate.  Offering to fetch it again is offering the same failure, so a
+    /// display should say it cannot be had rather than invite another attempt.
+    ///
+    /// **A cached answer, not a fact about the url**, and the difference decides what a client
+    /// should do about it.  The repair is to ask the sender to send it again: an attachment url is
+    /// a hash of the encrypted body and the encryption is deterministic, so the same file from the
+    /// same account lands at the same url, and the re-upload puts those bytes back where they were.
+    /// That resend clears this -- for the original message as well as the new one, since it is the
+    /// same file -- and the fetch is worth trying again.
+    ///
+    /// The value says *which*, because they are different things to tell a user: a file server
+    /// status -- 404 for an upload it does not hold, which is how an expired one answers -- or
+    /// `ATTACHMENT_UNREADABLE` for bytes that arrived and were not the file they claimed to be.
+    /// "Ask them to send it again" is the right advice for the first and not the second.
+    ///
+    /// Unset means only that nothing has proved otherwise: an attachment nobody has tried to fetch
+    /// is indistinguishable from one that will succeed.
+    std::optional<AttachmentUnavailable> unavailable;
 
     /// Whether the bytes are already here, on their way, or neither -- see
     /// `AttachmentAvailability`.
