@@ -23,8 +23,8 @@
 #include <session/sqlite.hpp>
 #include <set>
 #include <stdexcept>
-#include <system_error>
 #include <tuple>
+#include <unordered_set>
 
 #include "download_cache.hpp"
 
@@ -908,12 +908,17 @@ std::optional<int64_t> Client::attachment_cache_limit(await_t) {
     return loop.call_get([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); });
 }
 
+// The cache's name for an attachment url: the hash `_in_flight` and `attachment_cache` are both
+// keyed by, so one spelling serves the lookup and the index query alike.
+static std::string cache_name(const std::filesystem::path& dir, std::string_view url) {
+    return cache::path_for(dir, cache::ATTACHMENT_DIR, url).filename().string();
+}
+
 std::vector<AttachmentStatus> Client::_attachment_transfers(
         const std::vector<int64_t>& message_ids) {
     std::vector<AttachmentStatus> out;
     if (message_ids.empty())
         return out;
-    out.reserve(message_ids.size());
 
     auto c = core.database().conn();
 
@@ -948,9 +953,27 @@ std::vector<AttachmentStatus> Client::_attachment_transfers(
          sqlite::IterableStatementWrapper<int64_t, int64_t, std::string, int64_t>{std::move(st)})
         rows.push_back({message_id, idx, conversation, std::move(url)});
 
+    // What the index says it holds, asked once for the page.  Read from the index rather than by
+    // stat-ing each file: the two can disagree until a sweep reconciles them, and either way round
+    // costs only a fetch that answers differently from what was predicted -- a row that offers to
+    // download bytes already here, or one that offers to open bytes that turn out to need
+    // fetching.  Neither is worth a syscall per attachment.
+    std::unordered_set<std::string> cached;
+    if (!_cache_dir.empty() && !rows.empty()) {
+        auto names = c.prepared_st("SELECT name FROM attachment_cache WHERE name IN ({})"_format(
+                sqlite::placeholders(rows.size())));
+        int at = 1;
+        for (const auto& row : rows)
+            names->bind(at++, cache_name(_cache_dir, row.url));
+
+        for (auto&& name : sqlite::IterableStatementWrapper<std::string>{std::move(names)})
+            cached.insert(std::move(name));
+    }
+
     // A page is normally one conversation, so its id is resolved once rather than per attachment.
     std::unordered_map<int64_t, ConversationId> conversations;
 
+    out.reserve(rows.size());
     for (auto& row : rows) {
         auto known = conversations.find(row.conversation);
         if (known == conversations.end())
@@ -959,13 +982,10 @@ std::vector<AttachmentStatus> Client::_attachment_transfers(
 
         AttachmentStatus status{known->second, row.message_id, static_cast<size_t>(row.idx)};
 
-        auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, row.url);
-        // The file rather than its index row: what decides whether the next fetch answers from
-        // disk is the file being there, and the two can disagree until a sweep.
-        std::error_code ignored;
-        status.cached = !_cache_dir.empty() && std::filesystem::exists(file, ignored);
+        auto name = cache_name(_cache_dir, row.url);
+        status.cached = cached.contains(name);
 
-        if (auto found = _in_flight.find(file.filename().string()); found != _in_flight.end()) {
+        if (auto found = _in_flight.find(name); found != _in_flight.end()) {
             status.transferring = true;
             status.done = found->second.done;
             status.total = found->second.total;

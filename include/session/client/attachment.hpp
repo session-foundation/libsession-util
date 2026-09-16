@@ -110,9 +110,10 @@ struct AttachmentStatus {
     int64_t message_id;
     size_t index;
 
-    /// The decrypted file is in the cache, so asking for the bytes would answer from disk without
-    /// a request.  A strong hint rather than a promise: the cache can be swept or the directory
-    /// emptied between this answer and the next fetch, and a fetch that misses simply downloads.
+    /// The cache index holds this file, so asking for the bytes would answer from disk without a
+    /// request.  A strong hint rather than a promise, and in both directions: the index and the
+    /// files can disagree until a sweep reconciles them, so a fetch may find bytes this did not
+    /// predict, or find none and simply download.  Either way the fetch is what settles it.
     bool cached = false;
 
     /// A transfer is running, and `done`/`total` are where it has got to -- the same figures, in
