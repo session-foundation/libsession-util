@@ -206,15 +206,15 @@ TEST_CASE(
     auto dest = dir / "saved.bin";
 
     std::vector<AttachmentProgress> reports;
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
             msg_id,
             0,
             dest,
             [&](const AttachmentProgress& p) { reports.push_back(p); },
-            [&](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
+            [&](auto r) {
+                done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
             });
 
     // Nothing is fetched until asked, and asking produces exactly one download.
@@ -296,15 +296,15 @@ TEST_CASE(
     // The promise is shared rather than captured by reference: save_attachment's callback outlives
     // this scope, and a reference to a local here would dangle by the time the download is served.
     auto save = [&](const std::filesystem::path& dest, bool notify) {
-        auto done = std::make_shared<std::promise<std::optional<std::string>>>();
+        auto done = std::make_shared<std::promise<std::optional<Error>>>();
         auto waiter = done->get_future();
         c->Client::save_attachment(
                 msg_id,
                 0,
                 dest,
                 nullptr,
-                [done](std::optional<std::string> err, std::filesystem::path) {
-                    done->set_value(std::move(err));
+                [done](auto r) {
+                    done->set_value(r ? std::nullopt : std::optional{std::move(r).error()});
                 },
                 notify);
         sync(*c);
@@ -329,7 +329,7 @@ TEST_CASE(
     // The account's own answer refuses the notification even when the caller asked for it, so a
     // client that never grew a setting for this still honours one made on another device.
     {
-        c->core.configs.user_profile().set_notify_media_saved(false);
+        in_configs(*c, [](auto& cfg) { cfg.user_profile().set_notify_media_saved(false); });
         auto loud = dir / "still-quiet.bin";
         auto waiter = save(loud, true);
         REQUIRE(serve_downloads(*net, ciphertext) == 1);
@@ -338,7 +338,7 @@ TEST_CASE(
         CHECK(std::filesystem::exists(loud));
         sync(*c);
         CHECK(stores(*net).empty());
-        c->core.configs.user_profile().set_notify_media_saved(true);
+        in_configs(*c, [](auto& cfg) { cfg.user_profile().set_notify_media_saved(true); });
     }
 
     // A file that fails to authenticate is a failure, not a corrupt file on disk: the ciphertext is
@@ -401,16 +401,11 @@ TEST_CASE("Client: an attachment we sent can be saved back", "[client][attachmen
     CHECK(msg->attachments[0].size == static_cast<int64_t>(contents.size()));
 
     auto dest = dir / "saved.bin";
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
-    c->Client::save_attachment(
-            msg->id,
-            0,
-            dest,
-            nullptr,
-            [&done](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
-            });
+    c->Client::save_attachment(msg->id, 0, dest, nullptr, [&done](auto r) {
+        done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
+    });
     sync(*c);
 
     // Served from what the upload left behind, found by the id in the url the send generated.
@@ -470,16 +465,14 @@ TEST_CASE(
         out << "appeared since";
     }
 
-    std::promise<std::pair<std::optional<std::string>, std::filesystem::path>> done;
+    std::promise<std::pair<std::optional<Error>, std::filesystem::path>> done;
     auto waiter = done.get_future();
-    c->Client::save_attachment(
-            id,
-            0,
-            dest,
-            nullptr,
-            [&done](std::optional<std::string> err, std::filesystem::path where) {
-                done.set_value({std::move(err), std::move(where)});
-            });
+    c->Client::save_attachment(id, 0, dest, nullptr, [&done](auto r) {
+        if (r)
+            done.set_value({std::nullopt, *std::move(r)});
+        else
+            done.set_value({std::move(r).error(), {}});
+    });
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
@@ -532,9 +525,7 @@ TEST_CASE(
             0,
             dest,
             nullptr,
-            [&done](std::optional<std::string>, std::filesystem::path where) {
-                done.set_value(std::move(where));
-            },
+            [&done](auto r) { done.set_value(r ? *std::move(r) : std::filesystem::path{}); },
             /*notify_sender=*/true,
             /*replace=*/true);
     sync(*c);
@@ -576,12 +567,11 @@ TEST_CASE(
     REQUIRE(accept_stores(*net) >= 1);
 
     auto dest = dir / "my-copy.bin";
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
-    c->Client::save_attachment(
-            id, 0, dest, nullptr, [&done](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
-            });
+    c->Client::save_attachment(id, 0, dest, nullptr, [&done](auto r) {
+        done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
+    });
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
@@ -767,16 +757,11 @@ TEST_CASE("Client: a legacy attachment is saved", "[client][attachments][legacy]
     std::filesystem::create_directories(dir);
     auto dest = dir / "legacy.txt";
 
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
-    c->Client::save_attachment(
-            msgs[0].id,
-            0,
-            dest,
-            nullptr,
-            [&done](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
-            });
+    c->Client::save_attachment(msgs[0].id, 0, dest, nullptr, [&done](auto r) {
+        done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
+    });
     sync(*c);
 
     REQUIRE(serve_downloads(*net, LEGACY_BLOB) == 1);
@@ -983,12 +968,11 @@ TEST_CASE(
     std::filesystem::create_directories(dir);
     auto dest = dir / "saved.bin";
 
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
-    c->Client::save_attachment(
-            msg_id, 0, dest, nullptr, [&](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
-            });
+    c->Client::save_attachment(msg_id, 0, dest, nullptr, [&](auto r) {
+        done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
+    });
 
     sync(*c);
     REQUIRE(serve_downloads(*net, ciphertext) == 1);
@@ -997,7 +981,7 @@ TEST_CASE(
     // Reported as a failure rather than saved short or saved long.
     auto err = waiter.get();
     REQUIRE(err.has_value());
-    CHECK(err->find("sender said") != std::string::npos);
+    CHECK(err->message.find("sender said") != std::string::npos);
 
     // And nothing is left on disk that could be mistaken for the file.
     CHECK_FALSE(std::filesystem::exists(dest));
@@ -1051,9 +1035,9 @@ TEST_CASE(
                 msg_id,
                 0,
                 [&, i](const AttachmentProgress& p) { seen[i].push_back(p); },
-                [&, i](std::optional<std::string> err, std::vector<std::byte> d) {
-                    REQUIRE_FALSE(err.has_value());
-                    got[i] = std::move(d);
+                [&, i](auto r) {
+                    REQUIRE(r.has_value());
+                    got[i] = *std::move(r);
                 });
     sync(*c);
 
@@ -1080,11 +1064,10 @@ TEST_CASE(
     // And having finished, a third ask is served from the cache with no download at all.
     net->downloads.clear();
     std::optional<std::vector<std::byte>> third;
-    c->attachment_data(
-            msg_id, 0, nullptr, [&](std::optional<std::string> err, std::vector<std::byte> d) {
-                REQUIRE_FALSE(err.has_value());
-                third = std::move(d);
-            });
+    c->attachment_data(msg_id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        third = *std::move(r);
+    });
     sync(*c);
     CHECK(net->downloads.empty());
     REQUIRE(third);
@@ -1135,26 +1118,25 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
 
     // A display asks first, so the file is being accumulated.
     std::optional<std::vector<std::byte>> shown;
-    c->attachment_data(
-            msg_id, 0, nullptr, [&](std::optional<std::string> err, std::vector<std::byte> d) {
-                REQUIRE_FALSE(err.has_value());
-                shown = std::move(d);
-            });
+    c->attachment_data(msg_id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        shown = *std::move(r);
+    });
     sync(*c);
     REQUIRE(net->downloads.size() == 1);
 
     // Now a save of the same attachment, while that is still in flight.
     auto dest = dir.path / "saved.png";
     std::vector<AttachmentProgress> saw;
-    std::promise<std::optional<std::string>> done;
+    std::promise<std::optional<Error>> done;
     auto waiter = done.get_future();
     c->Client::save_attachment(
             msg_id,
             0,
             dest,
             [&](const AttachmentProgress& p) { saw.push_back(p); },
-            [&](std::optional<std::string> err, std::filesystem::path) {
-                done.set_value(std::move(err));
+            [&](auto r) {
+                done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
             });
     sync(*c);
 
@@ -1371,7 +1353,7 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
     // Reach for the *oldest* one, which makes it the most recently used.  Under oldest-first
     // eviction it would still be first to go; under least-recently-used it is last.
     later();
-    c->attachment_data(ids[0], 0, nullptr, [](auto, auto) {});
+    c->attachment_data(ids[0], 0, nullptr, [](auto) {});
     sync(*c);
 
     // Now a limit that only two of the three fit under.

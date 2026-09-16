@@ -257,7 +257,9 @@ TEST_CASE("Client: non-conversation content does not create a conversation", "[c
                 own_sid(*c),
                 std::nullopt);
         core::SwarmMessage sm{encoded, std::move(hash), from_epoch_ms(1000), from_epoch_ms(99999)};
-        c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+        TestHelper::on_loop(c->core, [&] {
+            c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+        });
     };
 
     // A typing indicator: valid Content, but nothing that belongs in message history.
@@ -703,9 +705,8 @@ TEST_CASE("Client: an unsend request from the author deletes the message", "[cli
                 own_sid(*c),
                 std::nullopt);
         core::SwarmMessage sm{encoded, std::move(hash), from_epoch_ms(9000), from_epoch_ms(1e12)};
-        c->core.loop().call_get([&] {
+        TestHelper::on_loop(c->core, [&] {
             c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
-            return 0;
         });
     };
 
@@ -843,7 +844,9 @@ TEST_CASE("Client: a sender's picture arrives with their message", "[client][rec
     }
 
     SECTION("and it reaches the config, so our other devices learn it too") {
-        auto entry = c->core.configs.contacts().get(oxenc::to_hex(sender.session_id));
+        auto entry = in_configs(*c, [&](auto& cfg) {
+            return cfg.contacts().get(oxenc::to_hex(sender.session_id));
+        });
         REQUIRE(entry);
         CHECK(entry->profile_picture.url == "http://fs.example/file/7#pubkey=aa");
         CHECK(entry->profile_picture.key == key);

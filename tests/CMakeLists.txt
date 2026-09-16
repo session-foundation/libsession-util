@@ -26,6 +26,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp
+    test_expected.cpp
     test_bugs.cpp
     test_compression.cpp
     test_config_userprofile.cpp
@@ -50,6 +51,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_pro_backend.cpp
     test_random.cpp
     test_session_encrypt.cpp
+    test_network_teardown.cpp
     test_swarm_retry.cpp
     test_utils.cpp
     test_session_protocol.cpp

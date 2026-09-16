@@ -22,6 +22,7 @@ typedef enum {
     SESSION_NETWORK_REQUEST_CATEGORY_STANDARD_SMALL,
     SESSION_NETWORK_REQUEST_CATEGORY_FILE,
     SESSION_NETWORK_REQUEST_CATEGORY_FILE_SMALL,
+    SESSION_NETWORK_REQUEST_CATEGORY_CONFIG,
 } SESSION_NETWORK_REQUEST_CATEGORY;
 
 typedef enum {
@@ -74,25 +75,6 @@ typedef struct {
     const char* swarm_pubkey_hex;
 
 } session_request_params;
-
-typedef struct {
-    SESSION_NETWORK_PATH_CATEGORY category;
-} session_onion_path_metadata;
-
-typedef struct {
-    char destination_pubkey[65];         // The 64-byte ed25519 pubkey in hex + null terminator.
-    char destination_snode_address[65];  // The 64-byte .snode address + null terminator.
-} session_router_tunnel_metadata;
-
-typedef struct {
-    const network_service_node* nodes;
-    size_t nodes_count;
-
-    // Only ONE of these pointers should be set, the other should be left null
-    const session_onion_path_metadata* onion_metadata;
-    const session_router_tunnel_metadata* session_router_metadata;
-
-} session_path_info;
 
 #ifdef __cplusplus
 }

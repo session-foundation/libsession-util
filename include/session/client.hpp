@@ -159,7 +159,7 @@ class Client {
     ///
     /// Message requests are not in it — see `message_requests()` — and neither are hidden
     /// conversations.
-    void conversations(failable_function<void(std::vector<AnyConversation>)> cb);
+    void conversations(result_function<std::vector<AnyConversation>> cb);
     std::vector<AnyConversation> conversations(await_t);
 
     /// The message requests: accounts that have written to us and that we have never written to,
@@ -169,7 +169,7 @@ class Client {
     /// name and an unread count, and `Conversation::request` is true on every one of these.  It
     /// stops being a request when we answer it, since writing to someone is what approving them
     /// is; there is no separate accept, and no way back short of deleting the contact.
-    void message_requests(failable_function<void(std::vector<AnyConversation>)> cb);
+    void message_requests(result_function<std::vector<AnyConversation>> cb);
     std::vector<AnyConversation> message_requests(await_t);
 
     /// One conversation, or nullopt if we have no such conversation.
@@ -185,9 +185,8 @@ class Client {
     /// `DM` and needs no narrowing.
     ///
     /// @throws std::invalid_argument, from `dm()`, if the id is not a one-to-one conversation.
-    void conversation(
-            const ConversationId& id, failable_function<void(std::optional<AnyConversation>)> cb);
-    void dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
+    void conversation(const ConversationId& id, result_function<std::optional<AnyConversation>> cb);
+    void dm(const ConversationId& id, result_function<std::optional<DM>> cb);
     std::optional<AnyConversation> conversation(const ConversationId& id, await_t);
     std::optional<DM> dm(const ConversationId& id, await_t);
 
@@ -206,7 +205,7 @@ class Client {
     /// than opened, and will say so in their own words when they arrive.
     ///
     /// @throws std::invalid_argument if the id is not a one-to-one conversation.
-    void open_dm(const ConversationId& id, failable_function<void(std::optional<DM>)> cb);
+    void open_dm(const ConversationId& id, result_function<std::optional<DM>> cb);
     DM open_dm(const ConversationId& id, await_t);
 
     /// True if this is our own account's session ID.
@@ -228,7 +227,7 @@ class Client {
     bool is_note_to_self(const ConversationId& id);
 
     /// A single message by its Client-assigned id, or nullopt if it does not exist.
-    void message(int64_t id, failable_function<void(std::optional<Message>)> cb);
+    void message(int64_t id, result_function<std::optional<Message>> cb);
     std::optional<Message> message(int64_t id, await_t);
 
     /// Blocks or unblocks an account named by id.
@@ -239,7 +238,7 @@ class Client {
     /// nothing to open first, and opening one would be the wrong thing to do about it.
     ///
     /// @throws std::invalid_argument if the id is not a one-to-one conversation, or is our own.
-    void set_blocked(const ConversationId& id, bool blocked, failable_function<void()> cb);
+    void set_blocked(const ConversationId& id, bool blocked, result_function<> cb);
     void set_blocked(const ConversationId& id, bool blocked, await_t);
 
     /// Sends to a conversation named by id, creating it if it does not exist.
@@ -259,11 +258,8 @@ class Client {
             const ConversationId& id,
             OutgoingMessage msg,
             Conversation::upload_progress on_upload,
-            failable_function<void(int64_t message_id)> cb);
-    void send_message(
-            const ConversationId& id,
-            OutgoingMessage msg,
-            failable_function<void(int64_t message_id)> cb);
+            result_function<int64_t> cb);
+    void send_message(const ConversationId& id, OutgoingMessage msg, result_function<int64_t> cb);
     int64_t send_message(
             const ConversationId& id,
             OutgoingMessage msg,
@@ -290,7 +286,7 @@ class Client {
             std::function<
                     void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
                     on_upload,
-            failable_function<void(bool started)> cb);
+            result_function<bool> cb);
     bool retry_send(int64_t message_id, Conversation::upload_progress on_upload, await_t);
     bool retry_send(int64_t message_id, await_t);
 
@@ -318,7 +314,7 @@ class Client {
     ///
     /// Returns false, having done nothing, if there is no such message.  Deleting one already
     /// deleted here is not an error and changes nothing.
-    void delete_message(int64_t message_id, failable_function<void(bool deleted)> cb);
+    void delete_message(int64_t message_id, result_function<bool> cb);
     bool delete_message(int64_t message_id, await_t);
 
     /// Deletes a message we sent, here and everywhere else it reached.
@@ -342,7 +338,7 @@ class Client {
     ///
     /// The message is marked `Deletion::everywhere` locally either way, since that records what we
     /// asked for, and it is what stops a client offering the same deletion twice.
-    void delete_message_everywhere(int64_t message_id, failable_function<void(bool deleted)> cb);
+    void delete_message_everywhere(int64_t message_id, result_function<bool> cb);
     bool delete_message_everywhere(int64_t message_id, await_t);
 
     /// Shows, or stops showing, a message as a gallery.
@@ -355,7 +351,7 @@ class Client {
     /// Starts nothing.  Turning gallery mode on for a conversation that does not auto-download
     /// leaves its images unfetched, and getting them is the caller's move — `attachment_data` for
     /// each — because a setter that reached for the network would surprise whoever called it.
-    void set_gallery(int64_t message_id, bool gallery, failable_function<void(bool set)> cb);
+    void set_gallery(int64_t message_id, bool gallery, result_function<bool> cb);
     bool set_gallery(int64_t message_id, bool gallery, await_t);
 
     /// An attachment's contents, decrypted and whole.
@@ -374,7 +370,7 @@ class Client {
             int64_t message_id,
             size_t index,
             std::function<void(const AttachmentProgress&)> on_progress,
-            failable_function<void(std::vector<std::byte>)> cb);
+            result_function<std::vector<std::byte>> cb);
 
     /// Removes one deleted message's leftover row.  The conversation-wide form, and the reason a
     /// deletion leaves a row at all — including how this can bring a message back — are on
@@ -383,7 +379,7 @@ class Client {
     /// Returns false, having done nothing, if the message does not exist or has not been deleted.
     /// Refusing a live message is the point rather than a nicety: this is the one operation here
     /// that removes history outright, and it is only ever entitled to remove what a deletion left.
-    void purge_deleted_message(int64_t message_id, failable_function<void(bool removed)> cb);
+    void purge_deleted_message(int64_t message_id, result_function<bool> cb);
     bool purge_deleted_message(int64_t message_id, await_t);
 
     /// The message as it arrived on the wire, rendered as indented text: one line per field that is
@@ -406,7 +402,7 @@ class Client {
     /// stored wire form, one whose content has been deleted, and one whose content some later
     /// pruning removed.  Also nullopt if the stored bytes no longer parse, which is corruption
     /// rather than absence and is logged as such.
-    void message_debug(int64_t message_id, failable_function<void(std::optional<std::string>)> cb);
+    void message_debug(int64_t message_id, result_function<std::optional<std::string>> cb);
     std::optional<std::string> message_debug(int64_t message_id, await_t);
 
     /// Fetches one of a message's attachments and writes it to `dest`, decrypting it on the way.
@@ -465,7 +461,7 @@ class Client {
             size_t index,
             std::filesystem::path dest,
             std::function<void(const AttachmentProgress&)> on_progress,
-            failable_function<void(std::filesystem::path saved_to)> cb,
+            result_function<std::filesystem::path> cb,
             bool notify_sender = true,
             bool replace = false);
 
@@ -524,10 +520,9 @@ class Client {
     void profile_picture(
             const ConversationId& id,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
+            result_function<std::optional<std::vector<std::byte>>> cb);
     void profile_picture(
-            const ConversationId& id,
-            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
+            const ConversationId& id, result_function<std::optional<std::vector<std::byte>>> cb);
 
     /// How much disk the cached attachments may occupy in total, or nullopt for no limit.
     ///
@@ -546,9 +541,9 @@ class Client {
     /// how much disk to spend is a property of this machine rather than of the account.  Unlike
     /// `set_cache_dir`, which is the application's to decide every run — a stored path would be the
     /// wrong one the moment the database moved.
-    void set_attachment_cache_limit(std::optional<int64_t> bytes, failable_function<void()> cb);
+    void set_attachment_cache_limit(std::optional<int64_t> bytes, result_function<> cb);
     void set_attachment_cache_limit(std::optional<int64_t> bytes, await_t);
-    void attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb);
+    void attachment_cache_limit(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> attachment_cache_limit(await_t);
 
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
@@ -562,9 +557,9 @@ class Client {
     /// somebody asking for one particular file, and are never refused for being large.
     ///
     /// Persisted and device-local, for the same reasons as the cache limit.
-    void set_auto_download_max_size(std::optional<int64_t> bytes, failable_function<void()> cb);
+    void set_auto_download_max_size(std::optional<int64_t> bytes, result_function<> cb);
     void set_auto_download_max_size(std::optional<int64_t> bytes, await_t);
-    void auto_download_max_size(failable_function<void(std::optional<int64_t>)> cb);
+    void auto_download_max_size(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> auto_download_max_size(await_t);
 
     // -- Our own account ----------------------------------------------------------------------
@@ -581,9 +576,9 @@ class Client {
     /// else.  This is account state and has no conversation: reading it off the note-to-self
     /// conversation works only once that conversation exists, which is a bug waiting for a fresh
     /// account.
-    void display_name(failable_function<void(std::string)> cb);
+    void display_name(result_function<std::string> cb);
     std::string display_name(await_t);
-    void set_display_name(std::string_view name, failable_function<void()> cb);
+    void set_display_name(std::string_view name, result_function<> cb);
     void set_display_name(std::string_view name, await_t);
 
     /// Whether to tell somebody when we save a file they sent us.
@@ -592,9 +587,9 @@ class Client {
     /// `save_attachment`'s `notify_sender` in one direction only: this can refuse a notification
     /// and cannot require one, so a caller passing false is never overruled, and a client with no
     /// setting of its own still honours a choice made elsewhere.
-    void notify_media_saved(failable_function<void(bool)> cb);
+    void notify_media_saved(result_function<bool> cb);
     bool notify_media_saved(await_t);
-    void set_notify_media_saved(bool notify, failable_function<void()> cb);
+    void set_notify_media_saved(bool notify, result_function<> cb);
     void set_notify_media_saved(bool notify, await_t);
 
     /// How often a handler that reports continuously — such as attachment upload progress — is
@@ -727,7 +722,7 @@ class Client {
         int64_t done = 0, total = 0;
         std::shared_ptr<std::vector<std::byte>> plain;
         std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
-        std::vector<failable_function<void(std::vector<std::byte>)>> waiting;
+        std::vector<result_function<std::vector<std::byte>>> waiting;
     };
     std::unordered_map<std::string, InFlight> _in_flight;
 
@@ -802,7 +797,7 @@ class Client {
             int64_t message_id,
             size_t index,
             std::function<void(const AttachmentProgress&)> on_progress,
-            failable_function<void(std::vector<std::byte>)> cb);
+            result_function<std::vector<std::byte>> cb);
 
     // Decides what an arriving message's attachments are worth fetching unasked, sets whether it is
     // shown as a gallery, and starts whatever it decided on.  Does nothing without a cache
@@ -825,7 +820,7 @@ class Client {
     void _profile_picture(
             const ConversationId& id,
             std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-            failable_function<void(std::optional<std::vector<std::byte>>)> cb);
+            result_function<std::optional<std::vector<std::byte>>> cb);
     std::vector<Message> _messages(
             const ConversationId& id,
             int limit,
@@ -916,7 +911,7 @@ class Client {
             std::optional<int64_t> claimed_size,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            std::function<void(std::optional<std::string> error)> on_done);
+            std::function<void(std::optional<Error> error)> on_done);
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {
@@ -940,7 +935,7 @@ class Client {
     void _fetch_cached(
             FetchTarget target,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
-            failable_function<void(std::vector<std::byte>)> cb,
+            result_function<std::vector<std::byte>> cb,
             std::function<void(const std::string& name)> on_hit,
             std::function<void(std::span<const std::byte>)> store);
 
@@ -968,7 +963,7 @@ class Client {
             size_t index,
             std::filesystem::path dest,
             std::function<void(const AttachmentProgress&)> on_progress,
-            failable_function<void(std::filesystem::path saved_to)> cb,
+            result_function<std::filesystem::path> cb,
             bool notify_sender,
             bool replace);
 
@@ -1164,14 +1159,18 @@ class Client {
     // dispatcher itself be an ordinary member.
     void _dispatch_out(std::function<void()> job);
 
-    // Calls `cb` with `args`, on the application's thread, if it gave us one.
-    template <typename Cb, typename... A>
-    void _report(Cb& cb, A... args) {
+    // Hands `result` to `cb`, on the application's thread, if it gave us one.
+    template <typename Cb, typename R>
+    void _report(Cb& cb, R result) {
         if (!cb)
             return;
-        _dispatch_out([cb, args = std::make_tuple(std::move(args)...)]() mutable {
-            std::apply(cb, std::move(args));
-        });
+        _dispatch_out([cb, result = std::move(result)]() mutable { cb(std::move(result)); });
+    }
+
+    // Reports a failure, for the callers that have one in hand rather than an exception to convert.
+    template <typename T = void, typename Cb>
+    void _fail(Cb& cb, Error err) {
+        _report(cb, Expected<T>{unexpected{std::move(err)}});
     }
 
     // Runs `produce` on the loop and reports what it produced to `cb`, or reports the reason it
@@ -1181,21 +1180,21 @@ class Client {
     // leave them waiting for an answer that is never coming.
     template <typename Produce, typename Cb>
     void _async(Produce produce, Cb cb) {
-        loop.call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
+        // `_jq`, not `loop`: this captures `this` and runs later, and ~Client has to be able to
+        // throw it away.  On the loop's own queue it would instead run during Core's destruction
+        // -- the loop thread keeps draining until ~Loop, which is the *last* thing ~Core does --
+        // reaching a Client whose components have already gone.
+        call([this, produce = std::move(produce), cb = std::move(cb)]() mutable {
             using Result = decltype(produce());
             try {
                 if constexpr (std::is_void_v<Result>) {
                     produce();
-                    _report(cb, std::optional<std::string>{});
+                    _report(cb, Expected<void>{});
                 } else
-                    _report(cb, std::optional<std::string>{}, produce());
+                    _report(cb, Expected<Result>{produce()});
             } catch (const std::exception& e) {
                 log_operation_failure(e);
-                // Whatever a default value is: the caller is being told not to read it.
-                if constexpr (std::is_void_v<Result>)
-                    _report(cb, std::optional{std::string{e.what()}});
-                else
-                    _report(cb, std::optional{std::string{e.what()}}, Result{});
+                _report(cb, Expected<Result>{unexpected{error_from(e)}});
             }
         });
     }
@@ -1247,18 +1246,50 @@ class Client {
     /// Put anything a Core callback touches *above* this, never below.
     core::Core core;
 
-    /// Helper reference to Core's event loop, which is where this class does its work.
-    oxen::quic::Loop& loop{core.loop()};
-
   private:
+    /// Schedules work on this Client's job queue, which is where everything this class defers
+    /// belongs -- see `_jq`.  Same shapes as `Core`'s: `call` runs inline when already on the loop
+    /// thread, `call_soon` always queues, `call_later` queues after a delay, and `call_get` blocks
+    /// until the answer is ready.
+    ///
+    /// There is deliberately no `loop` member any more.  It read as the obvious way to defer work
+    /// and was the wrong one, since the loop's own queue outlives every Core member that these
+    /// jobs reach through `this`.  Anything genuinely wanting the loop says `core.loop()`.
+    template <typename F>
+    void call(F&& f) {
+        _jq.call(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_soon(F&& f) {
+        _jq.call_soon(std::forward<F>(f));
+    }
+    template <typename F>
+    void call_later(std::chrono::microseconds delay, F&& f) {
+        _jq.call_later(delay, std::forward<F>(f));
+    }
+    /// By value, for the same reason as Core's: a reference returned here has escaped the loop.
+    template <typename F>
+    auto call_get(F&& f) {
+        return _jq.call_get(std::forward<F>(f));
+    }
+
     // Client's own queue on Core's loop, rather than the loop's shared one, so that work deferred
     // here is *cancelled* if the Client is destroyed with it still outstanding.  Running it instead
     // would mean reporting a change to the subscribers of a Client that is going away, against a
     // Core whose database is already being torn down.
     //
+    // **Everything this class defers must go here**, not on `loop`.  The loop's own queue is not
+    // emptied until `~Loop`, which is the last thing `~Core` does, so a job left on it keeps being
+    // drained by the loop thread throughout the destruction of every Core member -- and every one
+    // of these jobs holds `this` and reaches through it into those members.  Stopping this queue
+    // is the first thing `~Client` does, while all of that is still whole.
+    //
+    // `loop.call_get()` is the exception and stays as it is: the calling thread is blocked inside
+    // it, so there is no window in which the caller can have gone away.
+    //
     // Declared after `core` -- the one thing that belongs below it -- because a JobQueue needs its
     // loop alive in order to stop, so it has to be destroyed while Core still exists.
-    oxen::quic::JobQueue _jq{loop};
+    oxen::quic::JobQueue _jq{core.loop()};
 };
 
 }  // namespace session::client
