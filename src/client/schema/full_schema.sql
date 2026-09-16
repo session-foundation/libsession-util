@@ -412,8 +412,8 @@ CREATE TABLE message_attachments (
     -- to be.  Never cleared, because an attachment url names one upload and is never reissued --
     -- what failed this way is gone rather than currently unreachable.
     --
-    -- Written against the url rather than one row, since two messages quoting the same attachment
-    -- share a transfer and one answer settles it for both.
+    -- Written against the url rather than one row because what failed is the file: every message
+    -- already quoting it is answered at once, and one arriving later starts false.
     unavailable INTEGER NOT NULL DEFAULT 0,
 
     PRIMARY KEY (message, idx)
