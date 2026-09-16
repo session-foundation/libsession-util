@@ -911,44 +911,67 @@ std::optional<int64_t> Client::attachment_cache_limit(await_t) {
 std::vector<AttachmentStatus> Client::_attachment_transfers(
         const std::vector<int64_t>& message_ids) {
     std::vector<AttachmentStatus> out;
+    if (message_ids.empty())
+        return out;
+    out.reserve(message_ids.size());
 
-    for (auto message_id : message_ids) {
-        auto msg = _message(message_id);
-        if (!msg)
-            continue;
+    auto c = core.database().conn();
 
-        for (const auto& a : msg->attachments) {
-            // An outgoing attachment that has not uploaded has nothing on a server to fetch, and
-            // _attachment_pointer would throw for it.  Left out rather than reported idle.
-            if (!a.uploaded)
-                continue;
+    // One query for the page, as `load_attachments` does and for the same reason.  What this needs
+    // is a url and a conversation; reaching them a message at a time meant a full hydration --
+    // bodies, replies resolved a level deep -- for two fields, and then a second query per
+    // attachment whose own join it threw away.
+    //
+    // `url IS NOT NULL` is the definition of `Attachment::uploaded`, so it is also the test for
+    // there being anything to fetch: an attachment nobody could fetch is left out rather than
+    // reported idle, and asking in SQL means no row rather than a thrown exception per attachment.
+    auto st = c.prepared_st(
+            R"(
+        SELECT a.message, a.idx, a.url, m.conversation FROM message_attachments a
+        JOIN messages m ON m.id = a.message
+        WHERE a.url IS NOT NULL AND a.message IN ({}) ORDER BY a.message, a.idx
+    )"_format(sqlite::placeholders(message_ids.size())));
 
-            std::string url;
-            try {
-                url = _attachment_pointer(message_id, a.index).url;
-            } catch (const std::exception&) {
-                // A sender who described an attachment but gave no url.  Nothing to fetch, so
-                // nothing to say about it.
-                continue;
-            }
+    int n = 1;
+    for (auto id : message_ids)
+        st->bind(n++, id);
 
-            AttachmentStatus status{msg->conversation, message_id, a.index};
+    struct Row {
+        int64_t message_id, idx, conversation;
+        std::string url;
+    };
+    std::vector<Row> rows;
 
-            auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url);
-            // The file rather than its index row: what decides whether the next fetch answers
-            // from disk is the file being there, and the two can disagree until a sweep.
-            std::error_code ignored;
-            status.cached = !_cache_dir.empty() && std::filesystem::exists(file, ignored);
+    // Read out before anything else is asked of the connection: resolving a conversation is itself
+    // a query, and this one is still stepping.
+    for (auto&& [message_id, idx, url, conversation] :
+         sqlite::IterableStatementWrapper<int64_t, int64_t, std::string, int64_t>{std::move(st)})
+        rows.push_back({message_id, idx, conversation, std::move(url)});
 
-            auto name = file.filename().string();
-            if (auto found = _in_flight.find(name); found != _in_flight.end()) {
-                status.transferring = true;
-                status.done = found->second.done;
-                status.total = found->second.total;
-            }
+    // A page is normally one conversation, so its id is resolved once rather than per attachment.
+    std::unordered_map<int64_t, ConversationId> conversations;
 
-            out.push_back(std::move(status));
+    for (auto& row : rows) {
+        auto known = conversations.find(row.conversation);
+        if (known == conversations.end())
+            known = conversations.emplace(row.conversation, conversation_id_at(c, row.conversation))
+                            .first;
+
+        AttachmentStatus status{known->second, row.message_id, static_cast<size_t>(row.idx)};
+
+        auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, row.url);
+        // The file rather than its index row: what decides whether the next fetch answers from
+        // disk is the file being there, and the two can disagree until a sweep.
+        std::error_code ignored;
+        status.cached = !_cache_dir.empty() && std::filesystem::exists(file, ignored);
+
+        if (auto found = _in_flight.find(file.filename().string()); found != _in_flight.end()) {
+            status.transferring = true;
+            status.done = found->second.done;
+            status.total = found->second.total;
         }
+
+        out.push_back(std::move(status));
     }
 
     return out;
