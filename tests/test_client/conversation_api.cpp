@@ -34,7 +34,7 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
 
     // All of it reaches the Contacts config, which is what makes it follow the account rather than
     // the device.
-    auto entry = c->core.configs.contacts().get(them);
+    auto entry = in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); });
     REQUIRE(entry);
     CHECK(entry->notifications == config::notify_mode::disabled);
     CHECK(entry->mute_until == 1700000000);
@@ -46,12 +46,45 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     // Clearing the nickname falls back to what they call themselves.
     c->dm(id, await)->set_nickname("", await);
     CHECK(convo().dm()->nickname.empty());
-    CHECK_FALSE(c->core.configs.contacts().get(them)->nickname == "Bilbo");
+    CHECK_FALSE(in_configs(*c, [&](auto& cfg) {
+                    return cfg.contacts().get(them);
+                })->nickname == "Bilbo");
 
     // A timer without a mode expires nothing, so it is not stored as though it were a setting.
     c->conversation(id, await)->set_expiry(config::expiration_mode::none, 3600s, await);
     CHECK(convo().exp_mode() == config::expiration_mode::none);
     CHECK(convo().exp_timer() == 0s);
+}
+
+TEST_CASE("Client: a nickname too long to sync is refused rather than stored", "[client][convos]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'a');
+    auto id = dm_from_hex(them);
+    c->open_dm(id, await);
+
+    c->dm(id, await)->set_nickname("Bilbo", await);
+
+    // One byte over is enough.  What must not happen is the row being written and the config then
+    // refusing it: a sync rebuilds the whole entry from that row, so it would never carry again --
+    // taking every later change to this contact with it.
+    std::string too_long(config::contact_info::MAX_NAME_LENGTH + 1, 'x');
+    REQUIRE(config::validate_contact_name(too_long).has_value());
+    CHECK_THROWS_AS(c->dm(id, await)->set_nickname(too_long, await), std::invalid_argument);
+
+    // Nothing moved: not the database, and not the config it is reconciled into.
+    CHECK(c->conversation(id, await)->dm()->nickname == "Bilbo");
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname == "Bilbo");
+
+    // And the contact still syncs, which is the part that would have been lost quietly.
+    c->set_blocked(id, true, await);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->blocked);
+
+    // Exactly at the limit is fine: the check is the config's own, not a stricter one.
+    std::string at_limit(config::contact_info::MAX_NAME_LENGTH, 'y');
+    CHECK_FALSE(config::validate_contact_name(at_limit).has_value());
+    c->dm(id, await)->set_nickname(at_limit, await);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
+          at_limit);
 }
 
 TEST_CASE("Client: settings from another device reach the conversation", "[client][configs]") {
@@ -203,12 +236,16 @@ TEST_CASE("Client: auto-download is per conversation and stays here", "[client][
     // Device-local: nothing about it reaches the config that follows the account.  Checked by
     // deriving the contact outward and finding the config unchanged -- if this were synced, the
     // setting above would have dirtied it.
-    auto& contacts = c->core.configs.contacts();
+    // Read each time rather than binding the config: a reference to one is only ours for as long
+    // as the excursion onto the loop lasts.
+    auto contacts_dirty = [&] {
+        return in_configs(*c, [](auto& cfg) { return cfg.contacts().needs_push(); });
+    };
     TestHelper::sync_contact(*c.client, id);
-    auto before_push = contacts.needs_push();
+    auto before_push = contacts_dirty();
     c->conversation(id, await)->set_auto_download(AutoDownload::all, await);
     TestHelper::sync_contact(*c.client, id);
-    CHECK(contacts.needs_push() == before_push);
+    CHECK(contacts_dirty() == before_push);
 
     // And it survives a restart, being a stored property rather than a session's opinion.
     c.reopen();

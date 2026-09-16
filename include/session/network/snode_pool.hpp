@@ -35,6 +35,13 @@ namespace config {
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint8_t cache_min_num_refresh_presence_to_include_node;
         uint16_t cache_node_strike_threshold;
+
+        /// Storage server version at or above which a swarm member is preferred, or nullopt to
+        /// treat every member alike.
+        ///
+        /// Deliberately a version rather than a reason: what the version *means* belongs to
+        /// whoever sets this, and this layer only has to order by it.
+        std::optional<std::array<uint16_t, 3>> prefer_min_version;
     };
 }  // namespace config
 
@@ -86,6 +93,17 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
+
+    /// Replaces the cached swarm for an account with one a storage server told us authoritatively,
+    /// as a 421 body does.
+    ///
+    /// Overrides the locally computed membership, which is only as fresh as the snode cache
+    /// (`cache_expiration`, hours) and is exactly what a 421 says was wrong.  The override lives
+    /// until the next snode cache refresh recomputes everything.
+    virtual void set_swarm(
+            session::network::x25519_pubkey swarm_pubkey,
+            swarm::swarm_id_t swarm_id,
+            std::vector<service_node> nodes);
 
     virtual std::vector<service_node> get_unused_nodes(
             size_t count, const std::vector<service_node>& exclude = {});

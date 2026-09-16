@@ -113,10 +113,11 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
     }
     TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
-    auto outer_msg = linker->devices.build_link_request().message;
+    auto outer_msg = linker->devices.build_link_request(await).message;
 
     sent.callback(
             true, false, 200, {}, make_response(*sent.request.body, 21, outer_msg, "hash1").dump());
+    TestHelper::drain(*core);
 
     // Verify last_hash was stored under this specific node's pubkey.
     CHECK(TestHelper::namespace_last_hash(*core, 21, mock_net->current_node.remote_pubkey) ==
@@ -159,6 +160,7 @@ TEST_CASE(
             {},
             make_response(*mock_net->sent_requests[0].request.body, 21, {std::byte{0x01}}, "xyz")
                     .dump());
+    TestHelper::drain(*c);
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_a.remote_pubkey) == "xyz");
     CHECK_FALSE(TestHelper::namespace_last_hash(*c, 21, node_b.remote_pubkey).has_value());
 
@@ -189,6 +191,7 @@ TEST_CASE(
             {},
             make_response(*mock_net->sent_requests[0].request.body, 21, {std::byte{0x02}}, "zyx")
                     .dump());
+    TestHelper::drain(*c);
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_b.remote_pubkey) == "zyx");
     // A's hash is untouched.
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_a.remote_pubkey) == "xyz");
@@ -235,7 +238,7 @@ TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[co
         std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
     }
     TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
-    auto outer_msg = linker->devices.build_link_request().message;
+    auto outer_msg = linker->devices.build_link_request(await).message;
 
     TestHelper::poll(*core);
     REQUIRE(mock_net->sent_requests.size() == 1);
@@ -245,6 +248,7 @@ TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[co
             200,
             {},
             make_response(*mock_net->sent_requests[0].request.body, 21, outer_msg, "hash1").dump());
+    TestHelper::drain(*core);
 
     REQUIRE(called);
     CHECK(!hash_during_callback);
@@ -287,7 +291,7 @@ TEST_CASE("Poll: a truncated namespace is continued before it is reported final"
         std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
     }
     TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
-    auto outer_msg = linker->devices.build_link_request().message;
+    auto outer_msg = linker->devices.build_link_request(await).message;
 
     TestHelper::poll(*core);
     REQUIRE(mock_net->sent_requests.size() == 1);
@@ -296,10 +300,12 @@ TEST_CASE("Poll: a truncated namespace is continued before it is reported final"
     auto resp = make_response(first, 21, outer_msg, "hash1");
     set_more(resp, first, 21);
 
-    // Copied out before invoking: the continuation is sent from inside this call, which appends to
-    // `sent_requests` and can reallocate the vector the callback itself lives in.
+    // Copied out before invoking: handling the response appends to `sent_requests` -- the batch is
+    // not final, so a continuation goes out -- which can reallocate the vector the callback itself
+    // lives in.
     auto reply = mock_net->sent_requests[0].callback;
     reply(true, false, 200, {}, resp.dump());
+    TestHelper::drain(*core);
 
     // The request is stored, but the batch was not final, so nothing has been reported yet.
     CHECK(calls == 0);
@@ -313,6 +319,7 @@ TEST_CASE("Poll: a truncated namespace is continued before it is reported final"
     // final.
     auto reply2 = mock_net->sent_requests[1].callback;
     reply2(true, false, 200, {}, make_empty_response(second).dump());
+    TestHelper::drain(*core);
 
     CHECK(calls == 1);
 }
@@ -330,6 +337,7 @@ TEST_CASE("Poll: `more` with nothing returned does not continue", "[core][poll]"
 
     auto reply = mock_net->sent_requests[0].callback;
     reply(true, false, 200, {}, resp.dump());
+    TestHelper::drain(*core);
 
     // There is no new hash to move the cursor to, so another round would ask the same question.
     CHECK(mock_net->sent_requests.size() == 1);
