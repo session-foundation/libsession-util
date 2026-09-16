@@ -1,3 +1,5 @@
+#include <fstream>
+
 #include "../../src/client/download_cache.hpp"
 #include "../utils.hpp"
 #include "common.hpp"
@@ -1425,6 +1427,104 @@ TEST_CASE("Client: the cache evicts least recently used", "[client][auto][evict]
         if (!e.path().filename().string().ends_with(cache::PARTIAL_SUFFIX))
             on_disk++;
     CHECK(static_cast<size_t>(rows) == on_disk);
+}
+
+TEST_CASE(
+        "Client: a page answers for every attachment it can fetch and no others",
+        "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(400, std::byte{9});
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+
+    // Two attachments on one message, so the answer is longer than the list of ids it was asked
+    // about and every row is addressed by its own index rather than by its message's.
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(6000),
+            "p1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                for (int i = 0; i < 2; i++) {
+                    auto* a = data.add_attachments();
+                    a->set_id(static_cast<uint64_t>(i + 1));
+                    a->set_url("http://fs.example/file/two{}#d"_format(i));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                }
+            },
+            61);
+    // A second message, so the conversation is resolved once and reused rather than per row.
+    deliver(*c, peer, "hello", from_epoch_ms(6001), "p2", "", std::nullopt, nullptr, 62);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 2);
+
+    std::vector<int64_t> ids;
+    for (const auto& m : msgs)
+        ids.push_back(m.id);
+
+    auto status = c->attachment_transfers(ids, await);
+    REQUIRE(status.size() == 2);
+    for (const auto& st : status) {
+        CHECK(st.conversation_id == convo);
+        CHECK_FALSE(st.cached);
+        CHECK_FALSE(st.transferring);
+    }
+    CHECK(status[0].index == 0);
+    CHECK(status[1].index == 1);
+    // The message with no attachments contributes nothing rather than an empty answer.
+    CHECK(status[0].message_id == status[1].message_id);
+}
+
+TEST_CASE(
+        "Client: an attachment with nothing to fetch is not reported at all",
+        "[client][attachments]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    // A sender who described an attachment and gave no url.  There is nothing to fetch, which is
+    // not the same as nothing happening to it: a row offering to fetch this would be offering
+    // something that cannot be done.
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(7000),
+            "n1",
+            "",
+            std::nullopt,
+            [](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_contenttype("image/png");
+                a->set_size(100);
+            },
+            71);
+    sync(*c);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto msgs = c->conversation(convo, await)->messages(await);
+    REQUIRE(msgs.size() == 1);
+
+    // Whether such a pointer is kept at all is libsession's own business; what this pins is that
+    // nothing offers to fetch it.
+    for (const auto& a : msgs[0].attachments)
+        CHECK_FALSE(a.uploaded);
+    CHECK(c->attachment_transfers({msgs[0].id}, await).empty());
 }
 
 TEST_CASE("Client: a file the server does not have is recorded as gone", "[client][attachments]") {

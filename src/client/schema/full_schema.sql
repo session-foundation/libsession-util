@@ -418,3 +418,8 @@ CREATE TABLE message_attachments (
 
     PRIMARY KEY (message, idx)
 ) STRICT;
+
+-- What a failed download marks, and what the status of a page's attachments is read through: both
+-- ask by url, which is otherwise unindexed -- the primary key is (message, idx).  Partial, because
+-- a row with no url is one there is nothing to fetch for and no query looks for it.
+CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;

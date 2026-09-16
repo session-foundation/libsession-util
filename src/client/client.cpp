@@ -931,10 +931,11 @@ void Client::_mark_attachment_unavailable(const std::string& url) {
         auto c = core.database().conn();
 
         // Read before the write, because afterwards nothing matches the predicate any more.  By
-        // url rather than by row: two messages quoting one attachment share the transfer that
-        // discovered this, so the answer settles it for both.  A row already marked is not
-        // collected, which is what keeps a repeated failure from re-announcing anything -- this is
-        // reached from a progress report, which arrives repeatedly.
+        // url rather than by row, so every message that already quotes this file is answered at
+        // once rather than each discovering it in turn -- but only those: a message carrying the
+        // same url that arrives afterwards is not marked, and finds out for itself the same way.
+        // A row already marked is not collected, which is what keeps a repeated failure from
+        // re-announcing anything -- this is reached from a report, which arrives repeatedly.
         std::vector<std::pair<int64_t, int64_t>> affected;
         {
             auto st = c.prepared_bind(
@@ -1229,14 +1230,8 @@ void Client::_fetch_cached(
             },
             // Onto the loop before touching the registry -- this arrives on the network thread, and
             // `_in_flight` is ours.
-            [this, name, url = target.url, attachment = target.dir == cache::ATTACHMENT_DIR](
-                    int64_t done, int64_t total, std::optional<int> r) {
-                loop.call([this, name, url, attachment, done, total, r] {
-                    // Recorded before anyone is told, so a display reacting to the report finds
-                    // the row already saying the file is not coming.
-                    if (attachment && r && permanently_gone(*r))
-                        _mark_attachment_unavailable(url);
-
+            [this, name](int64_t done, int64_t total, std::optional<int> r) {
+                loop.call([this, name, done, total, r] {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -4322,8 +4317,11 @@ void Client::_download_decrypted(
         }
     };
 
-    req.on_complete = [state,
+    req.on_complete = [this,
+                       state,
                        scheme,
+                       kind,
+                       url,
                        on_plain,
                        on_progress,
                        on_done,
@@ -4332,6 +4330,16 @@ void Client::_download_decrypted(
                        claimed_size](
                               std::variant<network::file_metadata, int16_t> result, bool timeout) {
         auto fail = [&](std::string why, int code) {
+            // Here rather than in either caller: `_fetch_cached` and `_save_attachment` both end
+            // up in this function and would otherwise have to remember to do it separately -- a
+            // save of a file the server has dropped is exactly the case that was missed.
+            //
+            // Queued before the report, so that by the time a display reacts to the failure the
+            // row already says the file is not coming.  Both of the callbacks below reach the
+            // application through the loop as well, so the order holds.
+            if (kind == DownloadKind::attachment && permanently_gone(code))
+                loop.call([this, url] { _mark_attachment_unavailable(url); });
+
             if (on_progress)
                 on_progress(0, 0, code);
             on_done(std::move(why));
