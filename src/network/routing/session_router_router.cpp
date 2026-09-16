@@ -9,6 +9,7 @@
 #include <oxen/log/format.hpp>
 #include <session/router.hpp>
 
+#include "session/crypto/ed25519.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/response_parser.hpp"
@@ -715,6 +716,13 @@ static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_vie
 
     std::optional<ed25519_pubkey> result{std::in_place};
     oxenc::from_base32z(b32z.begin(), b32z.end(), result->begin());
+
+    // The length and alphabet checks above only establish that the label decodes to 32 bytes; the
+    // address names a router by its Ed25519 pubkey, so 32 bytes that are not one do not name
+    // anything.  The caller hands this straight to a file client as the remote's identity key.
+    if (!ed25519::is_valid_pubkey(*result))
+        return std::nullopt;
+
     return result;
 }
 

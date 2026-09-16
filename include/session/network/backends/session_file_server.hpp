@@ -32,9 +32,11 @@ struct FileServer {
     std::string host;
     uint16_t port;
 
-    // The server's X25519 pubkey, used to encrypt requests to it as an onion request destination.
-    // Note this is a different key from the Ed25519 one its QUIC endpoint is identified by.  It
-    // also doubles as the server's identity for our purposes: a config whose pubkey differs from
+    // The server's Ed25519 pubkey -- the same key its QUIC endpoint is identified by, NOT the
+    // X25519 form.  Onion requests derive the X25519 form from this, so storing the derived value
+    // here instead makes every request to the server fail: it is not a valid Ed25519 point.
+    //
+    // It also doubles as the server's identity for our purposes: a config whose pubkey differs from
     // the built-in one is treated as a custom server, which is what puts a `p=` fragment in
     // generated URLs and stops the built-in QUIC endpoint from being assumed.
     std::string pubkey_hex;

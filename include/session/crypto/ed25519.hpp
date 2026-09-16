@@ -199,6 +199,15 @@ void sk_to_pk(std::span<std::byte, 32> pk, const PrivKeySpan& sk);
 /// Return-value form.
 b32 sk_to_pk(const PrivKeySpan& sk);
 
+/// Returns true if `pk` is a usable Ed25519 public key: a canonical encoding of a point that is on
+/// the curve and in its prime-order subgroup.
+///
+/// Use this to validate a key that arrived from outside (a peer, a url, a server response) before
+/// doing anything with it.  Only a small fraction of 32-byte values satisfy this, so it rejects
+/// almost all garbage -- but note that a well-formed key belonging to someone else passes just as
+/// readily, so this answers "could this be a public key" and never "is this the right key".
+bool is_valid_pubkey(std::span<const std::byte, 32> pk);
+
 /// Converts an Ed25519 public key to an X25519 public key.
 /// Throws std::runtime_error if the key is invalid.
 /// Write-to-output form: result written into `out`.

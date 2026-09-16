@@ -3,6 +3,7 @@
 #include <fmt/ranges.h>
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
+#include <oxenc/hex.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -11,6 +12,7 @@
 #include "../session_network_internal.hpp"
 #include "session/blinding.hpp"
 #include "session/clock.hpp"
+#include "session/crypto/ed25519.hpp"
 #include "session/network/backends/backend_util.hpp"
 #include "session/network/backends/session_file_server.h"
 #include "session/network/key_types.hpp"
@@ -34,24 +36,18 @@ const config::FileServer DEFAULT_CONFIG = {
         .scheme = "http",
         .host = "filev2.getsession.org",
         .port = 80,
-        // ED25519. `p=` in a download url carries the Ed form on every client, and the X25519 form
-        // for onion requests is derived from it.
-        //
         // NOT the file server's X25519-only key (`da21e1d886c6...ee59`), which cannot be used here:
         // it has no Ed private key and cannot be given one, since deriving Ed from X would mean
         // reversing a hash. A file server has to publish a real Ed keypair to be addressable this
         // way.
-        .pubkey_hex = "b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371",
+        .pubkey_hex = oxenc::to_hex(QUIC_FS_ED_PUBKEY_MAINNET),
         .max_file_size = 10'000'000};
 
-// Testnet file server config.  The X25519 pubkey is derived from the Ed25519 key
-// 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602 via
-// crypto_sign_ed25519_pk_to_curve25519.
 const config::FileServer TESTNET_CONFIG = {
         .scheme = "http",
         .host = "superduperfiles.oxen.io",
         .port = 80,
-        .pubkey_hex = "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d",
+        .pubkey_hex = oxenc::to_hex(QUIC_FS_ED_PUBKEY_TESTNET),
         .max_file_size = 10'000'000};
 
 constexpr std::string_view HEADER_CONTENT_TYPE = "Content-Type";
@@ -69,11 +65,12 @@ constexpr std::string_view LEGACY_ENDPOINT_FILE_INDIVIDUAL = "files/{}";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {scheme}://{host}/file/{file_id}(?:#p={customPubkey})(?:d)
+    // `p=` is the server's Ed25519 pubkey, present only for a server other than the built-in one.
     // Examples:
     //   https://example.com/file/abc123
-    //   https://example.com/file/abc123#p=da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59
+    //   https://example.com/file/abc123#p=929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602
     //   https://example.com/file/abc123#d
-    //   https://example.com/file/abc123#p=abc123&d
+    //   https://example.com/file/abc123#p=929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602&d
     DownloadInfo info{};
 
     auto match = backends::match_endpoint(ENDPOINT_FILE_INDIVIDUAL, url);
@@ -124,13 +121,26 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     for (auto fragment : split(fragments, "&", true)) {
         if (fragment == backends::FRAGMENT_STREAM_ENCRYPTION)
             info.wants_stream_decryption = true;
-        else if (
-                fragment.starts_with(fmt::format("{}=", backends::FRAGMENT_PUBKEY)) &&
-                fragment.size() == 66 &&  // 'p=' + pubkey
-                oxenc::is_hex(fragment.substr(2)) &&
-                fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
-            info.custom_pubkey_hex = fragment.substr(2);
-        else if (fragment.starts_with("{}="_format(backends::FRAGMENT_SROUTER))) {
+        else if (fragment.starts_with("{}="_format(backends::FRAGMENT_PUBKEY))) {
+            // Unlike the other fragments a bad pubkey cannot just be skipped: dropping it leaves
+            // the url's host in place but falls back to our own file server's key, so the request
+            // would go out encrypted to a key the host it is addressed to does not hold.  A url we
+            // cannot address is not a url we can use, so reject the whole thing.
+            auto pubkey_hex = fragment.substr(2);
+            if (pubkey_hex.size() != 64 || !oxenc::is_hex(pubkey_hex))
+                return std::nullopt;
+
+            ed25519_pubkey pubkey;
+            oxenc::from_hex(pubkey_hex.begin(), pubkey_hex.end(), pubkey.begin());
+
+            // Hex of the right length still leaves ~94% of values off the curve, and the ones that
+            // land on it but outside the prime-order subgroup are not keys either.
+            if (!ed25519::is_valid_pubkey(pubkey))
+                return std::nullopt;
+
+            if (pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex)
+                info.custom_pubkey_hex = std::string{pubkey_hex};
+        } else if (fragment.starts_with("{}="_format(backends::FRAGMENT_SROUTER))) {
             // sr=address or sr=address:port (port defaults to QUIC_DEFAULT_PORT if omitted)
             auto parts = split(fragment.substr(backends::FRAGMENT_SROUTER.size() + 1), ":");
             if (parts.size() <= 2 && !parts[0].empty()) {
@@ -168,7 +178,11 @@ static uint16_t default_port_for_scheme(std::string_view scheme) {
 
 std::string generate_download_url(
         std::string_view file_id, const config::FileServer& config, bool stream_encrypted) {
-    const auto has_custom_pubkey = (config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex);
+    // An empty pubkey means "no custom server", not "a custom server with no key": emitting `p=`
+    // for it produces a url that names a key it does not carry, which the parser cannot accept.
+    // Other clients read an empty custom pubkey the same way.
+    const auto has_custom_pubkey = !config.pubkey_hex.empty() &&
+                                   config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex;
 
     // Omitted when the scheme already implies it, so urls for the default file server are
     // byte-identical to those any other client produces for it.

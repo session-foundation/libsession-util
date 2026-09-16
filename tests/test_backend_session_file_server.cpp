@@ -1,6 +1,7 @@
 #include <fmt/format.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <session/network/backends/session_file_server.hpp>
 
 #include "utils.hpp"
@@ -37,13 +38,13 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
 
     // Extracts the custom pubkey
     parsed_download_url = file_server::parse_download_url(
-            "https://example.com/file/abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+            "https://example.com/file/abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->scheme == "https"sv);
     CHECK(parsed_download_url->host == "example.com"sv);
     CHECK(parsed_download_url->file_id == "abc123"sv);
     CHECK(parsed_download_url->custom_pubkey_hex ==
-          "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+          "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
     // Ignores the pubkey if it matches the default one
@@ -58,24 +59,24 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
 
     // Handles both fragments
     parsed_download_url = file_server::parse_download_url(
-            "https://example.com/file/abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d"sv);
+            "https://example.com/file/abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29&d"sv);
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->scheme == "https"sv);
     CHECK(parsed_download_url->host == "example.com"sv);
     CHECK(parsed_download_url->file_id == "abc123"sv);
     CHECK(parsed_download_url->custom_pubkey_hex ==
-          "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+          "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     CHECK(parsed_download_url->wants_stream_decryption);
 
     // Handles both fragments in the opposite order
     parsed_download_url = file_server::parse_download_url(
-            "https://example.com/file/abc123#d&p=0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+            "https://example.com/file/abc123#d&p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->scheme == "https"sv);
     CHECK(parsed_download_url->host == "example.com"sv);
     CHECK(parsed_download_url->file_id == "abc123"sv);
     CHECK(parsed_download_url->custom_pubkey_hex ==
-          "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+          "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     CHECK(parsed_download_url->wants_stream_decryption);
 
     // A valueless `d=` is NOT the stream-encryption fragment.  Session Desktop builds its fragment
@@ -87,10 +88,10 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
     parsed_download_url = file_server::parse_download_url(
-            "https://example.com/file/abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d="sv);
+            "https://example.com/file/abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29&d="sv);
     REQUIRE(parsed_download_url.has_value());
     CHECK(parsed_download_url->custom_pubkey_hex ==
-          "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
+          "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv);
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
     // Doesn't have an issue with a legacy url
@@ -103,18 +104,45 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
     CHECK_FALSE(parsed_download_url.has_value());
 }
 
+TEST_CASE("Download url rejects an unusable pubkey", "[backend][session_file_server]") {
+    // `p=` says which key to encrypt the request to, so a url carrying one we cannot use is not a
+    // url we can fall back on: ignoring the fragment would keep the url's host but quietly
+    // substitute our own file server's key, sending the request to a host that cannot read it.
+    // What makes a key usable is [ed25519][pubkey]'s subject; this only has to show the check is
+    // reached, alongside the shapes the url parser turns away before the key is even decoded.
+    auto rejected = GENERATE(
+            // Well-formed hex of the right length, but not a point on the curve
+            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv,
+            // Too short, too long, not hex, and absent -- `p=` with nothing after it
+            "abc123"sv,
+            "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da2900"sv,
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"sv,
+            ""sv);
+
+    INFO("pubkey: " << rejected);
+    CHECK_FALSE(file_server::parse_download_url(
+                        fmt::format("https://example.com/file/abc123#p={}", rejected))
+                        .has_value());
+
+    // A well-formed key is still accepted, so the check above is rejecting the key and not the url
+    CHECK(file_server::parse_download_url(
+                  "https://example.com/file/abc123#p="
+                  "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv)
+                  .has_value());
+}
+
 TEST_CASE("Download url generation", "[backend][session_file_server]") {
     auto url = file_server::generate_download_url(
             "abc123"sv,
             {"http",
              "example.com",
              123,
-             "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
+             "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
              12345},
             true);
     CHECK(url ==
           "http://example.com:123/file/"
-          "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d");
+          "abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29&d");
 
     // Omits the stream encryption fragment for a file encrypted the legacy way
     url = file_server::generate_download_url(
@@ -122,12 +150,12 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
             {"http",
              "example.com",
              123,
-             "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
+             "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
              12345},
             false);
     CHECK(url ==
           "http://example.com:123/file/"
-          "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000");
+          "abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29");
 
     // Omits the pubkey when it matches the default pubkey
     url = file_server::generate_download_url(
@@ -199,13 +227,13 @@ TEST_CASE("Download url generation", "[backend][session_file_server]") {
             {"http",
              "example.com",
              123,
-             "0123456789abcdef0123456789abcdef00000000000000000000000000000000",
+             "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29",
              12345,
              file_server::SRouterTarget{"somewhere.sesh", 4567}},
             true);
     CHECK(url ==
           "http://example.com:123/file/"
-          "abc123#p=0123456789abcdef0123456789abcdef00000000000000000000000000000000&d"
+          "abc123#p=3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29&d"
           "&sr=somewhere.sesh:4567");
 }
 
@@ -249,7 +277,7 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     // to 80/443, which returns a response rather than an error -- so it surfaced as an
     // undecryptable attachment, far from its cause.
     constexpr auto custom_pubkey =
-            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv;
+            "3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29"sv;
     auto url = file_server::generate_download_url(
             "abc123"sv, {"http", "192.168.1.2", 8000, std::string{custom_pubkey}, 12345}, false);
     CHECK(url == fmt::format("http://192.168.1.2:8000/file/abc123#p={}", custom_pubkey));
@@ -287,13 +315,17 @@ TEST_CASE("Download url port round trip", "[backend][session_file_server]") {
     CHECK(*parsed->port == 8000);
 }
 
-TEST_CASE("Default file server onion pubkey", "[backend][session_file_server]") {
+TEST_CASE("Built-in file server onion pubkeys", "[backend][session_file_server]") {
     // A download url carries the file server's ED25519 key, while an onion request needs the X25519
     // form, so every request derives one from the other. Pinned here because the two forms are 32
     // bytes either way: using the wrong one produces a perfectly well-formed key that simply never
     // decrypts, and the only symptom is the file server rejecting the request without naming a key.
-    const auto derived =
-            compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex));
+    // Storing the derived form in `pubkey_hex` is louder but no easier to spot from the outside: it
+    // is not a valid Ed25519 point, so the derivation throws and every upload fails before it ever
+    // reaches the network.
+    CHECK(compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::DEFAULT_CONFIG.pubkey_hex))
+                  .hex() == "09324794aa9c11948189762d198c618148e9136ac9582068180661208927ef34");
 
-    CHECK(derived.hex() == "09324794aa9c11948189762d198c618148e9136ac9582068180661208927ef34");
+    CHECK(compute_x25519_pubkey(ed25519_pubkey::from_hex(file_server::TESTNET_CONFIG.pubkey_hex))
+                  .hex() == "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d");
 }
