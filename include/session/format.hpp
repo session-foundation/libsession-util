@@ -10,7 +10,9 @@
 #include <concepts>
 #include <oxen/log/format.hpp>
 #include <ranges>
+#include <session/util.hpp>
 #include <span>
+#include <string>
 #include <type_traits>
 
 namespace session {
@@ -40,6 +42,18 @@ inline namespace literals {
 }  // namespace session
 
 namespace fmt {
+
+/// Formats a byte count with an SI prefix: "12.3 kB".  See `session::human_size`.
+///
+/// A formatter specialization rather than fmt's `format_as` hook, as everywhere else here: the
+/// hook only reaches non-enum types from fmt 10, and a specialization is also what `std::format`
+/// takes, should we ever want it.
+template <>
+struct formatter<session::human_size, char> : formatter<std::string> {
+    auto format(session::human_size s, format_context& ctx) const {
+        return formatter<std::string>::format(s.str(), ctx);
+    }
+};
 
 // Disable fmt's generic range formatter for byte spans so that our byte_spannable formatter takes
 // precedence (avoids ambiguity when fmt/ranges.h is also included).

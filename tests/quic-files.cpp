@@ -15,6 +15,7 @@
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/network_opt.hpp>
 #include <session/network/session_network.hpp>
+#include <session/format.hpp>
 #include <session/util.hpp>
 
 #include "dns_utils.hpp"

@@ -388,12 +388,15 @@ std::vector<std::byte> zstd_compress(
 std::optional<std::vector<std::byte>> zstd_decompress(
         std::span<const std::byte> data, size_t max_size = 0);
 
-/// Wrapper for formatting byte sizes with SI prefixes via fmt/oxen-logging.  Provides a
-/// `format_as` friend function discoverable via ADL, so no fmt headers are needed here.
+/// Wrapper for formatting byte sizes with SI prefixes via fmt/oxen-logging.  The fmt formatter
+/// lives in session/format.hpp, alongside the others, so that no fmt headers are needed here;
+/// formatting one of these means including that header.
 /// Usage: `log::info(cat, "Size: {}", human_size{12345});` => "Size: 12.3 kB"
 struct human_size {
     int64_t bytes;
-    friend std::string format_as(human_size s);
+
+    /// "12.3 kB", which is what the formatter prints.
+    std::string str() const;
 };
 
 /// NTTP helper struct for the `_bytes` user-defined literal.
