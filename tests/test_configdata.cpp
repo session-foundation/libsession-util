@@ -1,11 +1,11 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
-#include <sodium/crypto_sign.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <session/config.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/hash.hpp>
 #include <session/util.hpp>
 
 #include "session/bt_merge.hpp"
@@ -98,6 +98,8 @@ TEST_CASE("config pruning", "[config][prune]") {
                       });
 }
 
+namespace {
+
 // shortcut to access a nested dict
 auto& d(config::dict_value& v) {
     return std::get<config::dict>(v);
@@ -107,12 +109,7 @@ auto& s(config::dict_value& v) {
     return std::get<config::set>(v);
 }
 
-std::vector<unsigned char> blake2b(std::span<const unsigned char> data) {
-    std::vector<unsigned char> result;
-    result.resize(32);
-    crypto_generichash_blake2b(result.data(), 32, data.data(), data.size(), nullptr, 0);
-    return result;
-}
+}  // namespace
 
 TEST_CASE("config diff", "[config][diff]") {
     MutableConfigMessage m;
@@ -330,20 +327,15 @@ TEST_CASE("config message signature", "[config][signing]") {
     constexpr auto skey_hex =
             "79f530dbf3d81aecc04072933c1b3e3edc0b7d91f2dcc2f7756f2611886cca5f"
             "4384261cdd338f5820ca9cbbe3fc72ac8944ee60d3b795b797fbbf5597b09f17"sv;
-    std::array<unsigned char, 64> secretkey;
+    b64 secretkey;
     oxenc::from_hex(skey_hex.begin(), skey_hex.end(), secretkey.begin());
-    auto signer = [&secretkey](std::span<const unsigned char> data) {
-        std::vector<unsigned char> result;
-        result.resize(64);
-        crypto_sign_ed25519_detached(
-                result.data(), nullptr, data.data(), data.size(), secretkey.data());
-        return result;
+    ed25519::PrivKeySpan sk{secretkey};
+    auto signer = [&sk](std::span<const std::byte> data) {
+        auto sig = ed25519::sign(sk, data);
+        return std::vector<std::byte>{sig.begin(), sig.end()};
     };
-    auto verifier = [&secretkey](
-                            std::span<const unsigned char> data,
-                            std::span<const unsigned char> signature) {
-        return 0 == crypto_sign_verify_detached(
-                            signature.data(), data.data(), data.size(), secretkey.data() + 32);
+    auto verifier = [&sk](std::span<const std::byte> data, std::span<const std::byte> signature) {
+        return signature.size() == 64 && ed25519::verify(signature.first<64>(), sk.pubkey(), data);
     };
 
     m.signer = signer;
@@ -377,15 +369,13 @@ TEST_CASE("config message signature", "[config][signing]") {
 
     auto expected_sig =
             "77267f4de7701ae348eba0ef73175281512ba3f1051cfed22dc3e31b9c699330"
-            "2938863e09bc8b33638161071bd8dc397d5c1d3f674120d08fbb9c64dde2e907"_hexbytes;
-    std::vector<unsigned char> sig(64, '\0');
+            "2938863e09bc8b33638161071bd8dc397d5c1d3f674120d08fbb9c64dde2e907"_hex_b;
     // Sign it ourselves, and check what we get:
-    crypto_sign_ed25519_detached(
-            sig.data(), nullptr, m_signing_value.data(), m_signing_value.size(), secretkey.data());
+    auto sig = ed25519::sign(sk, m_signing_value);
     CHECK(to_hex(sig) == to_hex(expected_sig));
     auto key_bytes = "1:~64:"_bytes;
     auto end_bytes = "e"_bytes;
-    auto m_expected = m_signing_value;
+    auto m_expected = to_vector(m_signing_value);
     m_expected.insert(m_expected.end(), key_bytes.begin(), key_bytes.end());
     m_expected.insert(m_expected.end(), expected_sig.begin(), expected_sig.end());
     m_expected.insert(m_expected.end(), end_bytes.begin(), end_bytes.end());
@@ -398,8 +388,8 @@ TEST_CASE("config message signature", "[config][signing]") {
 
     // Deliberately modify the signature to break it:
     auto m_broken = m_expected;
-    REQUIRE(m_broken[m_broken.size() - 2] == 0x07);
-    m_broken[m_broken.size() - 2] = 0x17;
+    REQUIRE(m_broken[m_broken.size() - 2] == std::byte{0x07});
+    m_broken[m_broken.size() - 2] = std::byte{0x17};
 
     using Catch::Matchers::Message;
     CHECK_THROWS_AS(ConfigMessage(m_broken, verifier), config::signature_error);
@@ -426,7 +416,7 @@ TEST_CASE("config message signature", "[config][signing]") {
             config::config_error,
             Message("Config signature failed verification"));
 
-    auto m_unsigned = m_signing_value;
+    auto m_unsigned = to_vector(m_signing_value);
     m_unsigned.insert(m_unsigned.end(), end_bytes.begin(), end_bytes.end());
     CHECK_THROWS_MATCHES(
             ConfigMessage(m_unsigned, verifier),
@@ -445,10 +435,10 @@ const config::dict data118{
         {"string2", "goodbye"},
 };
 
-const auto h119 = "43094f68c1faa37eff79e1c2f3973ffd5f9d6423b00ccda306fc6e7dac5f0c44"_hexbytes;
-const auto h120 = "e3a237f91014d31e4d30569c4a8bfcd72157804f99b8732c611c48bf126432b5"_hexbytes;
-const auto h121 = "1a7f602055124deaf21175ef3f32983dee7c9de570e5d9c9a0bbc2db71dcb97f"_hexbytes;
-const auto h122 = "46560604fe352101bb869435260d7100ccfe007be5f741c7e96303f02f394e8a"_hexbytes;
+const auto h119 = "43094f68c1faa37eff79e1c2f3973ffd5f9d6423b00ccda306fc6e7dac5f0c44"_hex_b;
+const auto h120 = "e3a237f91014d31e4d30569c4a8bfcd72157804f99b8732c611c48bf126432b5"_hex_b;
+const auto h121 = "1a7f602055124deaf21175ef3f32983dee7c9de570e5d9c9a0bbc2db71dcb97f"_hex_b;
+const auto h122 = "46560604fe352101bb869435260d7100ccfe007be5f741c7e96303f02f394e8a"_hex_b;
 const auto m123_expected = to_vector(
         // clang-format off
         "d"
@@ -489,7 +479,7 @@ const auto m123_expected = to_vector(
          "e"
        "e");
 // clang-format on
-const auto h123 = "d9398c597b058ac7e28e3febb76ed68eb8c5b6c369610562ab5f2b596775d73c"_hexbytes;
+const auto h123 = "d9398c597b058ac7e28e3febb76ed68eb8c5b6c369610562ab5f2b596775d73c"_hex_b;
 
 TEST_CASE("config message example 1", "[config][example]") {
     /// This is the "Ordinary update" example described in docs/api/docs/config-merge-logic.md
@@ -556,7 +546,7 @@ TEST_CASE("config message example 1", "[config][example]") {
 
     CHECK(printable(m118.serialize()) == printable(m118_expected));
 
-    CHECK(to_hex(m118.hash()) == to_hex(blake2b(m118_expected)));
+    CHECK(to_hex(m118.hash()) == to_hex(hash::blake2b<32>(m118_expected)));
 
     // Increment 5 times so that our diffs will be empty.
     auto m123 = m118.increment();
@@ -697,7 +687,7 @@ TEST_CASE("config message empty set/list deserialization", "[config][deserializa
             Message("Failed to parse config file: Data contains an unpruned, empty dict"));
 }
 
-void updates_124(MutableConfigMessage& m) {
+static void updates_124(MutableConfigMessage& m) {
     m.data()["dictA"] = config::dict{
             {"hello", 123},
             {"goodbye", config::set{{123, 456}}},
@@ -719,7 +709,7 @@ void updates_124(MutableConfigMessage& m) {
     m.data().erase("great");
 }
 
-const auto h124 = "8b73f316178765b9b3b37168e865c84bb5a78610cbb59b84d0fa4d3b4b3c102b"_hexbytes;
+const auto h124 = "8b73f316178765b9b3b37168e865c84bb5a78610cbb59b84d0fa4d3b4b3c102b"_hex_b;
 
 TEST_CASE("config message example 2", "[config][example]") {
     /// This is the "Large, but still ordinary, update" example described in
@@ -760,7 +750,7 @@ TEST_CASE("config message example 2", "[config][example]") {
             "l" "i122e" "32:"+to_string(h122)+ "de" "e"
             "l"
               "i123e"
-              "32:"+to_string(blake2b(m123_expected))+
+              "32:"+to_string(hash::blake2b<32>(m123_expected))+
               "d"
                 "4:int0" "1:-"
                 "4:int1" "0:"
@@ -806,8 +796,8 @@ TEST_CASE("config message example 2", "[config][example]") {
     CHECK(to_hex(m.hash()) == to_hex(h124));
 }
 
-const auto h125a = "80f229c3667de6d0fa6f96b53118e097fbda82db3ca1aea221a3db91ea9c45fb"_hexbytes;
-const auto h125b = "ab12f0efe9a9ed00db6b17b44ae0ff36b9f49094077fb114f415522f2a0e98de"_hexbytes;
+const auto h125a = "80f229c3667de6d0fa6f96b53118e097fbda82db3ca1aea221a3db91ea9c45fb"_hex_b;
+const auto h125b = "ab12f0efe9a9ed00db6b17b44ae0ff36b9f49094077fb114f415522f2a0e98de"_hex_b;
 
 // clang-format off
 const auto m126_expected = to_vector(
@@ -995,7 +985,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
              m120b.serialize()}};
 
     REQUIRE(m124a.hash() < m124b.hash());
-    REQUIRE(h125a < h125b);
+    REQUIRE(to_hex(h125a) < to_hex(h125b));
     REQUIRE(m126a.hash() < m126b.hash());
 
     // Now we merge m126a and m126b together and should end up with the final merged result.

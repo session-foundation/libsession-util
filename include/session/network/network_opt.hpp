@@ -17,8 +17,8 @@ namespace opt {
     using namespace std::chrono_literals;
 
     namespace {
-        inline std::vector<unsigned char> from_hex(std::string_view s) {
-            std::vector<unsigned char> out;
+        inline std::vector<std::byte> from_hex(std::string_view s) {
+            std::vector<std::byte> out;
             out.reserve(s.size() / 2);
             oxenc::from_hex(s.begin(), s.end(), std::back_inserter(out));
 
@@ -48,40 +48,40 @@ namespace opt {
         static netid mainnet() {
             auto seed_nodes = {
                     service_node{
-                            ed25519_pubkey::from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58a"
-                                                     "fb0e38111fb6cda1fef"),
+                            ed25519_pubkey::from_hex("1f000f09a7b07828dcb72af7cd168570"
+                                                     "50c10c02bd58afb0e38111fb6cda1fef"),
                             oxen::quic::ipv4{"95.216.33.113"},
                             uint16_t{22100},
                             uint16_t{20200},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef"
-                                                     "7f971e88ab144c1a7ce"),
+                            ed25519_pubkey::from_hex("1f101f0acee4db6f31aaa8b4df134e85"
+                                                     "ca8a4878efaef7f971e88ab144c1a7ce"),
                             oxen::quic::ipv4{"37.27.236.229"},
                             uint16_t{22101},
                             uint16_t{20201},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c3254"
-                                                     "74d159814e06199919f"),
+                            ed25519_pubkey::from_hex("1f202f00f4d2d4acc01e20773999a291"
+                                                     "cf3e3136c325474d159814e06199919f"),
                             oxen::quic::ipv4{"172.96.140.124"},
                             uint16_t{22102},
                             uint16_t{20202},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fba"
-                                                     "e5749442f66afb6d78b"),
+                            ed25519_pubkey::from_hex("1f303f1d7523c46fa5398826740d1328"
+                                                     "2d26b5de90fbae5749442f66afb6d78b"),
                             oxen::quic::ipv4{"208.73.207.54"},
                             uint16_t{22103},
                             uint16_t{20203},
                             {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            ed25519_pubkey::from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad"
-                                                     "15a35e16b50c28db7b0"),
+                            ed25519_pubkey::from_hex("1f604f1c858a121a681d8f9b470ef72e"
+                                                     "6946ee1b9c5ad15a35e16b50c28db7b0"),
                             oxen::quic::ipv4{"104.194.8.115"},
                             uint16_t{22104},
                             uint16_t{20204},
@@ -94,17 +94,9 @@ namespace opt {
 
         static netid testnet() {
             auto seed_nodes = {
-                    // service_node{
-                    //         ed25519_pubkey::from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"),
-                    //         oxen::quic::ipv4{"144.76.164.202"},
-                    //         uint16_t{35500},
-                    //         uint16_t{35400},
-                    //         {2, 10, 0},
-                    //         swarm::INVALID_SWARM_ID},  // This is the original one
-
                     service_node{
-                            ed25519_pubkey::from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b"
-                                                     "2e9e08c3505a48a811a"),
+                            ed25519_pubkey::from_hex("decaf20025ca6389d8225bda6a32d7fc"
+                                                     "4ee5176d21e3b2e9e08c3505a48a811a"),
                             oxen::quic::ipv4{"23.88.6.250"},
                             uint16_t{35520},
                             uint16_t{35420},
@@ -211,13 +203,16 @@ namespace opt {
         file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
     };
 
-    /// Can be used to override the default (false) flag indicating whether files uploaded to the
-    /// file server should use XChaCha20-stream based encryption.
-    struct file_server_use_stream_encryption {
-        bool use_stream_encryption;
+    /// Can be used to tell recipients where a custom file server's QUIC endpoint is, by naming it
+    /// in the download URLs we generate.  The built-in servers need no such option: a recipient
+    /// resolves their endpoint from the network it is on.  The port defaults to the standard QUIC
+    /// file server port, and is left out of the URL when it is that.
+    struct file_server_srouter {
+        std::string address;
+        std::optional<uint16_t> port;
 
-        file_server_use_stream_encryption(bool use_stream_encryption) :
-                use_stream_encryption{use_stream_encryption} {}
+        file_server_srouter(std::string address, std::optional<uint16_t> port = std::nullopt) :
+                address{std::move(address)}, port{port} {}
     };
 
     /// Can be used to attempt to increase the NOFILE limit (can cause issues with automated tests).
@@ -362,6 +357,26 @@ namespace opt {
         cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
+    // MARK: QUIC File Server Options
+
+    /// Can be used to override the default QUIC file server Ed25519 pubkey (hex).
+    struct quic_file_server_ed_pubkey {
+        std::string pubkey_hex;
+        quic_file_server_ed_pubkey(std::string pubkey_hex) : pubkey_hex{std::move(pubkey_hex)} {}
+    };
+
+    /// Can be used to specify the direct address (IP:PORT) of the QUIC file server for direct mode.
+    struct quic_file_server_address {
+        std::string address;
+        quic_file_server_address(std::string address) : address{std::move(address)} {}
+    };
+
+    /// Can be used to override the default (11235) QUIC file server port.
+    struct quic_file_server_port {
+        uint16_t port;
+        quic_file_server_port(uint16_t port) : port{port} {}
+    };
+
     // MARK: Quic Transport Options
 
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
@@ -376,8 +391,12 @@ namespace opt {
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
     };
 
-    /// Can be used to disable Quic MTU discovery.
-    struct quic_disable_mtu_discovery {};
+    /// Caps the maximum QUIC UDP payload size for path MTU discovery.  PMTUD will still
+    /// probe upward from 1200, but will not exceed this value.  Must be at least 1200.
+    struct quic_max_udp_payload {
+        size_t size;
+        explicit quic_max_udp_payload(size_t s) : size{s} {}
+    };
 
     // MARK: Onion Request Router Options
 
@@ -442,7 +461,7 @@ namespace opt {
             file_server_port,
             file_server_pubkey_hex,
             file_server_max_file_size,
-            file_server_use_stream_encryption,
+            file_server_srouter,
 
             // General options
             increase_no_file_limit,
@@ -464,17 +483,22 @@ namespace opt {
             cache_min_num_refresh_presence_to_include_node,
             cache_node_strike_threshold,
 
+            // QUIC file server options
+            quic_file_server_ed_pubkey,
+            quic_file_server_address,
+            quic_file_server_port,
+
             // Quic transport options
             quic_handshake_timeout,
             quic_keep_alive,
-            quic_disable_mtu_discovery,
+            quic_max_udp_payload,
 
             // Onion request router options
             onionreq_path_strike_threshold,
+            onionreq_path_build_retry_limit,
             onionreq_min_path_count,
             onionreq_single_path_mode,
             onionreq_disable_pre_build_paths,
-            onionreq_path_build_retry_limit,
             onionreq_path_rotation_frequency,
             onionreq_edge_node_cache_duration>;
 

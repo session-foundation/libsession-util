@@ -21,7 +21,7 @@ class ProConfig {
   public:
     /// Rotating private key for the public key specified in the proof. On the wire we store the
     /// seed. At runtime we derive the full key for convenience.
-    cleared_uc64 rotating_privkey;
+    cleared_b64 rotating_privkey;
 
     /// A cryptographic proof for entitling an Ed25519 key to Session Pro
     ProProof proof;

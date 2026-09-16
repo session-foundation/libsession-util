@@ -97,12 +97,31 @@ void Config::handle_config_opt(opt::file_server_max_file_size fsmfs) {
             cat, "Network config custom file server max file size set to {}", fsmfs.max_file_size);
 }
 
-void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
-    file_server_use_stream_encryption = fsuse.use_stream_encryption;
+void Config::handle_config_opt(opt::file_server_srouter fssr) {
+    custom_file_server_srouter_address = fssr.address;
+    custom_file_server_srouter_port = fssr.port;
     log::debug(
             cat,
-            "Network config file use stream encryption set to {}",
-            fsuse.use_stream_encryption);
+            "Network config custom file server session router endpoint set to {}:{}",
+            fssr.address,
+            fssr.port ? "{}"_format(*fssr.port) : "<default>");
+}
+
+// MARK: QUIC file server options
+
+void Config::handle_config_opt(opt::quic_file_server_ed_pubkey qfep) {
+    quic_file_server_ed_pubkey = std::move(qfep.pubkey_hex);
+    log::debug(cat, "Network config QUIC file server Ed25519 pubkey set");
+}
+
+void Config::handle_config_opt(opt::quic_file_server_address qfa) {
+    quic_file_server_address = std::move(qfa.address);
+    log::debug(cat, "Network config QUIC file server address set to {}", *quic_file_server_address);
+}
+
+void Config::handle_config_opt(opt::quic_file_server_port qfp) {
+    quic_file_server_port = qfp.port;
+    log::debug(cat, "Network config QUIC file server port set to {}", qfp.port);
 }
 
 // MARK: General options
@@ -235,9 +254,9 @@ void Config::handle_config_opt(opt::quic_keep_alive qka) {
     log::debug(cat, "Network config quic keep alive set to {}s", qka.duration.count());
 }
 
-void Config::handle_config_opt(opt::quic_disable_mtu_discovery) {
-    quic_disable_mtu_discovery = true;
-    log::debug(cat, "Network config disabled MTU discovery for Quic");
+void Config::handle_config_opt(opt::quic_max_udp_payload qmup) {
+    quic_max_udp_payload = qmup.size;
+    log::debug(cat, "Network config max QUIC UDP payload set to {} bytes", qmup.size);
 }
 
 // MARK: Onion Request Router Options

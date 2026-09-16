@@ -19,7 +19,11 @@ class IRouter {
     virtual std::vector<PathInfo> get_active_paths() { return {}; };
     virtual std::vector<service_node> get_all_used_nodes() { return {}; };
     virtual void send_request(Request request, network_response_callback_t callback) = 0;
+    [[deprecated("use upload_file() instead")]]
     virtual void upload(UploadRequest request) = 0;
+    /// Upload a file from disk with streaming encryption.  The seed is consumed immediately
+    /// (before this returns) to initialize the encryption key derivation state.
+    virtual void upload_file(FileUploadRequest request, std::span<const std::byte> seed) = 0;
     virtual void download(DownloadRequest request) = 0;
 };
 

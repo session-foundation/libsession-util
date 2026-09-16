@@ -226,6 +226,52 @@ LIBSESSION_EXPORT int user_profile_get_nts_expiry(const config_object* conf);
 /// - `expiry` -- [in] Integer of the expiry timer in seconds
 LIBSESSION_EXPORT void user_profile_set_nts_expiry(config_object* conf, int expiry);
 
+/// API: user_profile/user_profile_get_nts_delete_before
+///
+/// Gets the "delete before" unix timestamp (seconds) for the "Note to Self" conversation: messages
+/// in it older than this are to be deleted, and arriving ones older than it dropped.  Returns 0 if
+/// no such instruction is set.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- the timestamp, or 0 if unset
+LIBSESSION_EXPORT int64_t user_profile_get_nts_delete_before(const config_object* conf);
+
+/// API: user_profile/user_profile_set_nts_delete_before
+///
+/// Sets the "delete before" unix timestamp (seconds) for the "Note to Self" conversation.  Pass 0
+/// (or a negative value) to clear it.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `before` -- [in] unix timestamp (seconds) before which messages are to be deleted
+LIBSESSION_EXPORT void user_profile_set_nts_delete_before(config_object* conf, int64_t before);
+
+/// API: user_profile/user_profile_get_nts_delete_attach_before
+///
+/// As `user_profile_get_nts_delete_before`, but covering the attachments alone: the messages
+/// themselves stay.  Returns 0 if no such instruction is set.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- the timestamp, or 0 if unset
+LIBSESSION_EXPORT int64_t user_profile_get_nts_delete_attach_before(const config_object* conf);
+
+/// API: user_profile/user_profile_set_nts_delete_attach_before
+///
+/// Sets the "delete attachments before" unix timestamp (seconds) for the "Note to Self"
+/// conversation.  Pass 0 (or a negative value) to clear it.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `before` -- [in] unix timestamp (seconds) before which attachments are to be deleted
+LIBSESSION_EXPORT void user_profile_set_nts_delete_attach_before(
+        config_object* conf, int64_t before);
+
 /// API: user_profile/user_profile_get_blinded_msgreqs
 ///
 /// Returns true if blinded message requests should be retrieved (from SOGS servers), false if they
@@ -266,6 +312,46 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// Outputs:
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
+
+/// API: user_profile/user_profile_get_notify_media_saved
+///
+/// Returns true if we tell somebody when we save a file they sent us.  True is the default, and
+/// what an account that has never set this returns: Session's clients report it, so it is what a
+/// sender expects.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_get_notify_media_saved(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `bool` -- true to tell the sender
+LIBSESSION_EXPORT bool user_profile_get_notify_media_saved(const config_object* conf);
+
+/// API: user_profile/user_profile_set_notify_media_saved
+///
+/// Sets the above.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_notify_media_saved(
+///     [in]    config_object*      conf,
+///     [in]    bool                notify
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `notify` -- [in] false to stop telling senders that we saved their files
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_notify_media_saved(config_object* conf, bool notify);
 
 /// API: user_profile/user_profile_get_profile_updated
 ///
@@ -348,9 +434,9 @@ LIBSESSION_EXPORT bool user_profile_remove_pro_config(config_object* conf);
 /// - `conf` -- [in] Pointer to the config object
 ///
 /// Outputs:
-/// - `session_protocol_pro_profile_bitset` - bitset indicating which profile features are enabled.
-LIBSESSION_EXPORT session_protocol_pro_profile_bitset
-user_profile_get_pro_features(const config_object* conf);
+/// - `uint64_t` - bitset (mask of SESSION_PROTOCOL_PRO_PROFILE_FEATURE_* bits) indicating which
+///   profile features are enabled.
+LIBSESSION_EXPORT uint64_t user_profile_get_pro_features(const config_object* conf);
 
 /// API: user_profile/user_profile_set_pro_badge
 ///

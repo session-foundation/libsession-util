@@ -36,7 +36,14 @@ typedef struct contacts_contact {
 
     int64_t created;  // unix timestamp (seconds)
 
-    session_protocol_pro_profile_bitset profile_bitset;
+    // Messages in this conversation older than these are to be deleted (and arriving ones older
+    // than them dropped); 0 for no such instruction.  `delete_attach_before` covers the attachments
+    // alone, leaving the messages.  Both unix timestamps in seconds, matching the group info
+    // config's fields of the same names.
+    int64_t delete_before;
+    int64_t delete_attach_before;
+
+    uint64_t profile_bitset;  // Mask of SESSION_PROTOCOL_PRO_PROFILE_FEATURE_* bits
 
 } contacts_contact;
 
@@ -55,7 +62,7 @@ typedef struct contacts_blinded_contact {
     bool legacy_blinding;
     int64_t created;  // unix timestamp (seconds)
 
-    session_protocol_pro_profile_bitset profile_bitset;
+    uint64_t profile_bitset;  // Mask of SESSION_PROTOCOL_PRO_PROFILE_FEATURE_* bits
 
 } contacts_blinded_contact;
 
@@ -371,7 +378,7 @@ LIBSESSION_EXPORT bool contacts_set_blinded(
 ///
 /// Outputs:
 /// - `bool` -- True if erasing was successful
-LIBSESSION_EXPORT bool contacts_erase_blinded_contact(
+LIBSESSION_EXPORT bool contacts_erase_blinded(
         config_object* conf, const char* community_base_url, const char* blinded_id);
 
 typedef struct contacts_iterator {

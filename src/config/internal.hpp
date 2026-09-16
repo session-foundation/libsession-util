@@ -7,10 +7,14 @@
 #include <memory>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
+#include "../internal-util.hpp"
+#include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/base.hpp"
 #include "session/config/error.h"
+#include "session/session_protocol.hpp"
 #include "session/types.hpp"
 
 namespace session {
@@ -63,10 +67,10 @@ template <typename ConfigT>
         size_t dumplen,
         char* error) {
     assert(ed25519_secretkey_bytes);
-    std::span<const unsigned char> ed25519_secretkey{ed25519_secretkey_bytes, 64};
-    std::optional<std::span<const unsigned char>> dump;
+    ed25519::PrivKeySpan ed25519_secretkey{ed25519_secretkey_bytes, 64};
+    std::optional<std::span<const std::byte>> dump;
     if (dumpstr && dumplen)
-        dump.emplace(dumpstr, dumplen);
+        dump.emplace(reinterpret_cast<const std::byte*>(dumpstr), dumplen);
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_secretkey, dump);
 }
 
@@ -81,13 +85,13 @@ template <typename ConfigT>
 
     assert(ed25519_pubkey_bytes);
 
-    std::span<const unsigned char> ed25519_pubkey{ed25519_pubkey_bytes, 32};
-    std::optional<std::span<const unsigned char>> ed25519_secretkey;
-    if (ed25519_secretkey_bytes)
-        ed25519_secretkey.emplace(ed25519_secretkey_bytes, 64);
-    std::optional<std::span<const unsigned char>> dump;
+    std::span<const std::byte, 32> ed25519_pubkey{
+            reinterpret_cast<const std::byte*>(ed25519_pubkey_bytes), 32};
+    ed25519::OptionalPrivKeySpan ed25519_secretkey{
+            ed25519_secretkey_bytes, ed25519_secretkey_bytes ? 64u : 0u};
+    std::optional<std::span<const std::byte>> dump;
     if (dump_bytes && dumplen)
-        dump.emplace(dump_bytes, dumplen);
+        dump.emplace(reinterpret_cast<const std::byte*>(dump_bytes), dumplen);
 
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_pubkey, ed25519_secretkey, dump);
 }
@@ -148,7 +152,7 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
 
 // Checks the session_id (throwing if invalid) then returns it as bytes, omitting the 05 (or
 // whatever) prefix, which is a pubkey (x25519 for 05 session_ids, ed25519 for other prefixes).
-std::array<unsigned char, 32> session_id_pk(
+std::array<std::byte, 32> session_id_pk(
         std::string_view session_id, std::string_view prefix = "05");
 
 // Validates a community pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
@@ -157,7 +161,7 @@ void check_encoded_pubkey(std::string_view pk);
 
 // Takes a 32-byte pubkey value encoded as hex, base32z, or base64 and returns the decoded 32 bytes.
 // Throws if invalid.
-std::vector<unsigned char> decode_pubkey(std::string_view pk);
+std::vector<std::byte> decode_pubkey(std::string_view pk);
 
 // Modifies a string to be (ascii) lowercase.
 void make_lc(std::string& s);
@@ -171,12 +175,6 @@ std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key
 // Digs into a config `dict` to get out an int64_t; returns 0 if the value is not there or not an
 // int.  Equivalent to `maybe_int(d, key).value_or(0)`.
 int64_t int_or_0(const session::config::dict& d, const char* key);
-
-// Returns std::chrono::system_clock::now(), with the given precision (seconds, if unspecified).
-template <typename Duration = std::chrono::seconds>
-std::chrono::sys_time<Duration> ts_now() {
-    return std::chrono::floor<Duration>(std::chrono::system_clock::now());
-}
 
 // Digs into a config `dict` to get out an int64_t containing unix timestamp seconds, returns it
 // wrapped in a std::chrono::sys_seconds.  Returns nullopt if not there (or not int).
@@ -196,11 +194,34 @@ std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char*
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
-// Extract a U64 bitset from a set of i64's
-uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s);
+// A feature flag enum (ProProfileFlags/ProMessageFlags) is stored in a config as the *set of bit
+// positions* that are set (e.g. the flags 0b101 are stored as the set {0, 2}) rather than as a
+// single packed integer, so that the CRDT merges concurrent per-flag changes as a set union instead
+// of clobbering the whole value. These two helpers convert between that stored set and the enum.
 
-// Individually write each bit from bitset into a set consisting of int64's
-void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset);
+// Converts a config set of bit positions into flags of type `E`. Set elements that aren't int64s or
+// fall outside [0, 64) are ignored; an empty or absent set yields no flags.
+template <session::detail::ProFlags E>
+E to_flags(const session::config::set& positions) {
+    uint64_t mask = 0;
+    for (const auto& v : positions)
+        if (auto* pos = std::get_if<int64_t>(&v); pos && *pos >= 0 && *pos < 64)
+            mask |= 1ULL << *pos;
+    return static_cast<E>(mask);
+}
+
+// Inverse of to_flags(): writes `f` into `field` as the set of its set bit positions (inserting the
+// position of each set flag, erasing that of each unset one).
+template <session::detail::ProFlags E>
+void set_flags(ConfigBase::DictFieldProxy&& field, E f) {
+    auto mask = static_cast<uint64_t>(f);
+    for (int64_t pos = 0; pos < 64; pos++) {
+        if (mask & (1ULL << pos))
+            field.set_insert(pos);
+        else
+            field.set_erase(pos);
+    }
+}
 
 // Digs into a config `dict` to get out a string; ""s if not there (or not string)
 std::string string_or_empty(const session::config::dict& d, const char* key);
@@ -213,15 +234,14 @@ std::optional<std::string_view> maybe_sv(const session::config::dict& d, const c
 // string view is only valid as long as the dict stays unchanged.
 std::string_view sv_or_empty(const session::config::dict& d, const char* key);
 
-// Digs into a config `dict` to get out a std::span<const unsigned char>; nullopt if not there (or
+// Digs into a config `dict` to get out a std::span<const std::byte>; nullopt if not there (or
 // not string)
-std::optional<std::span<const unsigned char>> maybe_span(
+std::optional<std::span<const std::byte>> maybe_span(
         const session::config::dict& d, const char* key);
 
-// Digs into a config `dict` to get out a std::vector<unsigned char>; nullopt if not there (or not
+// Digs into a config `dict` to get out a std::vector<std::byte>; nullopt if not there (or not
 // string)
-std::optional<std::vector<unsigned char>> maybe_vector(
-        const session::config::dict& d, const char* key);
+std::optional<std::vector<std::byte>> maybe_vector(const session::config::dict& d, const char* key);
 
 /// Sets a value to 1 if true, removes it if false.
 void set_flag(ConfigBase::DictFieldProxy&& field, bool val);
@@ -271,6 +291,47 @@ void load_unknowns(
         oxenc::bt_dict_consumer& in,
         std::string_view previous,
         std::string_view until);
+template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
+inline internals<T>& unbox(config_object* conf) {
+    return *static_cast<internals<T>*>(conf->internals);
+}
+template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
+inline const internals<T>& unbox(const config_object* conf) {
+    return *static_cast<const internals<T>*>(conf->internals);
+}
+
+// Wraps a lambda and, if an exception is thrown, sets an error message in the config_object's
+// error buffer and updates the last_error pointer.
+template <std::invocable Call>
+decltype(auto) wrap_exceptions(config_object* conf, Call&& f) {
+    using Ret = std::invoke_result_t<Call>;
+
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        session::copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    if constexpr (std::is_pointer_v<Ret>)
+        return static_cast<Ret>(nullptr);
+    else
+        static_assert(std::is_void_v<Ret>, "Don't know how to return an error value!");
+}
+
+// Same as above but accepts callbacks with value returns on errors
+template <std::invocable Call, typename Ret>
+Ret wrap_exceptions(config_object* conf, Call&& f, Ret error_return) {
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        session::copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    return error_return;
+}
+
 }  // namespace session::config
 
 namespace fmt {

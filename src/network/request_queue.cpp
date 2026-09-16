@@ -18,9 +18,18 @@ namespace {
 }
 
 RequestQueue::~RequestQueue() {
-    _timeout.reset();
+    // Runs whatever adds are already queued before cancelling them below, so that a request that
+    // arrived just before this destructor still gets told it is not going to be sent.  Dropping
+    // those jobs instead would drop their callbacks with them, and the caller would hear nothing.
+    _jq.call_get([] {});
+    _jq.stop();
 
-    _loop->call_get([this] {
+    // The timeout event is the loop's to fire and reaches `this`, so it has to be taken away on the
+    // loop thread rather than from here.  The cancellations go in the same job because that is
+    // where they have always been called from.
+    _loop.call_get([this] {
+        _timeout.reset();
+
         for (auto& [id, request_pair] : _requests) {
             auto& [req, callback] = request_pair;
 
@@ -38,14 +47,12 @@ RequestQueue::~RequestQueue() {
 }
 
 void RequestQueue::add(Request request, network_response_callback_t callback) {
-    _loop->call([self = shared_from_this(),
-                 req = std::move(request),
-                 cb = std::move(callback)]() mutable {
+    _jq.call([this, req = std::move(request), cb = std::move(callback)]() mutable {
         const auto req_id = req.request_id;
         const auto creation_time = req.creation_time;
         const auto timeout = req.overall_timeout;
-        self->_requests.emplace(req_id, std::make_pair(std::move(req), std::move(cb)));
-        self->_queue.emplace_back(req_id);
+        _requests.emplace(req_id, std::make_pair(std::move(req), std::move(cb)));
+        _queue.emplace_back(req_id);
 
         if (timeout) {
             auto expiry = creation_time + *timeout;
@@ -53,24 +60,24 @@ void RequestQueue::add(Request request, network_response_callback_t callback) {
             // We hint at the end because it is an extremely common pattern that you use the same
             // timeout for all (or most) requests in which case each new request timeout *does* land
             // at the end.
-            self->_req_expiries.emplace_hint(self->_req_expiries.end(), expiry, req_id);
+            _req_expiries.emplace_hint(_req_expiries.end(), expiry, req_id);
 
             // If the expiry entry landed at the beginning of the map -- either because it was
             // empty, or because this has a shorter timeout than what's already in there -- then we
             // need to (re)schedule the event to this request's timeout.
-            if (self->_req_expiries.begin()->second == req_id)
-                self->update_timeout();
+            if (_req_expiries.begin()->second == req_id)
+                update_timeout();
         }
     });
 }
 
 void RequestQueue::add_front(std::pair<Request, network_response_callback_t> req_pair) {
-    _loop->call([self = shared_from_this(), pair = std::move(req_pair)] {
+    _jq.call([this, pair = std::move(req_pair)] {
         const auto req_id = pair.first.request_id;
         const auto creation_time = pair.first.creation_time;
         const auto timeout = pair.first.overall_timeout;
-        self->_requests.emplace(req_id, std::move(pair));
-        self->_queue.emplace_front(req_id);
+        _requests.emplace(req_id, std::move(pair));
+        _queue.emplace_front(req_id);
 
         if (timeout) {
             auto expiry = creation_time + *timeout;
@@ -78,34 +85,34 @@ void RequestQueue::add_front(std::pair<Request, network_response_callback_t> req
             // We hint at the end because it is an extremely common pattern that you use the same
             // timeout for all (or most) requests in which case each new request timeout *does* land
             // at the end.
-            self->_req_expiries.emplace_hint(self->_req_expiries.end(), expiry, req_id);
+            _req_expiries.emplace_hint(_req_expiries.end(), expiry, req_id);
 
             // If the expiry entry landed at the beginning of the map -- either because it was
             // empty, or because this has a shorter timeout than what's already in there -- then we
             // need to (re)schedule the event to this request's timeout.
-            if (self->_req_expiries.begin()->second == req_id)
-                self->update_timeout();
+            if (_req_expiries.begin()->second == req_id)
+                update_timeout();
         }
     });
 }
 
 std::deque<std::pair<Request, network_response_callback_t>> RequestQueue::pop_all() {
-    return _loop->call_get([self = shared_from_this()] {
+    return _jq.call_get([this] {
         std::deque<std::pair<Request, network_response_callback_t>> popped_items;
 
-        for (const auto& id : self->_queue) {
-            auto it = self->_requests.find(id);
+        for (const auto& id : _queue) {
+            auto it = _requests.find(id);
 
-            if (it != self->_requests.end()) {
+            if (it != _requests.end()) {
                 popped_items.push_back(std::move(it->second));
-                self->_requests.erase(it);
+                _requests.erase(it);
             }
         }
 
-        self->_queue.clear();
-        self->_requests.clear();
-        self->_req_expiries.clear();
-        self->update_timeout();
+        _queue.clear();
+        _requests.clear();
+        _req_expiries.clear();
+        update_timeout();
 
         return popped_items;
     });
@@ -148,7 +155,7 @@ void RequestQueue::update_timeout() {
     if (!_timeout) {
         // If this is the first request timeout then set up the timeout event timer:
         _timeout.reset(event_new(
-                _loop->get_event_base(),
+                _loop.get_event_base(),
                 -1,          // Not attached to an actual socket
                 EV_TIMEOUT,  // Stays active (i.e. repeats) once fired
                 [](evutil_socket_t, short, void* self) {

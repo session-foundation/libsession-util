@@ -1,8 +1,8 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "types.h"
 
@@ -10,10 +10,6 @@ namespace session {
 
 template <typename T, typename... U>
 static constexpr bool is_one_of = (std::is_same_v<T, U> || ...);
-
-using array_uc32 = std::array<std::uint8_t, 32>;
-using array_uc33 = std::array<std::uint8_t, 33>;
-using array_uc64 = std::array<std::uint8_t, 64>;
 
 enum class SessionIDPrefix {
     standard = 0,
@@ -37,5 +33,4 @@ span_u8 span_u8_alloc_or_throw(size_t size);
 /// this function throws a runtime exception. The `data` pointer is span must be freed once the span
 /// is no longer needed.
 span_u8 span_u8_copy_or_throw(const void* data, size_t size);
-
 }  // namespace session

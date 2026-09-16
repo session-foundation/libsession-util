@@ -1,128 +1,89 @@
 #include <oxenc/hex.h>
-#include <sodium.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <stdexcept>
 
+#include "session/crypto/ed25519.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.h"
 #include "session/xed25519.hpp"
 
-constexpr std::array<unsigned char, 64> seed1{
-        0xfe, 0xcd, 0x9a, 0x60, 0x34, 0xbc, 0x9a, 0xba, 0x27, 0x39, 0x25, 0xde, 0xe7,
-        0x06, 0x2b, 0x12, 0x33, 0x34, 0x58, 0x7c, 0x3c, 0x62, 0x57, 0x34, 0x1a, 0xfa,
-        0xe2, 0xd7, 0xfe, 0x85, 0xe1, 0x22, 0xf4, 0xef, 0x87, 0x39, 0x08, 0xf6, 0xa5,
-        0x37, 0x7b, 0xa3, 0x85, 0x3f, 0x0e, 0x2f, 0xa3, 0x26, 0xee, 0xd9, 0xe7, 0x41,
-        0xed, 0xf9, 0xf7, 0xd0, 0x31, 0x1a, 0x3e, 0xcc, 0x66, 0xa5, 0x7b, 0x32};
-constexpr std::array<unsigned char, 64> seed2{
-        0x86, 0x59, 0xef, 0xdc, 0xbe, 0x09, 0x49, 0xe0, 0xf8, 0x11, 0x41, 0xe6, 0xd3,
-        0x97, 0xe8, 0xbe, 0x75, 0xf4, 0x5d, 0x09, 0x26, 0x2f, 0x20, 0x9d, 0x59, 0x50,
-        0xe9, 0x79, 0x89, 0xeb, 0x43, 0xc7, 0x35, 0x70, 0xb6, 0x9a, 0x47, 0xdc, 0x09,
-        0x45, 0x44, 0xc1, 0xc5, 0x08, 0x9c, 0x40, 0x41, 0x4b, 0xbd, 0xa1, 0xff, 0xdd,
-        0xe8, 0xaa, 0xb2, 0x61, 0x7f, 0xe9, 0x37, 0xee, 0x74, 0xa5, 0xee, 0x81};
+using namespace session;
+using namespace session::literals;
 
-constexpr std::span<const unsigned char> pub1{seed1.data() + 32, 32};
-constexpr std::span<const unsigned char> pub2{seed2.data() + 32, 32};
+// Full 64-byte libsodium-style Ed25519 keys (32-byte seed || 32-byte pubkey)
+constexpr auto seed1 =
+        "fecd9a6034bc9aba273925dee7062b123334587c3c6257341afae2d7fe85e122"
+        "f4ef873908f6a5377ba3853f0e2fa326eed9e741edf9f7d0311a3ecc66a57b32"_hex_b;
+constexpr auto seed2 =
+        "8659efdcbe0949e0f81141e6d397e8be75f45d09262f209d5950e97989eb43c7"
+        "3570b69a47dc094544c1c5089c40414bbda1ffdde8aab2617fe937ee74a5ee81"_hex_b;
 
-constexpr std::array<unsigned char, 32> xpub1{
-        0xfe, 0x94, 0xb7, 0xad, 0x4b, 0x7f, 0x1c, 0xc1, 0xbb, 0x92, 0x67,
-        0x1f, 0x1f, 0x0d, 0x24, 0x3f, 0x22, 0x6e, 0x11, 0x5b, 0x33, 0x77,
-        0x04, 0x65, 0xe8, 0x2b, 0x50, 0x3f, 0xc3, 0xe9, 0x6e, 0x1f,
-};
-constexpr std::array<unsigned char, 32> xpub2{
-        0x05, 0xc9, 0xa9, 0xbf, 0x17, 0x8f, 0xa6, 0x44, 0xd4, 0x4b, 0xeb,
-        0xf6, 0x28, 0x71, 0x6d, 0xc7, 0xf2, 0xdf, 0x3d, 0x08, 0x42, 0xe9,
-        0x78, 0x81, 0x96, 0x2c, 0x72, 0x36, 0x99, 0x15, 0x20, 0x73,
-};
+// Ed25519 pubkeys (second half of the seed arrays)
+constexpr auto pub1 = seed1.last<32>();
+constexpr auto pub2 = seed2.last<32>();
 
-constexpr std::array<unsigned char, 32> pub2_abs{
-        0x35, 0x70, 0xb6, 0x9a, 0x47, 0xdc, 0x09, 0x45, 0x44, 0xc1, 0xc5,
-        0x08, 0x9c, 0x40, 0x41, 0x4b, 0xbd, 0xa1, 0xff, 0xdd, 0xe8, 0xaa,
-        0xb2, 0x61, 0x7f, 0xe9, 0x37, 0xee, 0x74, 0xa5, 0xee, 0x01,
-};
+// Expected X25519 pubkeys derived from the Ed25519 pubkeys
+constexpr auto xpub1 = "fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+constexpr auto xpub2 = "05c9a9bf178fa644d44bebf628716dc7f2df3d0842e97881962c723699152073"_hex_b;
 
-template <size_t N>
-static std::string view_hex(const std::array<unsigned char, N>& x) {
-    return oxenc::to_hex(session::to_span(x));
-}
+// The "absolute" (positive) version of pub2's Ed25519 pubkey
+constexpr auto pub2_abs = "3570b69a47dc094544c1c5089c40414bbda1ffdde8aab2617fe937ee74a5ee01"_hex_b;
 
 TEST_CASE("XEd25519 pubkey conversion", "[xed25519][pubkey]") {
-    std::array<unsigned char, 32> xpk1;
-    int rc = crypto_sign_ed25519_pk_to_curve25519(xpk1.data(), pub1.data());
-    REQUIRE(rc == 0);
-    REQUIRE(view_hex(xpk1) == view_hex(xpub1));
+    auto xpk1 = ed25519::pk_to_x25519(pub1);
+    REQUIRE(oxenc::to_hex(xpk1) == oxenc::to_hex(xpub1));
 
-    std::array<unsigned char, 32> xpk2;
-    rc = crypto_sign_ed25519_pk_to_curve25519(xpk2.data(), pub2.data());
-    REQUIRE(rc == 0);
-    REQUIRE(view_hex(xpk2) == view_hex(xpub2));
+    auto xpk2 = ed25519::pk_to_x25519(pub2);
+    REQUIRE(oxenc::to_hex(xpk2) == oxenc::to_hex(xpub2));
 
-    auto xed1 = session::xed25519::pubkey(xpub1);
-    REQUIRE(view_hex(xed1) == oxenc::to_hex(pub1));
+    auto xed1 = xed25519::pubkey(xpub1);
+    REQUIRE(oxenc::to_hex(xed1) == oxenc::to_hex(pub1));
 
     // This one fails because the original Ed pubkey is negative
-    auto xed2 = session::xed25519::pubkey(xpub2);
-    REQUIRE(view_hex(xed2) != oxenc::to_hex(pub2));
+    auto xed2 = xed25519::pubkey(xpub2);
+    REQUIRE(oxenc::to_hex(xed2) != oxenc::to_hex(pub2));
     // After making the xed negative we should be okay:
-    xed2[31] |= 0x80;
-    REQUIRE(view_hex(xed2) == oxenc::to_hex(pub2));
+    xed2[31] |= std::byte{0x80};
+    REQUIRE(oxenc::to_hex(xed2) == oxenc::to_hex(pub2));
 }
 
 TEST_CASE("XEd25519 signing", "[xed25519][sign]") {
-    std::array<unsigned char, 32> xsk1;
-    int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());
-    REQUIRE(rc == 0);
-    std::array<unsigned char, 32> xpk1;
-    rc = crypto_sign_ed25519_pk_to_curve25519(xpk1.data(), pub1.data());
+    auto xsk1 = ed25519::sk_to_x25519(ed25519::PrivKeySpan{seed1});
+    auto xsk2 = ed25519::sk_to_x25519(seed2.first<32>());
 
-    std::array<unsigned char, 32> xsk2;
-    rc = crypto_sign_ed25519_sk_to_curve25519(xsk2.data(), seed2.data());
-    REQUIRE(rc == 0);
-    std::array<unsigned char, 32> xpk2;
-    rc = crypto_sign_ed25519_pk_to_curve25519(xpk2.data(), pub2.data());
+    const auto msg = "hello world"_bytes;
 
-    const auto msg = session::to_span("hello world");
+    auto xed_sig1 = xed25519::sign(xsk1, msg);
 
-    auto xed_sig1 = session::xed25519::sign(xsk1, msg);
+    REQUIRE(ed25519::verify(xed_sig1, pub1, msg));
 
-    rc = crypto_sign_ed25519_verify_detached(xed_sig1.data(), msg.data(), msg.size(), pub1.data());
-    REQUIRE(rc == 0);
-
-    auto xed_sig2 = session::xed25519::sign(xsk2, msg);
+    auto xed_sig2 = xed25519::sign(xsk2, msg);
 
     // This one will fail, because Xed signing always uses the positive but our actual pub2 is the
     // negative:
-    rc = crypto_sign_ed25519_verify_detached(xed_sig2.data(), msg.data(), msg.size(), pub2.data());
-    REQUIRE(rc != 0);
+    REQUIRE_FALSE(ed25519::verify(xed_sig2, pub2, msg));
 
     // Flip it, though, and it should work:
-    rc = crypto_sign_ed25519_verify_detached(
-            xed_sig2.data(), msg.data(), msg.size(), pub2_abs.data());
-    REQUIRE(rc == 0);
+    REQUIRE(ed25519::verify(xed_sig2, pub2_abs, msg));
 }
 
 TEST_CASE("XEd25519 verification", "[xed25519][verify]") {
-    std::array<unsigned char, 32> xsk1;
-    int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());
-    REQUIRE(rc == 0);
+    auto xsk1 = ed25519::sk_to_x25519(ed25519::PrivKeySpan{seed1});
+    auto xsk2 = ed25519::sk_to_x25519(seed2.first<32>());
 
-    std::array<unsigned char, 32> xsk2;
-    rc = crypto_sign_ed25519_sk_to_curve25519(xsk2.data(), seed2.data());
-    REQUIRE(rc == 0);
+    const auto msg = "hello world"_bytes;
 
-    const auto msg = session::to_span("hello world");
+    auto xed_sig1 = xed25519::sign(xsk1, msg);
+    auto xed_sig2 = xed25519::sign(xsk2, msg);
 
-    auto xed_sig1 = session::xed25519::sign(xsk1, msg);
-    auto xed_sig2 = session::xed25519::sign(xsk2, msg);
-
-    REQUIRE(session::xed25519::verify(xed_sig1, xpub1, msg));
-    REQUIRE(session::xed25519::verify(xed_sig2, xpub2, msg));
+    REQUIRE(xed25519::verify(xed_sig1, xpub1, msg));
+    REQUIRE(xed25519::verify(xed_sig2, xpub2, msg));
 
     // Unlike regular Ed25519, XEd25519 uses randomness in the signature, so signing the same value
     // a second should give us a different signature:
-    auto xed_sig1b = session::xed25519::sign(xsk1, msg);
-    REQUIRE(view_hex(xed_sig1b) != view_hex(xed_sig1));
+    auto xed_sig1b = xed25519::sign(xsk1, msg);
+    REQUIRE(oxenc::to_hex(xed_sig1b) != oxenc::to_hex(xed_sig1));
 }
 
 TEST_CASE("XEd25519 string overloads reject invalid input sizes", "[xed25519]") {
@@ -133,77 +94,100 @@ TEST_CASE("XEd25519 string overloads reject invalid input sizes", "[xed25519]") 
     std::string signature(64, '\0');
     std::string long_signature(65, '\0');
 
-    CHECK_THROWS_AS(session::xed25519::sign(short_key, "hello world"), std::invalid_argument);
-    CHECK_THROWS_AS(session::xed25519::sign(long_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::sign(short_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::sign(long_key, "hello world"), std::invalid_argument);
 
-    CHECK_THROWS_AS(
-            session::xed25519::verify(short_signature, key, "hello world"), std::invalid_argument);
-    CHECK_THROWS_AS(
-            session::xed25519::verify(long_signature, key, "hello world"), std::invalid_argument);
-    CHECK_THROWS_AS(
-            session::xed25519::verify(signature, short_key, "hello world"), std::invalid_argument);
-    CHECK_THROWS_AS(
-            session::xed25519::verify(signature, long_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(short_signature, key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(long_signature, key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(signature, short_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(signature, long_key, "hello world"), std::invalid_argument);
 
-    CHECK_THROWS_AS(session::xed25519::pubkey(short_key), std::invalid_argument);
-    CHECK_THROWS_AS(session::xed25519::pubkey(long_key), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::pubkey(short_key), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::pubkey(long_key), std::invalid_argument);
 }
 
 TEST_CASE("XEd25519 pubkey conversion (C wrapper)", "[xed25519][pubkey][c]") {
-    auto xed1 = session::xed25519::pubkey(xpub1);
-    REQUIRE(view_hex(xed1) == oxenc::to_hex(pub1));
+    auto xed1 = xed25519::pubkey(xpub1);
+    REQUIRE(oxenc::to_hex(xed1) == oxenc::to_hex(pub1));
 
     // This one fails because the original Ed pubkey is negative
-    auto xed2 = session::xed25519::pubkey(xpub2);
-    REQUIRE(view_hex(xed2) != oxenc::to_hex(pub2));
+    auto xed2 = xed25519::pubkey(xpub2);
+    REQUIRE(oxenc::to_hex(xed2) != oxenc::to_hex(pub2));
     // After making the xed negative we should be okay:
-    xed2[31] |= 0x80;
-    REQUIRE(view_hex(xed2) == oxenc::to_hex(pub2));
+    xed2[31] |= std::byte{0x80};
+    REQUIRE(oxenc::to_hex(xed2) == oxenc::to_hex(pub2));
 }
+
 TEST_CASE("XEd25519 signing (C wrapper)", "[xed25519][sign][c]") {
-    std::array<unsigned char, 32> xsk1;
-    int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());
-    REQUIRE(rc == 0);
-    std::array<unsigned char, 32> xpk1;
-    rc = crypto_sign_ed25519_pk_to_curve25519(xpk1.data(), pub1.data());
+    auto xsk1 = ed25519::sk_to_x25519(ed25519::PrivKeySpan{seed1});
+    auto xsk2 = ed25519::sk_to_x25519(seed2.first<32>());
 
-    std::array<unsigned char, 32> xsk2;
-    rc = crypto_sign_ed25519_sk_to_curve25519(xsk2.data(), seed2.data());
-    REQUIRE(rc == 0);
-    std::array<unsigned char, 32> xpk2;
-    rc = crypto_sign_ed25519_pk_to_curve25519(xpk2.data(), pub2.data());
+    const auto msg = "hello world"_bytes;
 
-    const auto msg = session::to_span("hello world");
+    b64 xed_sig1, xed_sig2;
+    REQUIRE(session_xed25519_sign(
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xsk1.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
+    REQUIRE(session_xed25519_sign(
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xsk2.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
 
-    std::array<unsigned char, 64> xed_sig1, xed_sig2;
-    REQUIRE(session_xed25519_sign(xed_sig1.data(), xsk1.data(), msg.data(), msg.size()));
-    REQUIRE(session_xed25519_sign(xed_sig2.data(), xsk2.data(), msg.data(), msg.size()));
-
-    rc = crypto_sign_ed25519_verify_detached(xed_sig1.data(), msg.data(), msg.size(), pub1.data());
-    REQUIRE(rc == 0);
-
-    rc = crypto_sign_ed25519_verify_detached(xed_sig2.data(), msg.data(), msg.size(), pub2.data());
-    REQUIRE(rc != 0);  // Failure expected (pub2 is negative)
-
-    rc = crypto_sign_ed25519_verify_detached(
-            xed_sig2.data(), msg.data(), msg.size(), pub2_abs.data());
-    REQUIRE(rc == 0);  // Flipped sign should work
+    REQUIRE(ed25519::verify(xed_sig1, pub1, msg));
+    REQUIRE_FALSE(ed25519::verify(xed_sig2, pub2, msg));  // Failure expected (pub2 is negative)
+    REQUIRE(ed25519::verify(xed_sig2, pub2_abs, msg));    // Flipped sign should work
 }
+
+TEST_CASE("XEd25519 std::byte overloads", "[xed25519][byte]") {
+    auto xsk1 = ed25519::sk_to_x25519(ed25519::PrivKeySpan{seed1});
+
+    const auto msg = "hello world"_bytes;
+
+    // sign() byte overload should return a std::byte array.
+    auto sig_b = xed25519::sign(std::span<const std::byte, 32>{xsk1}, msg);
+    static_assert(std::same_as<decltype(sig_b), std::array<std::byte, 64>>);
+
+    // The signature must verify via the ed25519 helper.
+    REQUIRE(ed25519::verify(sig_b, pub1, msg));
+
+    // verify() byte overload.
+    REQUIRE(xed25519::verify(sig_b, xpub1, msg));
+
+    // pubkey() byte overload should return a std::byte array.
+    auto ed_pk_b = xed25519::pubkey(xpub1);
+    static_assert(std::same_as<decltype(ed_pk_b), std::array<std::byte, 32>>);
+    REQUIRE(oxenc::to_hex(ed_pk_b) == oxenc::to_hex(pub1));
+}
+
 TEST_CASE("XEd25519 verification (C wrapper)", "[xed25519][verify][c]") {
-    std::array<unsigned char, 32> xsk1;
-    int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());
-    REQUIRE(rc == 0);
+    auto xsk1 = ed25519::sk_to_x25519(ed25519::PrivKeySpan{seed1});
+    auto xsk2 = ed25519::sk_to_x25519(seed2.first<32>());
 
-    std::array<unsigned char, 32> xsk2;
-    rc = crypto_sign_ed25519_sk_to_curve25519(xsk2.data(), seed2.data());
-    REQUIRE(rc == 0);
+    const auto msg = "hello world"_bytes;
 
-    const auto msg = session::to_span("hello world");
+    b64 xed_sig1, xed_sig2;
+    REQUIRE(session_xed25519_sign(
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xsk1.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
+    REQUIRE(session_xed25519_sign(
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xsk2.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
 
-    std::array<unsigned char, 64> xed_sig1, xed_sig2;
-    REQUIRE(session_xed25519_sign(xed_sig1.data(), xsk1.data(), msg.data(), msg.size()));
-    REQUIRE(session_xed25519_sign(xed_sig2.data(), xsk2.data(), msg.data(), msg.size()));
-
-    REQUIRE(session_xed25519_verify(xed_sig1.data(), xpub1.data(), msg.data(), msg.size()));
-    REQUIRE(session_xed25519_verify(xed_sig2.data(), xpub2.data(), msg.data(), msg.size()));
+    REQUIRE(session_xed25519_verify(
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xpub1.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
+    REQUIRE(session_xed25519_verify(
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xpub2.data()),
+            to_unsigned(msg.data()),
+            msg.size()));
 }
