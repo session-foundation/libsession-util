@@ -868,6 +868,14 @@ class Client {
     std::optional<b32> _cache_key;
     // Must be called on the loop: it touches globals.
     const b32& _cache_encryption_key();
+
+    /// Where a cached file lives, and what it is called, with the cache key applied.
+    ///
+    /// One place rather than at every call site: the name is keyed (see `cache::name_for`), and a
+    /// caller that forgot the key would silently get the old, guessable naming back.  Taking the
+    /// key out of the caller's hands is what stops that being possible.
+    std::filesystem::path _cache_path(std::string_view kind, std::string_view url);
+    std::string _cache_name(std::string_view url);
     void _profile_picture(
             const ConversationId& id,
             std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,

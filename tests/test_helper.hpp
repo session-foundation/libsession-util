@@ -341,6 +341,20 @@ class TestHelper {
 
     static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
 
+    /// Where a url's cached file lives, with the cache key applied.
+    ///
+    /// Asked of the Client rather than computed, because the name is keyed on a secret only it
+    /// has -- which is the whole point, so that a directory listing is not a list of what this
+    /// account has downloaded.  A test checking what was written has to ask whoever wrote it.
+    ///
+    /// A template for the same reason the config helpers below are: this header does not know the
+    /// client types.
+    template <typename Client>
+    static std::filesystem::path cache_path(
+            Client& c, std::string_view kind, std::string_view url) {
+        return c._cache_path(kind, url);
+    }
+
     /// Drives the database-to-config direction directly, which is what makes the round-trip
     /// assertable: applying a config and then deriving one back has to be the identity, and only a
     /// test can ask for the second half in isolation.

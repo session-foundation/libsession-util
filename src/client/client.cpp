@@ -767,7 +767,7 @@ void Client::_reconcile_cache(
     std::set<std::string> keep;
     for (auto url : c.prepared_results<std::string>(
                  "SELECT profile_pic_url FROM accounts WHERE profile_pic_url IS NOT NULL"))
-        keep.insert(cache::path_for(_cache_dir, cache::PROFILE_DIR, url).filename().string());
+        keep.insert(_cache_name(url));
 
     size_t unreferenced = 0;
     for (const auto& name : pictures)
@@ -782,6 +782,14 @@ void Client::_reconcile_cache(
                 orphans,
                 stale.size(),
                 unreferenced);
+}
+
+std::filesystem::path Client::_cache_path(std::string_view kind, std::string_view url) {
+    return cache::path_for(_cache_dir, kind, _cache_encryption_key(), url);
+}
+
+std::string Client::_cache_name(std::string_view url) {
+    return cache::name_for(_cache_encryption_key(), url);
 }
 
 const b32& Client::_cache_encryption_key() {
@@ -868,7 +876,7 @@ std::function<void(std::span<const std::byte>)> Client::_store_picture(std::stri
     return [this, url = std::move(url), key = _cache_encryption_key()](
                    std::span<const std::byte> data) {
         try {
-            cache::write(cache::path_for(_cache_dir, cache::PROFILE_DIR, url), key, data);
+            cache::write(_cache_path(cache::PROFILE_DIR, url), key, data);
         } catch (const std::exception& e) {
             // A cache that cannot be written is a cache that misses next time, which is not worth
             // failing the caller's fetch over.
@@ -1022,10 +1030,10 @@ void Client::_fetch_cached(
         std::function<void(const std::string&)> on_hit,
         std::function<void(std::span<const std::byte>)> store) {
 
-    auto name = cache::path_for(_cache_dir, target.dir, target.url).filename().string();
+    auto name = _cache_name(target.url);
 
     if (!_cache_dir.empty()) {
-        auto file = cache::path_for(_cache_dir, target.dir, target.url);
+        auto file = _cache_path(target.dir, target.url);
         if (auto cached = cache::read(file, _cache_encryption_key())) {
             // Nothing to report: there is no transfer, and a progress bar for a local read is a
             // flicker that means nothing.  The caller gets the bytes.
@@ -2477,7 +2485,7 @@ void Client::_drop_unused_picture(sqlite::Connection& c, std::string_view url) {
         return;
 
     std::error_code ec;
-    std::filesystem::remove(cache::path_for(_cache_dir, cache::PROFILE_DIR, url), ec);
+    std::filesystem::remove(_cache_path(cache::PROFILE_DIR, url), ec);
 }
 
 void Client::_reconcile_contacts() {
@@ -3367,7 +3375,7 @@ AttachmentAvailability Client::_attachment_availability(
     if (_cache_dir.empty())
         return AttachmentAvailability::absent;
 
-    auto name = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url).filename().string();
+    auto name = _cache_name(url);
 
     // In flight first: a transfer under way has no cache row yet -- that is written when it
     // finishes -- and answering `absent` while the bytes are arriving is what puts a download
@@ -4305,7 +4313,7 @@ void Client::_cache_attachment(
         const std::string& url,
         std::span<const std::byte, 32> key,
         std::span<const std::byte> data) {
-    auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url);
+    auto file = _cache_path(cache::ATTACHMENT_DIR, url);
     try {
         cache::write(file, key, data);
     } catch (const std::exception& e) {
@@ -4481,9 +4489,9 @@ void Client::_save_attachment(
     // No progress is reported for it -- there is no transfer to watch, and a bar that appears and
     // completes in the same frame is noise.  A save does not *fill* the cache, only read it: it has
     // a destination of its own, and writing a second encrypted copy would double what it costs.
-    auto name = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url).filename().string();
+    auto name = _cache_name(url);
     if (!_cache_dir.empty()) {
-        auto file = cache::path_for(_cache_dir, cache::ATTACHMENT_DIR, url);
+        auto file = _cache_path(cache::ATTACHMENT_DIR, url);
         if (auto cached = cache::read(file, _cache_encryption_key())) {
             _touch_cached(name);
             write_and_finish(std::nullopt, *cached);

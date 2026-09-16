@@ -25,10 +25,25 @@ namespace {
 
 }  // namespace
 
+std::string name_for(std::span<const std::byte, 32> key, std::string_view url) {
+    // Keyed, so the name is a MAC rather than a digest.  Unkeyed, the directory is an oracle: hash
+    // a url you are curious about, see whether that file is there, and you know this account
+    // downloaded it -- which the encryption does nothing about, since the question is answered by
+    // the name alone.  With a key nobody else has, the listing says only how many files there are.
+    //
+    // Personalised because the same key encrypts the files: one key, two uses, kept apart by the
+    // personalisation rather than by hoping the primitives never meet.
+    constexpr auto PERS_CACHE_NAME = "SessionCacheName"_b2b_pers;
+    auto h = hash::blake2b_key_pers<32>(key, PERS_CACHE_NAME, base_url(url));
+    return oxenc::to_hex(h.begin(), h.end());
+}
+
 std::filesystem::path path_for(
-        const std::filesystem::path& dir, std::string_view kind, std::string_view url) {
-    auto h = hash::blake2b<32>(base_url(url));
-    return dir / kind / oxenc::to_hex(h.begin(), h.end());
+        const std::filesystem::path& dir,
+        std::string_view kind,
+        std::span<const std::byte, 32> key,
+        std::string_view url) {
+    return dir / kind / name_for(key, url);
 }
 
 std::optional<std::vector<std::byte>> read(
