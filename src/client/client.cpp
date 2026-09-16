@@ -4330,9 +4330,8 @@ void Client::_download_decrypted(
             // up in this function and would otherwise have to remember to do it separately -- a
             // save of a file the server has dropped is exactly the case that was missed.
             //
-            // Queued before the report, so that by the time a display reacts to the failure the
-            // row already says the file is not coming.  Both of the callbacks below reach the
-            // application through the loop as well, so the order holds.
+            // A fetch reports through the loop and so sees the row already marked; a save reports
+            // from this thread and can beat it, which the announcement then settles.
             if (kind == DownloadKind::attachment && permanently_gone(code))
                 loop.call([this, url] { _mark_attachment_unavailable(url); });
 

@@ -166,9 +166,11 @@ struct Attachment {
     /// claimed to be.  Offering to fetch it again is offering the same failure.
     ///
     /// Not the opposite of `cached`, and not a transfer state: this is a fact about the file,
-    /// which is why it is here rather than on `AttachmentStatus`.  It survives a restart, it is
-    /// true for everyone, and it is never cleared -- an attachment url names one upload and is
-    /// never reissued.
+    /// which is why it is here rather than on `AttachmentStatus`.  It survives a restart, and it
+    /// is never cleared -- an attachment url names one upload and is never reissued.
+    ///
+    /// Set on every message quoting the url at the moment the download failed, and on no others: a
+    /// message carrying the same url that arrives later starts false and learns the same way.
     ///
     /// False means only that nothing has proved otherwise.  An attachment nobody has tried to
     /// fetch is indistinguishable from one that will succeed.
