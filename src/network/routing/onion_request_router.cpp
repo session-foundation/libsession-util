@@ -2161,8 +2161,11 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     auto rotate_at = (std::chrono::steady_clock::now() + _config.path_rotation_frequency);
     std::vector<service_node> rotated_path_nodes;
 
-    if (now > path.edge_first_connected_at + _config.edge_node_cache_duration ||
-        snode_pool->node_struck_out(edge_node))
+    bool new_edge =
+            (now > path.edge_first_connected_at + _config.edge_node_cache_duration ||
+             snode_pool->node_struck_out(edge_node));
+
+    if (new_edge)
         rotated_path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
     else {
         rotated_path_nodes =
@@ -2186,7 +2189,10 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     }
 
     OnionPath new_path{
-            new_path_id, std::move(rotated_path_nodes), now, path.edge_first_connected_at};
+            new_path_id,
+            std::move(rotated_path_nodes),
+            now,
+            (new_edge ? now : path.edge_first_connected_at)};
 
     // Send /info request to verify path before rotating
     Request info_request{
