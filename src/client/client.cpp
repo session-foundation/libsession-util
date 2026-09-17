@@ -499,20 +499,34 @@ void Client::_emit_history_replaced(const ConversationId& id) {
     });
 }
 
-void Client::_emit_message_alone(bool added, const ConversationId& id, int64_t message_id) {
-    auto msg = _message(message_id);
-    if (!msg)
+void Client::_emit_messages(bool added, std::vector<int64_t> ids) {
+    std::ranges::sort(ids);
+    ids.erase(std::ranges::unique(ids).begin(), ids.end());
+
+    std::vector<Message> msgs;
+    msgs.reserve(ids.size());
+    for (auto id : ids)
+        if (auto m = _message(id))
+            msgs.push_back(std::move(*m));
+
+    if (msgs.empty())
         return;
-    _emit([added, id = id, msg = std::move(*msg)](const callbacks& cbs) mutable {
-        const auto& h = added ? cbs.message_added : cbs.message_updated;
+
+    // Oldest first, by the same ordering history itself has: a handler applying these in order ends
+    // up where a reload would put it.  `messages()` pages the other way round, which is about
+    // paging rather than about what order things happened in.
+    std::ranges::sort(msgs, [](const Message& a, const Message& b) {
+        return std::pair{a.timestamp, a.id} < std::pair{b.timestamp, b.id};
+    });
+
+    _emit([added, msgs = std::move(msgs)](const callbacks& cbs) mutable {
+        const auto& h = added ? cbs.messages_added : cbs.messages_updated;
         if (h)
-            h(std::move(id), std::move(msg));
+            h(std::move(msgs));
     });
 }
 
-void Client::_emit_message(bool added, const ConversationId& id, int64_t message_id) {
-    _emit_message_alone(added, id, message_id);
-
+std::vector<int64_t> Client::_repliers(sqlite::Connection& c, int64_t message_id) {
     // Matched the way the reference was written rather than the way it resolves: a quote with no
     // msgid whose target is ambiguous resolves to only one of the candidates, but which one is not
     // worth computing here.  Reporting a message whose displayed reply did not actually change
@@ -520,7 +534,7 @@ void Client::_emit_message(bool added, const ConversationId& id, int64_t message
     //
     // `reply_timestamp IS NOT NULL` is redundant against the equality but is what lets the planner
     // use `messages_reply_target`, which is a partial index over exactly that condition.
-    auto c = core.database().conn();
+    std::vector<int64_t> found;
     for (auto replier : c.prepared_results<int64_t>(
                  R"(
         SELECT r.id FROM messages r JOIN messages t ON t.id = ?1
@@ -532,7 +546,23 @@ void Client::_emit_message(bool added, const ConversationId& id, int64_t message
            AND r.id != t.id
     )",
                  message_id))
-        _emit_message_alone(false, id, replier);
+        found.push_back(replier);
+    return found;
+}
+
+void Client::_emit_message(bool added, int64_t message_id) {
+    std::vector<int64_t> repliers;
+    {
+        auto c = core.database().conn();
+        repliers = _repliers(c, message_id);
+    }
+
+    if (added)
+        _emit_messages(true, {message_id});
+    else
+        repliers.push_back(message_id);
+
+    _emit_messages(false, std::move(repliers));
 }
 
 void Client::_touch(const ConversationId& id) {
@@ -760,9 +790,14 @@ void Client::_reconcile_cache(
             stale.emplace_back(id, std::move(name));
     }
     // Through the same path an eviction takes, so a file that went missing behind our back is
-    // reported to the messages drawing it exactly as one we deleted on purpose would be.
-    for (const auto& [id, name] : stale)
-        _drop_cached(c, id, name);
+    // reported to the messages drawing it exactly as one we deleted on purpose would be -- and as
+    // one report for the sweep, not one per file.
+    std::vector<int64_t> affected;
+    for (const auto& [id, name] : stale) {
+        auto showing = _drop_cached(c, id, name);
+        affected.insert(affected.end(), showing.begin(), showing.end());
+    }
+    _emit_messages_showing(c, affected);
 
     // A picture is referenced by an account naming its url and by nothing else, so the referenced
     // set is that column.  Recomputed here rather than passed in, so that an account that appeared
@@ -2003,7 +2038,7 @@ bool Client::_delete_message(int64_t message_id, Deletion how_far) {
     if (convo) {
         // Updated rather than removed: the row is still there, and a client that draws a gap where
         // the message was needs to be told what it now says rather than that it went.
-        _emit_message(false, *convo, message_id);
+        _emit_message(false, message_id);
         // The list shows the newest message's body, which may be the one just emptied.
         _touch(*convo);
     }
@@ -2255,7 +2290,7 @@ bool Client::_set_gallery(int64_t message_id, bool gallery) {
     }
 
     if (convo)
-        _emit_message(false, *convo, message_id);
+        _emit_message(false, message_id);
     return true;
 }
 
@@ -3411,26 +3446,24 @@ void Client::_emit_attachment_availability(std::string_view url) {
     _emit_messages_showing(c, _messages_showing(c, url));
 }
 
-std::vector<std::pair<int64_t, int64_t>> Client::_messages_showing(
-        sqlite::Connection& c, std::string_view url) {
+std::vector<int64_t> Client::_messages_showing(sqlite::Connection& c, std::string_view url) {
     // Collected rather than acted on as they are read: callers go on to write the table this is
     // reading, and the emits at the end can call back in.
-    std::vector<std::pair<int64_t, int64_t>> found;  // message id, conversation rowid
-    for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
-                 R"(
-            SELECT DISTINCT a.message, m.conversation
-            FROM message_attachments a JOIN messages m ON m.id = a.message
-            WHERE a.url = ?
-         )"s,
-                 url))
-        found.emplace_back(message, convo);
+    std::vector<int64_t> found;
+    for (auto message : c.prepared_results<int64_t>(
+                 "SELECT DISTINCT message FROM message_attachments WHERE url = ?"s, url))
+        found.push_back(message);
     return found;
 }
 
-void Client::_emit_messages_showing(
-        sqlite::Connection& c, const std::vector<std::pair<int64_t, int64_t>>& messages) {
-    for (const auto& [message, convo] : messages)
-        _emit_message(false, conversation_id_at(c, convo), message);
+void Client::_emit_messages_showing(sqlite::Connection& c, const std::vector<int64_t>& messages) {
+    // One report for the lot, replies included: these are the messages showing one file, so
+    // whatever happened to it happened to all of them at once, and is one thing to be told.
+    std::vector<int64_t> all = messages;
+    for (auto message : messages)
+        for (auto replier : _repliers(c, message))
+            all.push_back(replier);
+    _emit_messages(false, std::move(all));
 }
 
 void Client::_set_attachment_unavailable(
@@ -3441,16 +3474,15 @@ void Client::_set_attachment_unavailable(
     // re-announcing anything: a failure is reported afresh every time something asks for the file,
     // and a resend arrives once per message rather than once per file.  A *different* code is a
     // change -- what to tell the user about it has changed -- so it is not filtered out.
-    std::vector<std::pair<int64_t, int64_t>> changed;
-    for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
+    std::vector<int64_t> changed;
+    for (auto message : c.prepared_results<int64_t>(
                  R"(
-            SELECT DISTINCT a.message, m.conversation
-            FROM message_attachments a JOIN messages m ON m.id = a.message
-            WHERE a.url = ?1 AND a.unavailable IS NOT ?2
+            SELECT DISTINCT message FROM message_attachments
+            WHERE url = ?1 AND unavailable IS NOT ?2
          )"s,
                  url,
                  code))
-        changed.emplace_back(message, convo);
+        changed.push_back(message);
 
     if (changed.empty())
         return;
@@ -3680,7 +3712,7 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
     if (created)
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
-    _emit_message(true, id, client_id);
+    _emit_message(true, client_id);
     _touch(id);
 
     log::debug(cat, "send_message: message {} to conversation {}", client_id, id.to_string());
@@ -3872,7 +3904,7 @@ int64_t Client::_send_message(
     if (created)
         _emit_conversation_added(id);
     _reveal_note_to_self(id);
-    _emit_message(true, id, client_id);
+    _emit_message(true, client_id);
     _touch(id);
 
     log::debug(
@@ -4091,7 +4123,7 @@ bool Client::_retry_send(
     }
 
     if (has_uploads_left)
-        _emit_message(false, *convo_id, client_id);
+        _emit_message(false, client_id);
 
     log::debug(
             cat,
@@ -4609,14 +4641,22 @@ void Client::_evict_cache(int64_t keep) {
         doomed.push_back(std::move(row));
     }
 
-    for (const auto& [id, name, size] : doomed)
-        _drop_cached(c, id, name);
+    // One report for the pass rather than one per file: a message showing two of the files being
+    // dropped changed once, and getting over a limit is a single event to whoever is drawing.
+    std::vector<int64_t> affected;
+    for (const auto& [id, name, size] : doomed) {
+        auto showing = _drop_cached(c, id, name);
+        affected.insert(affected.end(), showing.begin(), showing.end());
+    }
+    _emit_messages_showing(c, affected);
 }
 
-void Client::_drop_cached(sqlite::Connection& c, int64_t id, const std::string& name) {
+std::vector<int64_t> Client::_drop_cached(
+        sqlite::Connection& c, int64_t id, const std::string& name) {
     // Read before the delete, which is what takes the rows away: the foreign key clears `cached` on
     // every message showing this file, and afterwards there is nothing left to say which those
-    // were.
+    // were.  Losing the local copy is a change to every one of them -- back to a file that has to
+    // be fetched before it can be shown -- which is the whole reason they are reachable at all.
     auto showing = _messages_cached_as(c, id);
 
     // The row is an index, not the truth: a file that is already gone still costs a row, and
@@ -4625,23 +4665,14 @@ void Client::_drop_cached(sqlite::Connection& c, int64_t id, const std::string& 
     std::filesystem::remove(_cache_dir / cache::ATTACHMENT_DIR / name, ec);
     c.prepared_exec("DELETE FROM attachment_cache WHERE id = ?", id);
 
-    // Losing the local copy is a change to every message that was drawing it -- back to a file that
-    // has to be fetched before it can be shown -- and saying so is the whole reason the rows above
-    // are reachable at all.
-    _emit_messages_showing(c, showing);
+    return showing;
 }
 
-std::vector<std::pair<int64_t, int64_t>> Client::_messages_cached_as(
-        sqlite::Connection& c, int64_t id) {
-    std::vector<std::pair<int64_t, int64_t>> found;  // message id, conversation rowid
-    for (auto&& [message, convo] : c.prepared_results<int64_t, int64_t>(
-                 R"(
-            SELECT DISTINCT a.message, m.conversation
-            FROM message_attachments a JOIN messages m ON m.id = a.message
-            WHERE a.cached = ?
-         )"s,
-                 id))
-        found.emplace_back(message, convo);
+std::vector<int64_t> Client::_messages_cached_as(sqlite::Connection& c, int64_t id) {
+    std::vector<int64_t> found;
+    for (auto message : c.prepared_results<int64_t>(
+                 "SELECT DISTINCT message FROM message_attachments WHERE cached = ?"s, id))
+        found.push_back(message);
     return found;
 }
 
@@ -4917,7 +4948,7 @@ void Client::_record_saved(int64_t message_id, std::optional<size_t> index, sys_
         convo_id = conversation_id_at(c, *convo);
     }
 
-    _emit_message(false, *convo_id, message_id);
+    _emit_message(false, message_id);
 }
 
 void Client::_notify_media_saved(int64_t message_id, size_t index) {
@@ -5096,7 +5127,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
         tx.commit();
     }
 
-    _emit_message(false, *convo_id, client_id);
+    _emit_message(false, client_id);
 
     _dispatch_sends(
             client_id,
@@ -5128,7 +5159,7 @@ void Client::_fail_attachment_send(int64_t client_id, bool permanent) {
                 client_id);
     }
 
-    _emit_message(false, *convo_id, client_id);
+    _emit_message(false, client_id);
 }
 
 // -- Core event handling ----------------------------------------------------------------------
@@ -5454,7 +5485,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         // Before the message is announced, so that a display reacting to it already sees whether
         // this is a gallery rather than being told once and corrected a moment later.
         _auto_download(convo_id, client_id);
-        _emit_message(true, convo_id, client_id);
+        _emit_message(true, client_id);
     }
     if (inserted || renamed)
         _touch(convo_id);
@@ -5547,7 +5578,7 @@ void Client::_apply_send_status(
     }
 
     if (convo)
-        _emit_message(false, *convo, client_id);
+        _emit_message(false, client_id);
 }
 
 }  // namespace session::client

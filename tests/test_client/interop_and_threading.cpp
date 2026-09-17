@@ -55,8 +55,8 @@ TEST_CASE("Client: handlers arrive through the dispatcher", "[client][callbacks]
         job();
     queued.clear();
 
-    REQUIRE(r.msg_added.size() == 1);
-    CHECK(r.msg_added[0].second.body == "hello");
+    REQUIRE(Recorder::messages(r.msg_added).size() == 1);
+    CHECK(Recorder::messages(r.msg_added)[0].body == "hello");
     CHECK(r.added.size() == 1);
 
     // Unsetting puts things back the way they are without one, which is what an application does
@@ -66,8 +66,8 @@ TEST_CASE("Client: handlers arrive through the dispatcher", "[client][callbacks]
     sync(*c);
 
     CHECK(queued.empty());
-    REQUIRE(r.msg_added.size() == 2);
-    CHECK(r.msg_added[1].second.body == "direct");
+    REQUIRE(Recorder::messages(r.msg_added).size() == 2);
+    CHECK(Recorder::messages(r.msg_added)[1].body == "direct");
 }
 
 TEST_CASE("Client: Core is usable directly through the Client", "[client][callbacks]") {

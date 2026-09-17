@@ -46,7 +46,7 @@
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::client::callbacks{
 ///             .conversation_updated = [&](const auto& convo) { redraw(convo); },
-///             .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
+///             .messages_added = [&](auto&& msgs) { for (auto& m : msgs) append(m); },
 ///         }};
 ///
 ///     for (const auto& convo : client.conversations())
@@ -756,16 +756,13 @@ class Client {
     /// also why the cache is keyed on the file rather than on the message that wanted it.
     void _emit_attachment_availability(std::string_view url);
 
-    /// Every message showing the file at `url`, as (message id, conversation rowid), and the
-    /// `message_updated` for each of them.
+    /// Every message showing the file at `url`, and the one report covering all of them.
     ///
     /// Two halves rather than one call because a caller with a condition of its own does the query
     /// itself; and collected rather than streamed because every caller goes on to write the table
     /// it is reading, and the emits can call back in.
-    std::vector<std::pair<int64_t, int64_t>> _messages_showing(
-            sqlite::Connection& c, std::string_view url);
-    void _emit_messages_showing(
-            sqlite::Connection& c, const std::vector<std::pair<int64_t, int64_t>>& messages);
+    std::vector<int64_t> _messages_showing(sqlite::Connection& c, std::string_view url);
+    void _emit_messages_showing(sqlite::Connection& c, const std::vector<int64_t>& messages);
 
     /// Records why the file at `url` could not be fetched, or -- with nullopt -- that something
     /// has happened to make it worth trying again.
@@ -857,14 +854,16 @@ class Client {
     // vanish.  Does nothing when no limit is set.
     void _evict_cache(int64_t keep);
 
-    // Removes one cache entry, file and row, and tells every message that was drawing it.
+    // Removes one cache entry, file and row, and returns the messages that were drawing it for the
+    // caller to report -- which it does rather than reporting them itself so that a pass dropping
+    // several files is one report and not one each.
     //
     // The messages have to be read before the row goes: the foreign key clears their reference as
     // it is deleted, and nothing afterwards can say which they were.
-    void _drop_cached(sqlite::Connection& c, int64_t id, const std::string& name);
+    std::vector<int64_t> _drop_cached(sqlite::Connection& c, int64_t id, const std::string& name);
 
-    // Every message whose attachment names cache entry `id`, as (message id, conversation rowid).
-    std::vector<std::pair<int64_t, int64_t>> _messages_cached_as(sqlite::Connection& c, int64_t id);
+    // Every message whose attachment names cache entry `id`.
+    std::vector<int64_t> _messages_cached_as(sqlite::Connection& c, int64_t id);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
@@ -1347,16 +1346,28 @@ class Client {
     // the replies pointing at it: one arriving makes them resolve, one being deleted changes what
     // they show.  Cascading here rather than at the ten call sites means none of them can forget
     // it, which would show up only as a display that quietly stops matching the database.
-    void _emit_message(bool added, const ConversationId& id, int64_t message_id);
+    //
+    // An added message and its replies are two reports, since they are two callbacks; the replies
+    // of a *changed* message join it in one.
+    void _emit_message(bool added, int64_t message_id);
 
-    // The above without the cascade, which is what the cascade itself uses.
+    // Every message that replies to `message_id`, which is what the cascade above reports.
     //
     // One level is enough, and is why this terminates: reporting B refreshes what A shows for the
     // message it replied to, but reporting A cannot change what anything shows for *A*, because a
     // message reached through a reply carries the reference to what it answered and never the
     // answer itself.  So there is no visited set, and two messages claiming to reply to each other
     // cannot loop.
-    void _emit_message_alone(bool added, const ConversationId& id, int64_t message_id);
+    std::vector<int64_t> _repliers(sqlite::Connection& c, int64_t message_id);
+
+    // Reports `ids` as one call, deduplicated and ordered oldest first -- the order the callback
+    // promises, and the reverse of the one `messages()` pages in.
+    //
+    // Built here rather than by the caller: whatever prompted this may have reached a message more
+    // than once, and building at the end means one build per message in its settled state.  Ids
+    // that no longer resolve are dropped, so a report for something deleted along the way is simply
+    // not made.
+    void _emit_messages(bool added, std::vector<int64_t> ids);
 
     // Conversations whose settled state still has to be reported.  A conversation is marked here
     // rather than reported immediately so that a poll delivering fifty messages to one conversation

@@ -104,8 +104,9 @@ struct AttachmentProgress {
 ///
 /// It is a *hint about what the next call will do*, not a promise about the file.  A `cached` that
 /// is evicted before you ask for it just means `attachment_data` fetches instead of reading, which
-/// is correct and merely slower.  Changes to it are reported as `message_updated`, since this is
-/// part of the message.
+/// is correct and merely slower.  Changes to it are reported through `messages_updated`, since this
+/// is part of the message -- and for every message showing the same file at once, since it is one
+/// file and one thing that happened to it.
 enum class AttachmentAvailability {
     /// In the local cache: `attachment_data` will read it from disk without touching the network.
     cached,

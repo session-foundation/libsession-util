@@ -1787,7 +1787,7 @@ TEST_CASE(
 
     // ...and was told so, in a conversation nothing about this send belongs to.
     bool announced = false;
-    for (const auto& [id, m] : r.msg_updated)
+    for (const auto& m : Recorder::messages(r.msg_updated))
         if (m.id == theirs && !m.attachments.empty() &&
             m.attachments[0].availability == AttachmentAvailability::cached)
             announced = true;
@@ -1908,6 +1908,88 @@ TEST_CASE(
 }
 
 TEST_CASE(
+        "Client: one report covers every message a change reached",
+        "[client][attachments][availability][signals]") {
+    // The two things a batch promises: it is ordered oldest first, and it is not confined to one
+    // conversation.  An attachment url is a hash of the encrypted body, so one file reaching three
+    // people's messages is ordinary rather than contrived -- and it is one thing that happened, so
+    // it is one report.
+    TempCacheDir dir;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys alice, bob;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    auto url = network::file_server::generate_download_url("shared", {}, true);
+    net->served["shared"] = ciphertext;
+
+    // Delivered newest first, so the order they are reported in cannot be the order they arrived.
+    int64_t next = 90;
+    auto arrive = [&](const SenderKeys& from, std::string hash, int64_t ts) {
+        deliver(
+                *c,
+                from,
+                "",
+                from_epoch_ms(ts),
+                std::move(hash),
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(static_cast<uint64_t>(next));
+                    a->set_url(url);
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                next++);
+        sync(*c);
+        // By timestamp rather than by position: `messages()` pages newest first, so the one just
+        // delivered is not the one at the front once a conversation has more than one.
+        for (const auto& m :
+             c->conversation(ConversationId::dm(from.session_id), await)->messages(await))
+            if (m.timestamp == from_epoch_ms(ts))
+                return m.id;
+        FAIL("delivered message not found");
+        return int64_t{0};
+    };
+    auto newest = arrive(alice, "h1", 3000);
+    auto oldest = arrive(bob, "h2", 1000);
+    auto middle = arrive(alice, "h3", 2000);
+
+    r.msg_updated.clear();
+    c->attachment_data(
+            oldest, 0, nullptr, [](std::optional<std::string>, std::vector<std::byte>) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    // The transfer starting and the transfer finishing, each of them once.
+    REQUIRE(r.msg_updated.size() == 2);
+    for (const auto& batch : r.msg_updated) {
+        // All three, across two conversations, in one call.
+        REQUIRE(batch.size() == 3);
+        std::set<ConversationId> convos;
+        for (const auto& m : batch)
+            convos.insert(m.conversation);
+        CHECK(convos.size() == 2);
+
+        // Oldest first, which is the reverse of the order they arrived in.
+        std::vector<int64_t> order;
+        for (const auto& m : batch)
+            order.push_back(m.id);
+        CHECK(order == std::vector<int64_t>{oldest, middle, newest});
+    }
+
+    CHECK(r.msg_updated.back()[0].attachments[0].availability == AttachmentAvailability::cached);
+}
+
+TEST_CASE(
         "Client: every change to what we hold of a file is reported",
         "[client][attachments][availability][signals]") {
     // One file, two messages showing it, and every way its availability can change -- because what
@@ -1965,7 +2047,7 @@ TEST_CASE(
     // Who was told since the last time we looked, and what they were told the state is.
     auto told = [&] {
         std::map<int64_t, AttachmentAvailability> seen;
-        for (const auto& [id, m] : r.msg_updated)
+        for (const auto& m : Recorder::messages(r.msg_updated))
             if (!m.attachments.empty())
                 seen[m.id] = m.attachments[0].availability;
         r.msg_updated.clear();
@@ -1987,7 +2069,7 @@ TEST_CASE(
         REQUIRE(net->downloads.size() == 1);
     };
 
-    told();  // The arrivals themselves are `message_added`, so start from clean.
+    told();  // The arrivals themselves are `messages_added`, so start from clean.
 
     // absent -> fetching.
     start_fetch();
@@ -2134,7 +2216,7 @@ TEST_CASE(
     // name, and getting from that back to the messages drawing it is only possible because the
     // reference runs that way.
     std::set<int64_t> told;
-    for (const auto& [id, m] : r.msg_updated)
+    for (const auto& m : Recorder::messages(r.msg_updated))
         told.insert(m.id);
     CHECK(told.count(first) == 1);
     CHECK(told.count(second) == 1);
@@ -2223,7 +2305,10 @@ TEST_CASE(
     // asked.
     try_fetch([&] { REQUIRE(fail_downloads(*net, 404) == 1); });
     CHECK(verdicts() == V{AttachmentUnavailable::not_found, AttachmentUnavailable::not_found});
-    CHECK(r.msg_updated.size() >= 2);
+    // One report carrying both, rather than one report each: it is one file, and what happened
+    // happened to both of them at once.
+    REQUIRE_FALSE(r.msg_updated.empty());
+    CHECK(r.msg_updated.back().size() == 2);
 
     // The repair: the sender sends the same file again, which -- the url being a hash of the
     // encrypted body -- lands at the same url.  That clears the verdict for the messages that

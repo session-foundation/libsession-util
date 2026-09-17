@@ -107,7 +107,7 @@ struct Reply {
     ///
     /// It can become set on a later read, once the message arrives, so do not cache it alongside
     /// the message.  You are told when it changes: the quoting message is re-reported through
-    /// `message_updated`.
+    /// `messages_updated`.
     std::optional<int64_t> message_id;
 
     /// The message itself, when it was loaded.
