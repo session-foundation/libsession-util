@@ -869,7 +869,7 @@ void Client::_profile_picture(
 }
 
 // Writes a fetched picture into the cache, or nothing at all when there is nowhere to put it.
-std::function<void(std::span<const std::byte>)> Client::_store_picture(std::string url) {
+std::function<bool(std::span<const std::byte>)> Client::_store_picture(std::string url) {
     if (_cache_dir.empty())
         return nullptr;
 
@@ -882,6 +882,9 @@ std::function<void(std::span<const std::byte>)> Client::_store_picture(std::stri
             // failing the caller's fetch over.
             log::warning(cat, "Could not cache a profile picture: {}", e.what());
         }
+        // Never: what the answer is for is whether the messages showing this file have been told it
+        // arrived, and a picture belongs to a conversation rather than to any message.
+        return false;
     };
 }
 
@@ -1004,10 +1007,10 @@ void Client::_attachment_data(
             on_progress(AttachmentProgress{message_id, index, done, total, r});
         });
 
-    std::function<void(std::span<const std::byte>)> store;
+    std::function<bool(std::span<const std::byte>)> store;
     if (!_cache_dir.empty())
         store = [this, url, k = _cache_encryption_key()](std::span<const std::byte> data) {
-            _cache_attachment(url, k, data);
+            return _cache_attachment(url, k, data);
         };
 
     _fetch_cached(
@@ -1026,7 +1029,7 @@ void Client::_fetch_cached(
         FetchTarget target,
         std::function<void(int64_t, int64_t, std::optional<int>)> progress,
         failable_function<void(std::vector<std::byte>)> cb,
-        std::function<void(std::span<const std::byte>)> store) {
+        std::function<bool(std::span<const std::byte>)> store) {
 
     if (!_cache_dir.empty()) {
         // An attachment's copy is found through the rows referencing it, under whatever name the
@@ -1117,29 +1120,38 @@ void Client::_fetch_cached(
                     if (found == _in_flight.end())
                         return;
 
-                    // Stored before anyone is told, since a waiter may go straight back to the
-                    // cache -- and only on success, because what a failed download produced is not
-                    // the file.
-                    if (!error && store)
-                        store(*found->second.plain);
-
-                    // Lifted out before the callbacks run: one of them may ask for this same file
-                    // again, and it must find a finished transfer rather than joining one that is
-                    // about to be erased.
+                    // Lifted out before anything else, because everything below can be seen from
+                    // outside and none of it should show a transfer that has finished as still
+                    // running.  Storing the file tells the messages showing it, and would report
+                    // them as `fetching` while this entry stood; a waiter may ask for the same file
+                    // again, and must find a finished transfer rather than join one about to be
+                    // erased.
                     auto entry = std::move(found->second);
                     _in_flight.erase(found);
 
-                    // Whichever way it went, the answer changed: `cached` if the file is now here,
-                    // back to `absent` if the download failed.  Before the waiters, so that one of
-                    // them reading a message finds the settled state rather than the old one.
+                    // Stored before anyone is told, since a waiter may go straight back to the
+                    // cache -- and only on success, because what a failed download produced is not
+                    // the file.
+                    bool stored = false;
+                    if (!error && store)
+                        stored = store(*entry.plain);
+
+                    // The transfer has stopped either way, so what a message can offer has changed
+                    // -- and it is `absent` for every outcome this has to report itself.  A success
+                    // that was kept has already said so from where the keeping happened; what is
+                    // left here is a download that failed, one whose file could not be written, and
+                    // one with nowhere to put it at all, none of which leave anything behind.
                     //
                     // A failure the file itself explains is recorded instead, which emits for the
                     // same messages and says more: not merely that nothing is here, but that
                     // asking again is pointless and why.
+                    //
+                    // Before the waiters, so that one of them reading a message finds the settled
+                    // state rather than the old one.
                     if (dir == cache::ATTACHMENT_DIR) {
                         if (permanent)
                             _set_attachment_unavailable(url, permanent);
-                        else
+                        else if (!stored)
                             _emit_attachment_availability(url);
                     }
 
@@ -4511,7 +4523,7 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
     _cache_attachment(url, _cache_encryption_key(), data);
 }
 
-void Client::_cache_attachment(
+bool Client::_cache_attachment(
         const std::string& url,
         std::span<const std::byte, 32> key,
         std::span<const std::byte> data) {
@@ -4522,7 +4534,7 @@ void Client::_cache_attachment(
         // A cache that cannot be written is a cache that misses next time, which is not worth
         // failing the caller's fetch over.
         log::warning(cat, "Could not cache an attachment: {}", e.what());
-        return;
+        return false;
     }
 
     // Recorded after the file exists, so a row never describes something that is not there.  The
@@ -4531,7 +4543,7 @@ void Client::_cache_attachment(
     std::error_code ec;
     auto on_disk = std::filesystem::file_size(file, ec);
     if (ec)
-        return;
+        return false;
 
     auto c = core.database().conn();
     auto name = file.filename().string();
@@ -4553,8 +4565,18 @@ void Client::_cache_attachment(
             url,
             id);
 
-    // Checked when something is added, which is the only moment the total can grow.
+    // Said here rather than by whoever asked for the bytes, because this is the moment it becomes
+    // true and there is more than one way to reach it: a download completing, and a file of our own
+    // being kept as it is uploaded.  Only the first has a caller waiting to hear about it, so an
+    // emit belonging to that path told nobody about the second -- including the other messages
+    // quoting the same file, which an upload makes drawable just as much as a download does.
+    _emit_attachment_availability(url);
+
+    // After the emit, so the file that provoked this is reported as here before anything it pushed
+    // out is reported as gone.  Checked when something is added, which is the only moment the total
+    // can grow.
     _evict_cache(id);
+    return true;
 }
 
 void Client::_evict_cache(int64_t keep) {
