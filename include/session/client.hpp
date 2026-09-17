@@ -882,8 +882,11 @@ class Client {
     // Every message whose attachment names cache entry `id`.
     std::vector<int64_t> _messages_cached_as(sqlite::Connection& c, int64_t id);
 
-    // What the cache index says its files add up to, in bytes on disk.
+    // What the cache index says its files add up to, in bytes on disk.  The overload taking a
+    // connection is for callers that already hold one and are about to write through it -- eviction
+    // reads this to decide whether it has work to do.
     int64_t _attachment_cache_size();
+    int64_t _attachment_cache_size(sqlite::Connection& c);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
