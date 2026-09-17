@@ -950,10 +950,14 @@ std::optional<int64_t> Client::attachment_cache_limit(await_t) {
 }
 
 int64_t Client::_attachment_cache_size() {
-    return core.database()
-            .conn()
-            .prepared_get<std::optional<int64_t>>("SELECT sum(size) FROM attachment_cache")
-            .value_or(0);
+    auto c = core.database().conn();
+    return _attachment_cache_size(c);
+}
+
+int64_t Client::_attachment_cache_size(sqlite::Connection& c) {
+    // `coalesce` rather than an optional the caller unwraps: SQL sums an empty set to NULL, and an
+    // empty cache occupying "no answer" rather than no bytes is a distinction nothing here wants.
+    return c.prepared_get<int64_t>("SELECT coalesce(sum(size), 0) FROM attachment_cache"s);
 }
 void Client::attachment_cache_size(result_function<int64_t> cb) {
     _async([this] { return _attachment_cache_size(); }, std::move(cb));
@@ -4621,8 +4625,7 @@ void Client::_evict_cache(int64_t keep) {
     if (!limit)
         return;
 
-    auto total = c.prepared_get<std::optional<int64_t>>("SELECT sum(size) FROM attachment_cache")
-                         .value_or(0);
+    auto total = _attachment_cache_size(c);
     if (total <= *limit)
         return;
 
