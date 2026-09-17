@@ -46,7 +46,8 @@ TEST_CASE("Cache: a url names one file, whatever is hung off it", "[client][cach
     CHECK(base == query);
 
     // A different file is a different entry.
-    CHECK(base != cache::path_for(dir.path, cache::PROFILE_DIR, key, "http://fs.example/file/5678"));
+    CHECK(base !=
+          cache::path_for(dir.path, cache::PROFILE_DIR, key, "http://fs.example/file/5678"));
 
     // And the two kinds do not share a directory, so a sweep of one cannot see the other's files.
     CHECK(base !=

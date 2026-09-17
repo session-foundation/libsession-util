@@ -98,7 +98,7 @@ TEST_CASE(
     CHECK(progress.back() == 0);
 
     // It landed in the cache under the url, not under the url plus its fragment.
-    auto file = TestHelper::cache_path(*c, cache::PROFILE_DIR,url);
+    auto file = TestHelper::cache_path(*c, cache::PROFILE_DIR, url);
     CHECK(std::filesystem::exists(file));
 
     // ...and the second ask is served from there: no download, and no progress reported, since
@@ -203,7 +203,7 @@ TEST_CASE(
     CHECK_FALSE(got.has_value());
 
     // And nothing was cached, so asking again tries again rather than serving the failure forever.
-    CHECK_FALSE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR,url)));
+    CHECK_FALSE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR, url)));
 }
 
 TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][pictures]") {
@@ -244,13 +244,13 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
-    REQUIRE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR,first)));
+    REQUIRE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR, first)));
 
     // They change it.  Nothing about the old file is referenced any more, and nothing else in the
     // client would ever look at it again.
     auto second = publish("new_pic", std::chrono::sys_seconds{2000s});
     sync(*c);
-    CHECK_FALSE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR,first)));
+    CHECK_FALSE(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR, first)));
 
     // ...and the new one still fetches, so what went was the stale file and not the directory.
     std::optional<std::vector<std::byte>> got;
@@ -262,7 +262,7 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
     REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
     REQUIRE(got);
-    CHECK(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR,second)));
+    CHECK(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR, second)));
 }
 
 TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictures]") {
@@ -295,7 +295,7 @@ TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictu
     REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
 
-    CHECK(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR,url)));
+    CHECK(std::filesystem::exists(TestHelper::cache_path(*c, cache::PROFILE_DIR, url)));
 
     // Watched from the outside, which is what a list of conversations needs to draw a placeholder:
     // the 0/0 that says it began, and a terminal result.

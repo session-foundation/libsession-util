@@ -300,7 +300,7 @@ class Conversation {
     // -- Sending ------------------------------------------------------------------------------
 
     /// Sends a message, storing it immediately and dispatching it via Core.  Yields the Client
-    /// message id of the stored row, which is what subsequent `message_updated` handlers carry as
+    /// message id of the stored row, which is what subsequent `messages_updated` reports carry as
     /// delivery progresses.
     ///
     /// See `OutgoingMessage` for what a message can carry.  With no attachments this stores and
