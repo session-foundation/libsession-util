@@ -1613,6 +1613,89 @@ TEST_CASE("Client: a text-only message previews no attachments", "[client][attac
 }
 
 TEST_CASE(
+        "Client: a file we send is kept in the cache",
+        "[client][attachments][availability][send]") {
+    // Otherwise a message we just sent draws as something to press, and pressing it fetches back a
+    // file that came off this disk a moment ago.
+    TempCacheDir cache;
+    TempClient c;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(cache.path);
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_outgoing", 7);
+    std::filesystem::create_directories(dir);
+
+    std::vector<std::byte> contents(5000);
+    random::fill(contents);
+    auto write_file = [&](const std::filesystem::path& to) {
+        std::ofstream out{to, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    };
+    auto picture = dir / "picture.png";
+    auto document = dir / "notes.pdf";
+    write_file(picture);
+    write_file(document);
+
+    auto as_image = OutgoingAttachment{.path = picture, .content_type = "image/png"};
+    auto as_document = OutgoingAttachment{.path = document, .content_type = "application/pdf"};
+
+    auto send = [&](std::vector<OutgoingAttachment> files) {
+        auto id = c->send_message(ConversationId::dm(me), {.attachments = std::move(files)}, await);
+        sync(*c);
+        REQUIRE(accept_stores(*net) == 1);
+        return id;
+    };
+    auto availability = [&](int64_t id, size_t index) {
+        return c->message(id, await)->attachments[index].availability;
+    };
+
+    // A gallery, which is drawn as the picture itself and so needs it whatever the setting says --
+    // that setting rations bandwidth, and there is none to ration for a file already on this disk.
+    auto gallery_id = send({as_image});
+    CHECK(availability(gallery_id, 0) == AttachmentAvailability::cached);
+
+    // Not a gallery, so it follows the rule the same file would have met arriving, and nobody has
+    // been asked yet.
+    CHECK(availability(send({as_document}), 0) == AttachmentAvailability::absent);
+
+    // Nor is a message mixing the two, however much of it is pictures: it draws as a list of
+    // attachments like any other, so the exception does not reach the image in it either.
+    auto mixed_id = send({as_image, as_document});
+    CHECK(availability(mixed_id, 0) == AttachmentAvailability::absent);
+    CHECK(availability(mixed_id, 1) == AttachmentAvailability::absent);
+
+    // And anything is kept once that rule says it would have been fetched, so what a conversation
+    // holds does not depend on which end of it a file came from.
+    c->conversation(ConversationId::dm(me), await)->set_auto_download(AutoDownload::all, await);
+    CHECK(availability(send({as_document}), 0) == AttachmentAvailability::cached);
+
+    // The copy is that file and not merely a file of the right length: saving it back is served
+    // from the cache with no request at all, and what lands is what was sent.
+    net->downloads.clear();
+    auto dest = dir / "saved.png";
+    std::promise<std::optional<Error>> done;
+    auto waiter = done.get_future();
+    c->Client::save_attachment(gallery_id, 0, dest, nullptr, [&done](auto r) {
+        done.set_value(r ? std::nullopt : std::optional{std::move(r).error()});
+    });
+    sync(*c);
+    CHECK(net->downloads.empty());
+    REQUIRE(waiter.wait_for(5s) == std::future_status::ready);
+    CHECK_FALSE(waiter.get().has_value());
+
+    REQUIRE(std::filesystem::file_size(dest) == contents.size());
+    std::ifstream in{dest, std::ios::binary};
+    std::vector<std::byte> got(contents.size());
+    in.read(reinterpret_cast<char*>(got.data()), got.size());
+    CHECK(!!(got == contents));
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE(
         "Client: an attachment says whether its bytes are already here",
         "[client][attachments][availability]") {
     // What a display needs before it can decide between drawing the file, drawing a bar, and
