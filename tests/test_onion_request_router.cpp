@@ -259,7 +259,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             3,
             10,
             10min,
-            node_strike_threshold,
             true,
             true,
             {{PathCategory::standard, 1}}};
@@ -570,7 +569,6 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
             3,
             10,
             10min,
-            3,
             true,
             true,
             {{PathCategory::standard, 1}}};
@@ -621,7 +619,6 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             3,
             10,
             10min,
-            3,
             true,
             false,
             {{PathCategory::standard, 1}}};
@@ -696,7 +693,6 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             3,
             10,
             10min,
-            3,
             true,
             true,  // single path mode
             {{PathCategory::standard, 1}}};
@@ -731,7 +727,6 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
             3,
             10,
             10min,
-            3,
             true,
             false,
             {{PathCategory::standard, 1}}};
@@ -873,7 +868,6 @@ TEST_CASE("Network", "[network][onion_request_router][cached_edge_nodes]") {
             3,
             10,
             10min,
-            node_strike_threshold,
             true,
             true,
             {{PathCategory::standard, 1}}};

@@ -31,7 +31,6 @@ namespace config {
         uint8_t path_strike_threshold;
         uint8_t path_build_retry_limit;
         std::chrono::minutes path_rotation_frequency;
-        uint8_t node_strike_threshold;
         bool disable_pre_build_paths;
         bool single_path_mode;
         std::unordered_map<PathCategory, uint8_t> min_path_counts;
