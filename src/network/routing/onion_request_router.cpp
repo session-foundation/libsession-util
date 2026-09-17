@@ -595,15 +595,9 @@ void OnionRequestRouter::_finish_setup() {
     }
 }
 
-// A cached edge node is handed to `_build_path` as a forced first hop, so it is the one node in a
-// path that never passes the strike filter `get_unused_nodes` applies to the rest, and the only
-// thing that dropped it was `edge_node_cache_duration` (10 days).
-//
-// Being struck out costs it the cached-edge-node role, not its place in the pool: it stays a node
-// like any other and `get_unused_nodes` can pick it again once its strikes expire.  Keeping the
-// entry and merely skipping it would hand the role back at that expiry, by which point we have been
-// running on a different edge node for two days - that is a second change of first hop, not a
-// return to a stable one.
+// A cached edge node is forced as a path's first hop, so it never passes the strike filter
+// `get_unused_nodes` applies to the rest; erasing rather than skipping is what stops it reclaiming
+// the role when its strikes expire.
 void OnionRequestRouter::_drop_struck_cached_edge_nodes() {
     auto snode_pool = _snode_pool.lock();
 
@@ -1748,8 +1742,7 @@ void OnionRequestRouter::_handle_transport_response(
                         for (const auto& node : path.nodes) {
                             auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
 
-                            if (snode_pool->node_strike_count(node_key) >=
-                                _config.node_strike_threshold)
+                            if (snode_pool->node_struck_out(node_key))
                                 nodes_to_repair.push_back(node_key);
                         }
 
@@ -2162,8 +2155,11 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     auto rotate_at = (std::chrono::steady_clock::now() + _config.path_rotation_frequency);
     std::vector<service_node> rotated_path_nodes;
 
-    if (now > path.edge_first_connected_at + _config.edge_node_cache_duration ||
-        snode_pool->node_struck_out(edge_node))
+    bool new_edge =
+            (now > path.edge_first_connected_at + _config.edge_node_cache_duration ||
+             snode_pool->node_struck_out(edge_node));
+
+    if (new_edge)
         rotated_path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
     else {
         rotated_path_nodes =
@@ -2187,7 +2183,10 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     }
 
     OnionPath new_path{
-            new_path_id, std::move(rotated_path_nodes), now, path.edge_first_connected_at};
+            new_path_id,
+            std::move(rotated_path_nodes),
+            now,
+            (new_edge ? now : path.edge_first_connected_at)};
 
     // Send /info request to verify path before rotating
     Request info_request{

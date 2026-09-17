@@ -78,7 +78,7 @@ class TestSnodePool : public SnodePool {
         });
     }
 
-    // Every strike on record, expired or not - which is what the decision sites used to count
+    // Every strike on record, expired or not
     size_t debug_recorded_strikes(const ed25519_pubkey& key) {
         return _loop->call_get([this, &key] {
             auto it = _snode_strikes.find(key);
@@ -124,18 +124,19 @@ std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes
 
 TEST_CASE("Network", "[network][get_unused_nodes]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 0,
+            .cache_node_strike_threshold = 0};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
     auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
@@ -248,18 +249,19 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
 TEST_CASE("Network", "[network][update_cache]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            5min,
-            5min,
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
+            .cache_expiration = 5min,
+            .cache_min_lifetime = 5min,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 0,
+            .cache_node_strike_threshold = 0};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::vector<service_node> snode_cache;
 
@@ -303,19 +305,19 @@ TEST_CASE("Network", "[network][update_cache]") {
 
 TEST_CASE("Network", "[network][refresh_min_cache_size]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            5min,
-            5min,
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            12,  // cache_min_size
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
+            .cache_expiration = 5min,
+            .cache_min_lifetime = 5min,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 12,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 0,
+            .cache_min_num_refresh_presence_to_include_node = 3,
+            .cache_node_strike_threshold = 0};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::vector<service_node> snode_cache;
 
