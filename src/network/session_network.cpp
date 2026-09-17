@@ -113,7 +113,6 @@ namespace {
                 main_config.onionreq_path_strike_threshold,
                 main_config.onionreq_path_build_retry_limit,
                 main_config.onionreq_path_rotation_frequency,
-                main_config.cache_node_strike_threshold,
                 main_config.onionreq_disable_pre_build_paths,
                 main_config.onionreq_single_path_mode,
                 main_config.onionreq_min_path_counts};
