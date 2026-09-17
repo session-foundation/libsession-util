@@ -724,19 +724,25 @@ class Client {
         std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
         std::vector<result_function<std::vector<std::byte>>> waiting;
     };
+    //
+    // Keyed by url rather than by the name the file is cached under.  Nothing outside this process
+    // sees these keys, and the hashed name exists to keep a directory listing from naming what was
+    // downloaded -- which is a question about the disk, not about a map in memory.
     std::unordered_map<std::string, InFlight> _in_flight;
 
     /// What to tell a reader about an attachment's local copy: the `Attachment` fields that report
-    /// it, filled in together because they come from one lookup.
+    /// it, given the `cached` reference already read from its row.
     ///
-    /// The one thing the message builders below need that is not in the database: it depends on
-    /// the cache directory and on which transfers are running, and both of those are ours.  Which
-    /// is why they are members rather than the file-local helpers they used to be.
+    /// The one thing the message builders below need that is not in the database: whether a
+    /// transfer is running, which is ours and in memory.  Which is why this is a member rather
+    /// than the file-local helper it used to be.
     struct CacheStatus {
         AttachmentAvailability availability = AttachmentAvailability::absent;
         int64_t done = 0, total = 0;
     };
-    CacheStatus _attachment_availability(sqlite::Connection& c, std::string_view url);
+    // `url` by reference rather than a view: `_in_flight` is keyed by std::string with no
+    // transparent hashing, and this runs once per attachment on a page.
+    CacheStatus _attachment_availability(const std::string& url, std::optional<int64_t> cached);
 
     /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
     /// every message showing that file.
@@ -825,13 +831,31 @@ class Client {
     /// upload is done.
     void _cache_outgoing_attachment(int64_t client_id, size_t index, const std::string& url);
 
+    // The cache entry holding `url`, as (id, file name), found through the attachment rows that
+    // reference it rather than by hashing the url.
+    //
+    // That is the point of the reference: the name is whatever the entry was written under, so one
+    // written under an older naming is still found, and the hash stays something applied to a file
+    // being created rather than to every lookup.
+    std::optional<std::pair<int64_t, std::string>> _cached_entry(
+            sqlite::Connection& c, std::string_view url);
+
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
-    void _touch_cached(const std::string& name);
+    void _touch_cached(int64_t id);
 
     // Removes least-recently-used entries until the cache fits its limit, never touching `keep` --
     // which is whatever was just written, so that a download cannot complete and immediately
     // vanish.  Does nothing when no limit is set.
-    void _evict_cache(const std::string& keep);
+    void _evict_cache(int64_t keep);
+
+    // Removes one cache entry, file and row, and tells every message that was drawing it.
+    //
+    // The messages have to be read before the row goes: the foreign key clears their reference as
+    // it is deleted, and nothing afterwards can say which they were.
+    void _drop_cached(sqlite::Connection& c, int64_t id, const std::string& name);
+
+    // Every message whose attachment names cache entry `id`, as (message id, conversation rowid).
+    std::vector<std::pair<int64_t, int64_t>> _messages_cached_as(sqlite::Connection& c, int64_t id);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
@@ -902,11 +926,16 @@ class Client {
     // Must be called on the loop: it touches globals.
     const b32& _cache_encryption_key();
 
-    /// Where a cached file lives, and what it is called, with the cache key applied.
+    /// What to call a cached file, and where to put it, with the cache key applied.
     ///
     /// One place rather than at every call site: the name is keyed (see `cache::name_for`), and a
     /// caller that forgot the key would silently get the old, guessable naming back.  Taking the
     /// key out of the caller's hands is what stops that being possible.
+    ///
+    /// For an *attachment* this is only ever used to name a file being written -- finding one that
+    /// already exists goes through `_cached_entry`, which reads the name the entry was stored with.
+    /// That is what lets the naming change without orphaning everything already downloaded.  A
+    /// profile picture has no such entry, so for those it remains the way in as well.
     std::filesystem::path _cache_path(std::string_view kind, std::string_view url);
     std::string _cache_name(std::string_view url);
     void _profile_picture(
@@ -1022,14 +1051,14 @@ class Client {
     // second request attaches to the first, picking up its progress from wherever it has reached,
     // rather than fetching the same bytes twice and caching them twice.
     //
-    // `on_hit` runs when the cache answered and `store` after a fetch completes, both on the loop.
-    // They are the whole of the difference between a cached attachment, which is indexed and
-    // evictable, and a cached picture, which is neither.
+    // `store` runs on the loop after a fetch completes, and is the whole of the difference between
+    // a cached attachment, which is indexed and evictable, and a cached picture, which is neither:
+    // `target.dir` is what says which of the two this is, so finding an existing copy and
+    // recording its use follow from that rather than from anything the caller supplies.
     void _fetch_cached(
             FetchTarget target,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
             result_function<std::vector<std::byte>> cb,
-            std::function<void(const std::string& name)> on_hit,
             std::function<void(std::span<const std::byte>)> store);
 
     // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.

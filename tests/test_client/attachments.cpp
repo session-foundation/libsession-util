@@ -1805,6 +1805,96 @@ TEST_CASE(
 }
 
 TEST_CASE(
+        "Client: a local copy is followed rather than recomputed",
+        "[client][attachments][availability][evict]") {
+    // What the reference from an attachment to its cached file buys, end to end: a message that
+    // arrives after the file is already here knows that without being told, and a message loses the
+    // file it was drawing loudly rather than silently.
+    TempCacheDir dir;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    auto seed = random::random(32);
+    int64_t next = 60;
+    auto arrive = [&](std::string file_id, std::string hash, int64_t ts) {
+        std::vector<std::byte> data(3000);
+        random::fill(data);
+        auto [ct, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+        net->served[file_id] = ct;
+        auto url = network::file_server::generate_download_url(file_id, {}, true);
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(ts),
+                std::move(hash),
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(static_cast<uint64_t>(next));
+                    a->set_url(url);
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(data.size());
+                    a->set_contenttype("image/png");
+                },
+                next++);
+        sync(*c);
+        return url;
+    };
+
+    auto convo = ConversationId::dm(peer.session_id);
+    auto newest = [&] { return c->conversation(convo, await)->messages(await)[0].id; };
+    auto availability = [&](int64_t id) {
+        return c->message(id, await)->attachments[0].availability;
+    };
+
+    auto url = arrive("shared", "h1", 1000);
+    auto first = newest();
+    CHECK(availability(first) == AttachmentAvailability::absent);
+
+    c->attachment_data(first, 0, nullptr, [](auto) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    CHECK(availability(first) == AttachmentAvailability::cached);
+
+    // A second message naming the same file, arriving after it is already here.  It has never been
+    // fetched for *this* message, and nothing hashes anything to work that out: the row it is
+    // inserted beside already points at the entry.
+    arrive("shared", "h2", 2000);
+    auto second = newest();
+    CHECK(availability(second) == AttachmentAvailability::cached);
+
+    // Now squeeze it out, by caching something else under a limit neither fits.
+    r.msg_updated.clear();
+    c->set_attachment_cache_limit(1, await);
+    arrive("other", "h3", 3000);
+    auto third = newest();
+    c->attachment_data(third, 0, nullptr, [](auto) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    // Both messages showing the evicted file are back to needing a download...
+    CHECK(availability(first) == AttachmentAvailability::absent);
+    CHECK(availability(second) == AttachmentAvailability::absent);
+    CHECK(availability(third) == AttachmentAvailability::cached);
+
+    // ...and both were told so.  This is the part a keyed hash could not do: eviction holds a file
+    // name, and getting from that back to the messages drawing it is only possible because the
+    // reference runs that way.
+    std::set<int64_t> told;
+    for (const auto& [id, m] : r.msg_updated)
+        told.insert(m.id);
+    CHECK(told.count(first) == 1);
+    CHECK(told.count(second) == 1);
+}
+
+TEST_CASE(
         "Client: a file that cannot be fetched is marked unavailable",
         "[client][attachments][unavailable]") {
     // Two messages naming one file, which is the case the column exists for: what a fetch discovers

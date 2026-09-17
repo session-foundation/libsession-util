@@ -297,7 +297,17 @@ END;
 -- to in years should not lose the last picture you had of them -- and are freed only when superseded,
 -- which is a question about what still references them rather than about size or age.
 CREATE TABLE attachment_cache (
-    name TEXT PRIMARY KEY NOT NULL,
+    -- Surrogate, so that an attachment row referencing this stores an integer rather than a second
+    -- copy of the name -- and so that the name is free to change shape later without the references
+    -- to it meaning anything different.
+    id INTEGER PRIMARY KEY,
+    -- The file on disk: a keyed hash of the url, deliberately not the url itself, so that someone
+    -- reading the cache directory cannot tell which files this account has fetched.
+    --
+    -- Nothing reads this to *find* an entry -- that is what the reference from message_attachments
+    -- is for -- so the hash is only ever applied to a file being written, and changing it costs
+    -- nothing already downloaded.
+    name TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
     last_used INTEGER NOT NULL      -- ms since epoch
 ) STRICT;
@@ -431,6 +441,20 @@ CREATE TABLE message_attachments (
     -- NULL means only that nothing has proved otherwise.
     unavailable INTEGER,
 
+    -- The local copy of this file, or NULL for no local copy -- which is also what eviction leaves
+    -- behind, since ON DELETE SET NULL clears this as the cache row goes.  That is what makes "this
+    -- row says cached" and "that file has an entry" impossible to disagree in the direction that
+    -- matters: the only way to be marked is to reference a living row.
+    --
+    -- Stored rather than derived from `url`.  The cached file is *named* by a keyed hash of the
+    -- url, so deriving it would make that hash load-bearing for everything already downloaded
+    -- rather than only for what is being written -- which is why changing the naming in 005 could
+    -- only be done by discarding the cache.
+    --
+    -- The other direction of disagreement -- a row naming a file something outside us deleted -- is
+    -- still possible, and is what the reconcile sweep is for.
+    cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
 
@@ -445,3 +469,11 @@ CREATE TABLE message_attachments (
 -- an outgoing attachment before its upload finishes, which on a sending-heavy account is a large
 -- share of the table.
 CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;
+
+-- Which messages show a file that is being evicted, which is the question a keyed hash cannot
+-- answer: it does not run backwards, so without this the only route from a cached file to the
+-- messages drawing it is to hash every url in the table.
+--
+-- Partial for the same reason as above: most rows are not cached at any given moment, and those
+-- are never the subject of this question.
+CREATE INDEX message_attachments_cached ON message_attachments(cached) WHERE cached IS NOT NULL;
