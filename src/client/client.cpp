@@ -4314,14 +4314,13 @@ void Client::_download_decrypted(
                           const network::file_metadata& meta, std::span<const std::byte> data) {
         if (state->failure)
             return;
-        // Asks for the transfer to stop, and today only asks: the download path does not consult
-        // the flag -- only uploads do -- so the rest of the file arrives and is dropped by the
-        // guard above before we report the failure.  Set anyway, because it is the right request to
-        // make and the plumbing is the part that is missing.
+        // Stops the transfer rather than merely stopping us from using it: the flag is read as the
+        // next chunk arrives, which matters because the stream scheme authenticates each chunk as
+        // it comes, so a failure surfaces wherever in the file the bad chunk is and everything
+        // after it would be bandwidth spent on a file already known to be unusable.
         //
-        // Worth having once it works: the stream scheme authenticates each chunk as it arrives, so
-        // a failure surfaces when the bad chunk does, wherever in the file that is, and everything
-        // after it is bandwidth spent on a file already known to be unusable.
+        // The guard above still stands, since a chunk already in flight arrives either way; what it
+        // no longer has to do is see the whole rest of the file.
         auto give_up = [&](std::string why) {
             state->failure = std::move(why);
             cancel->store(true);
@@ -4373,13 +4372,16 @@ void Client::_download_decrypted(
             on_done(Error{what, std::move(why)}, permanent);
         };
 
+        // Before the status, which for a transfer we gave up on is the cancellation we asked for:
+        // "decryption failed" is what happened, and the code that went with it is what says trying
+        // again is pointless.
+        if (state->failure)
+            return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
+
         if (auto* err = std::get_if<int16_t>(&result))
             return fail(
                     timeout ? "download timed out"s : "download failed with status {}"_format(*err),
                     *err);
-
-        if (state->failure)
-            return fail(std::move(*state->failure), ATTACHMENT_UNREADABLE);
 
         try {
             switch (scheme) {

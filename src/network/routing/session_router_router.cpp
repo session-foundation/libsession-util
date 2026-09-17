@@ -888,7 +888,8 @@ void SessionRouter::_quic_download_via_tunnel(
                                     std::get<int16_t>(result));
 
                         request.on_complete(std::move(result), false);
-                    });
+                    },
+                    request.cancelled);
 }
 
 void SessionRouter::_upload_internal(UploadRequest request) {

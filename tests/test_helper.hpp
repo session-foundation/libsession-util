@@ -157,18 +157,35 @@ inline MockNetwork* attach_mock_network(core::Core& core) {
     return &net;
 }
 
-/// Answers every captured download with `data`, delivered in chunks as a transport would rather
-/// than in one piece -- a decryptor that only works when handed the whole file at once is a bug
-/// this is meant to catch.  Returns how many there were.
+/// Answers one captured download with `data`, delivered in chunks as a transport would rather than
+/// in one piece -- a decryptor that only works when handed the whole file at once is a bug this is
+/// meant to catch -- and stops the moment its caller asks it to, as a router does.  Returns how
+/// many chunks were delivered, which is how a test tells a transfer that was cut short from one
+/// that ran to the end.
+inline size_t serve_one_download(
+        network::DownloadRequest& r,
+        std::string id,
+        std::span<const std::byte> data,
+        size_t chunk = 4096) {
+    network::file_metadata meta{std::move(id), static_cast<int64_t>(data.size()), {}, {}};
+    size_t delivered = 0;
+    for (size_t at = 0; at < data.size() && !r.is_cancelled(); at += chunk) {
+        r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
+        delivered++;
+    }
+    if (r.is_cancelled())
+        r.on_complete(network::ERROR_REQUEST_CANCELLED, false);
+    else
+        r.on_complete(meta, false);
+    return delivered;
+}
+
+/// Answers every captured download with `data`.  Returns how many there were.
 inline size_t serve_downloads(
         MockNetwork& net, std::span<const std::byte> data, size_t chunk = 4096) {
     auto pending = std::exchange(net.downloads, {});
-    for (auto& r : pending) {
-        network::file_metadata meta{"served", static_cast<int64_t>(data.size()), {}, {}};
-        for (size_t at = 0; at < data.size(); at += chunk)
-            r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
-        r.on_complete(meta, false);
-    }
+    for (auto& r : pending)
+        serve_one_download(r, "served", data, chunk);
     return pending.size();
 }
 
@@ -185,11 +202,7 @@ inline size_t serve_downloads(MockNetwork& net, size_t chunk = 4096) {
             continue;
         }
 
-        std::span<const std::byte> data{found->second};
-        network::file_metadata meta{info->file_id, static_cast<int64_t>(data.size()), {}, {}};
-        for (size_t at = 0; at < data.size(); at += chunk)
-            r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
-        r.on_complete(meta, false);
+        serve_one_download(r, info->file_id, found->second, chunk);
     }
     return pending.size();
 }

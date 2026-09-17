@@ -82,10 +82,17 @@ class QuicFileClient {
 
     /// Download a file by ID from the file server.  on_data is called as data chunks arrive
     /// with a non-owning view of the data; on_complete signals completion or failure.
+    ///
+    /// `cancelled` is the caller's cancellation flag -- `FileTransferRequest::cancelled` -- checked
+    /// as each chunk arrives, so a transfer the caller has given up on stops rather than running to
+    /// completion into a consumer that is discarding it.  Cancelling completes with
+    /// ERROR_REQUEST_CANCELLED.  A stream with nothing arriving on it notices nothing, since this
+    /// is the passive end of the transfer; the caller's timeouts are what end those.
     void download(
             std::string file_id,
             std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data,
-            std::function<void(std::variant<file_metadata, int16_t> result)> on_complete);
+            std::function<void(std::variant<file_metadata, int16_t> result)> on_complete,
+            std::shared_ptr<std::atomic<bool>> cancelled = nullptr);
 
     /// Close the current connection (if any).
     void close();
