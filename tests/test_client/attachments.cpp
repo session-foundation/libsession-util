@@ -2325,3 +2325,75 @@ TEST_CASE(
                           AttachmentUnavailable::unreadable,
                           AttachmentUnavailable::unreadable});
 }
+
+TEST_CASE(
+        "Client: a download that cannot be used is stopped rather than finished",
+        "[client][attachments][cancel]") {
+    // The stream scheme authenticates each chunk as it arrives, so a file that has been tampered
+    // with is known to be unusable from the bad chunk onwards -- and everything after it is
+    // bandwidth spent on a file we have already decided to throw away.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    // Large enough that stopping early is visibly different from running to the end.
+    std::vector<std::byte> plaintext(200'000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    REQUIRE(ciphertext.size() > 50'000);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("tampered", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            42);
+    sync(*c);
+    auto msg_id =
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    // Corrupted in the second chunk, so the first one authenticates and the failure happens partway
+    // rather than at the very start.
+    auto corrupt = ciphertext;
+    corrupt[5000] ^= std::byte{0xff};
+
+    std::optional<std::string> reported;
+    bool answered = false;
+    c->attachment_data(
+            msg_id, 0, nullptr, [&](std::optional<std::string> err, std::vector<std::byte>) {
+                reported = std::move(err);
+                answered = true;
+            });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+
+    auto chunks = serve_one_download(net->downloads[0], "tampered", corrupt);
+    net->downloads.clear();
+    sync(*c);
+
+    // Stopped well short of the end.  Not a tighter bound than that: how soon the tampering is
+    // noticed depends on how much the stream format has to have in hand before it can authenticate
+    // the block the bad byte landed in, which is its business and not something to pin here.
+    auto whole = (corrupt.size() + 4095) / 4096;
+    CHECK(chunks < whole / 2);
+
+    // And what the caller is told is what actually went wrong, not the cancellation we asked for on
+    // the strength of it -- which is also what decides that trying again is pointless.
+    REQUIRE(answered);
+    REQUIRE(reported);
+    CHECK(reported->find("decryption failed") != std::string::npos);
+}
