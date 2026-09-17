@@ -2136,6 +2136,19 @@ bool Client::_delete_message_everywhere(int64_t message_id) {
     return true;
 }
 
+// Whether an attachment of this kind is one `mode` fetches without being asked.  Shared with the
+// upload path, which keeps a copy of what we send under the same rule, so one file draws the same
+// way in a transcript whichever direction it went.
+static bool auto_download_wants(AutoDownload mode, const std::optional<std::string>& content_type) {
+    switch (mode) {
+        case AutoDownload::all: return true;
+        case AutoDownload::image_attachments:
+            return content_type && content_type->starts_with("image/");
+        case AutoDownload::none: return false;
+    }
+    return false;
+}
+
 // The two purges below are the only thing here that removes a message row outright rather than
 // emptying it, so both are written to be incapable of touching anything a deletion did not leave:
 // the predicate is part of the statement, not a check made before it.
@@ -2168,8 +2181,7 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
     auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY);
 
     for (const auto& a : msg->attachments) {
-        if (*mode == AutoDownload::image_attachments &&
-            !(a.content_type && a.content_type->starts_with("image/")))
+        if (!auto_download_wants(*mode, a.content_type))
             continue;
 
         // The sender's claim, and all we have before fetching anything.  A sender who under-reports
@@ -3948,6 +3960,11 @@ void Client::_upload_next(
                             static_cast<int64_t>(index));
                 }
 
+                // After the url is recorded, since that is what says where the copy belongs -- and
+                // before the message is announced as sent, so a display reacting to that already
+                // sees the file as here rather than being told a moment later.
+                _cache_outgoing_attachment(client_id, index, url);
+
                 log::debug(
                         cat,
                         "Uploaded attachment {} of message {} ({} bytes) to {}",
@@ -4383,6 +4400,82 @@ Client::StoredPointer Client::_attachment_pointer(int64_t message_id, size_t ind
         p.size = sz;
     }
     return p;
+}
+
+void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const std::string& url) {
+    if (_cache_dir.empty())
+        return;
+
+    // Read back rather than passed in: the upload has just written this row, and threading what
+    // this needs through the network callback would grow what that has to carry for something that
+    // is not part of sending.
+    auto msg = _message(client_id);
+    if (!msg)
+        return;
+    auto found = std::ranges::find(msg->attachments, index, &Attachment::index);
+    if (found == msg->attachments.end() || !found->size)
+        return;
+    auto size = *found->size;
+
+    // A gallery is drawn as its pictures, so a message we sent needs its bytes here just as much as
+    // one that arrived: without them a conversation shows placeholders over files that came off
+    // this disk.  That is the whole of the exception, which is why the gallery rule decides it --
+    // the same rule the display will apply -- rather than this attachment happening to be an image.
+    //
+    // Anything else follows what would have been fetched had the message arrived instead.
+    if (!msg->gallery_viewable) {
+        auto convo = _conversation(msg->conversation);
+        auto mode = convo ? convo->auto_download() : std::nullopt;
+        if (!mode || !auto_download_wants(*mode, found->content_type))
+            return;
+    }
+
+    // The same ceiling a download is held to: what it bounds is disk, and a copy of a file we sent
+    // costs exactly what a copy of one we received does.
+    if (auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY); max_size && size > *max_size)
+        return;
+
+    // Not on `Attachment`, deliberately: where a file is locally is the application's business, and
+    // this is the one place that needs the path back.
+    auto stored = core.database().conn().prepared_maybe_get<std::string>(
+            "SELECT path FROM message_attachments WHERE message = ?1 AND idx = ?2",
+            client_id,
+            static_cast<int64_t>(index));
+    if (!stored)
+        return;
+    std::filesystem::path path{*stored};
+
+    // Re-read rather than kept from the upload, which streams the file rather than holding it.
+    // Best effort throughout: a file moved or replaced between the upload finishing and this leaves
+    // nothing cached, which costs a download if the message is ever drawn again and nothing else.
+    //
+    // The length has to still match what was uploaded.  A url names one particular encrypted body,
+    // so storing something else under it would leave the cache answering for that url with bytes
+    // that are not the ones it identifies -- and unlike a missing cache entry, that is wrong rather
+    // than merely slow.
+    std::error_code ec;
+    if (std::filesystem::file_size(path, ec) != static_cast<uintmax_t>(size) || ec) {
+        log::debug(
+                cat,
+                "Not caching attachment of message {}: {} is no longer the file that was uploaded",
+                client_id,
+                path.string());
+        return;
+    }
+
+    std::vector<std::byte> data(static_cast<size_t>(size));
+    std::ifstream in{path, std::ios::binary};
+    in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    if (!in) {
+        log::debug(
+                cat,
+                "Not caching attachment of message {}: {} could not be read back",
+                client_id,
+                path.string());
+        return;
+    }
+
+    _cache_attachment(url, _cache_encryption_key(), data);
 }
 
 void Client::_cache_attachment(

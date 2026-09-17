@@ -817,6 +817,19 @@ class Client {
             const std::string& url,
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
+
+    /// Keeps a copy of a file we just uploaded, so that a message we sent can be drawn without
+    /// fetching back a file that came off this disk in the first place.
+    ///
+    /// Under the rule that would have applied had the same file arrived, plus anything on a
+    /// gallery-viewable message whatever that rule says -- see the definition.  Best effort: the
+    /// source is re-read, since the upload streamed it rather than holding it, and a file that has
+    /// since moved or changed is simply not cached.
+    ///
+    /// Call once the row carries the url, which is both where the copy belongs and what says the
+    /// upload is done.
+    void _cache_outgoing_attachment(int64_t client_id, size_t index, const std::string& url);
+
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
     void _touch_cached(const std::string& name);
 
