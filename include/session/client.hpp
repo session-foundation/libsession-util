@@ -812,9 +812,13 @@ class Client {
     // Throws if there is no such attachment, or if its sender gave no url.
     StoredPointer _attachment_pointer(int64_t message_id, size_t index);
 
-    // Writes `data` into the attachment cache under `url`, and records it.  The row is an index
-    // over the file, so it is written after the file exists.
-    void _cache_attachment(
+    // Writes `data` into the attachment cache under `url`, records it, and tells every message
+    // showing that file that it is now here.  The row is an index over the file, so it is written
+    // after the file exists.
+    //
+    // Returns whether it got that far, which is what says the messages have been told: a caller
+    // that gets false has left them where they were and owes them the news itself.
+    bool _cache_attachment(
             const std::string& url,
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
@@ -1055,14 +1059,21 @@ class Client {
     // a cached attachment, which is indexed and evictable, and a cached picture, which is neither:
     // `target.dir` is what says which of the two this is, so finding an existing copy and
     // recording its use follow from that rather than from anything the caller supplies.
+    //
+    // It returns whether it kept the file *and told the messages showing it*, which is what decides
+    // whether this has to report the transfer ending: a fetch with nothing to show for it leaves
+    // them where they were, and every way of having nothing to show -- a failure, a file that could
+    // not be written, no cache at all -- looks the same to them.
     void _fetch_cached(
             FetchTarget target,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
             result_function<std::vector<std::byte>> cb,
-            std::function<void(std::span<const std::byte>)> store);
+            std::function<bool(std::span<const std::byte>)> store);
 
-    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.
-    std::function<void(std::span<const std::byte>)> _store_picture(std::string url);
+    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.  Always
+    // answers false: a picture belongs to a conversation rather than to a message, so there is
+    // never a message to have told.
+    std::function<bool(std::span<const std::byte>)> _store_picture(std::string url);
 
     // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
     // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a

@@ -1696,6 +1696,84 @@ TEST_CASE(
 }
 
 TEST_CASE(
+        "Client: sending a file tells the messages already showing it",
+        "[client][attachments][availability][signals][send]") {
+    // An attachment url is a hash of the encrypted body, so uploading a file puts it at the url
+    // somebody may already have sent us.  Keeping our copy makes their message drawable too, and
+    // nothing else is going to tell them: the upload's own completion reports the message being
+    // sent, which is a different message in a different conversation.
+    TempCacheDir cache;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(cache.path);
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_shared", 7);
+    std::filesystem::create_directories(dir);
+    auto picture = dir / "picture.png";
+    std::vector<std::byte> contents(4000);
+    random::fill(contents);
+    {
+        std::ofstream out{picture, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+    }
+
+    // Pinned so the url our upload lands at is one this test can name in advance, which is what
+    // stands in for the two ends having encrypted the same file to the same place.
+    net->next_file_id = 4242;
+    auto shared = network::file_server::generate_download_url(
+            "4242", c->core.network()->file_server_config, true);
+
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(shared);
+                a->set_key(std::string(32, 'k'));
+                a->set_size(contents.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+
+    auto theirs =
+            c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+    CHECK(c->message(theirs, await)->attachments[0].availability == AttachmentAvailability::absent);
+
+    r.msg_updated.clear();
+    c->send_message(
+            ConversationId::dm(me),
+            {.attachments = {OutgoingAttachment{.path = picture, .content_type = "image/png"}}},
+            await);
+    sync(*c);
+    REQUIRE(accept_stores(*net) == 1);
+
+    // Their message can now be drawn from disk...
+    CHECK(c->message(theirs, await)->attachments[0].availability == AttachmentAvailability::cached);
+
+    // ...and was told so, in a conversation nothing about this send belongs to.
+    bool announced = false;
+    for (const auto& [id, m] : r.msg_updated)
+        if (m.id == theirs && !m.attachments.empty() &&
+            m.attachments[0].availability == AttachmentAvailability::cached)
+            announced = true;
+    CHECK(announced);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE(
         "Client: an attachment says whether its bytes are already here",
         "[client][attachments][availability]") {
     // What a display needs before it can decide between drawing the file, drawing a bar, and
@@ -1802,6 +1880,145 @@ TEST_CASE(
 
     CHECK(c->conversation(convo, await)->messages(await)[1].attachments[0].availability ==
           AttachmentAvailability::absent);
+}
+
+TEST_CASE(
+        "Client: every change to what we hold of a file is reported",
+        "[client][attachments][availability][signals]") {
+    // One file, two messages showing it, and every way its availability can change -- because what
+    // decides whether a display is right is not the state but whether it was *told* about the move
+    // into it.  Both messages every time: the file is one file, and telling only whoever asked for
+    // it leaves the other drawing the wrong thing.
+    TempCacheDir dir;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto seed = random::random(32);
+    auto [ciphertext, key] = attachment::encrypt(seed, plaintext, attachment::Domain::ATTACHMENT);
+    auto url = network::file_server::generate_download_url("watched", {}, true);
+    net->served["watched"] = ciphertext;
+
+    int64_t next = 80;
+    auto arrive = [&](std::string hash, int64_t ts, std::string file_id) {
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(ts),
+                std::move(hash),
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(static_cast<uint64_t>(next));
+                    a->set_url(network::file_server::generate_download_url(file_id, {}, true));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                next++);
+        sync(*c);
+    };
+
+    auto convo = ConversationId::dm(peer.session_id);
+    arrive("h1", 1000, "watched");
+    arrive("h2", 2000, "watched");
+    auto ids = [&] {
+        std::vector<int64_t> found;
+        for (const auto& m : c->conversation(convo, await)->messages(await))
+            found.push_back(m.id);
+        return found;
+    }();
+    REQUIRE(ids.size() == 2);
+    std::set<int64_t> both{ids.begin(), ids.end()};
+
+    // Who was told since the last time we looked, and what they were told the state is.
+    auto told = [&] {
+        std::map<int64_t, AttachmentAvailability> seen;
+        for (const auto& [id, m] : r.msg_updated)
+            if (!m.attachments.empty())
+                seen[m.id] = m.attachments[0].availability;
+        r.msg_updated.clear();
+        return seen;
+    };
+    auto told_both = [&](AttachmentAvailability state) {
+        auto seen = told();
+        std::set<int64_t> who;
+        for (const auto& [id, s] : seen) {
+            who.insert(id);
+            CHECK(s == state);
+        }
+        CHECK(who == both);
+    };
+    auto start_fetch = [&] {
+        c->attachment_data(ids[0], 0, nullptr, [](auto) {});
+        sync(*c);
+        REQUIRE(net->downloads.size() == 1);
+    };
+
+    told();  // The arrivals themselves are `message_added`, so start from clean.
+
+    // absent -> fetching.
+    start_fetch();
+    told_both(AttachmentAvailability::fetching);
+
+    // fetching -> absent, for a failure that says nothing about the file.
+    REQUIRE(fail_downloads(*net, 500) == 1);
+    sync(*c);
+    told_both(AttachmentAvailability::absent);
+
+    // fetching -> cached.
+    start_fetch();
+    told_both(AttachmentAvailability::fetching);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    told_both(AttachmentAvailability::cached);
+
+    // cached -> absent, by eviction.
+    c->set_attachment_cache_limit(1, await);
+    arrive("h3", 3000, "other");
+    net->served["other"] = ciphertext;
+    auto third = c->conversation(convo, await)->messages(await)[0].id;
+    c->attachment_data(third, 0, nullptr, [](auto) {});
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    {
+        auto seen = told();
+        // The third message is in here too, having just cached its own file; what matters is that
+        // the two showing the evicted one were told it is gone.
+        for (auto id : both) {
+            REQUIRE(seen.count(id) == 1);
+            CHECK(seen.at(id) == AttachmentAvailability::absent);
+        }
+    }
+    c->set_attachment_cache_limit(std::nullopt, await);
+
+    // fetching -> absent, for a failure that does say something: both are told, and both are told
+    // why rather than merely that nothing is here.
+    start_fetch();
+    told();
+    REQUIRE(fail_downloads(*net, 404) == 1);
+    sync(*c);
+    told_both(AttachmentAvailability::absent);
+    for (auto id : both)
+        CHECK(c->message(id, await)->attachments[0].unavailable ==
+              AttachmentUnavailable::not_found);
+
+    // ...and a resend clears it, for the message that first failed as well as the new arrival.
+    arrive("h4", 4000, "watched");
+    {
+        auto seen = told();
+        for (auto id : both)
+            CHECK(seen.count(id) == 1);
+    }
+    for (auto id : both)
+        CHECK_FALSE(c->message(id, await)->attachments[0].unavailable.has_value());
 }
 
 TEST_CASE(

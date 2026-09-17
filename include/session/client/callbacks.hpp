@@ -74,7 +74,18 @@ struct callbacks {
     /// A message was added, whether received or sent from here.
     std::function<void(ConversationId&&, Message&&)> message_added;
 
-    /// An existing message changed — currently only its send state.
+    /// An existing message changed: its send state, whether it is shown as a gallery, when its
+    /// recipient saved an attachment, or what we hold of an attachment's file — which of the three
+    /// `AttachmentAvailability` states it is in, and whether a fetch of it has been found to be
+    /// pointless.
+    ///
+    /// Fired for **every** message in **every** conversation, not only whichever one is on screen:
+    /// there is no notion here of what an application is showing, so deciding what to redraw is the
+    /// application's.
+    ///
+    /// A message can also be reported because something it *quotes* changed, since a reply draws a
+    /// preview of its target — so a handler sees messages it never asked about, and a change to one
+    /// message is several of these.
     std::function<void(ConversationId&&, Message&&)> message_updated;
 
     /// Messages were deleted from a conversation, and anything displaying its history should read
