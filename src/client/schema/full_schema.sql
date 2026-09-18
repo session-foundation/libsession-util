@@ -297,7 +297,17 @@ END;
 -- to in years should not lose the last picture you had of them -- and are freed only when superseded,
 -- which is a question about what still references them rather than about size or age.
 CREATE TABLE attachment_cache (
-    name TEXT PRIMARY KEY NOT NULL,
+    -- Surrogate, so that an attachment row referencing this stores an integer rather than a second
+    -- copy of the name -- and so that the name is free to change shape later without the references
+    -- to it meaning anything different.
+    id INTEGER PRIMARY KEY,
+    -- The file on disk: a keyed hash of the url, deliberately not the url itself, so that someone
+    -- reading the cache directory cannot tell which files this account has fetched.
+    --
+    -- Nothing reads this to *find* an entry -- that is what the reference from message_attachments
+    -- is for -- so the hash is only ever applied to a file being written, and changing it costs
+    -- nothing already downloaded.
+    name TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
     last_used INTEGER NOT NULL      -- ms since epoch
 ) STRICT;
@@ -407,5 +417,63 @@ CREATE TABLE message_attachments (
     -- the other end volunteering a DataExtractionNotification, which many clients do not.
     saved_at INTEGER,
 
+    -- What the last attempt to fetch this file found, when what it found was that it could not be
+    -- fetched: the file server does not hold it -- which is also how an expired upload answers --
+    -- or the bytes arrived and failed to authenticate.
+    --
+    -- A cached answer rather than a fact about the url, which is what decides its lifetime.  An
+    -- attachment url is a hash of the encrypted body and the encryption is deterministic, so the
+    -- same file sent again by the same account lands at the *same* url.  That is the repair path:
+    -- the recipient is told it could not be fetched, asks for it again, and the sender's re-upload
+    -- puts those bytes back where they were.  A flag that never cleared would block precisely the
+    -- action that fixes the problem.
+    --
+    -- Set across every row naming a url when a fetch of it fails; cleared across every row naming
+    -- that url when a new attachment row quoting it arrives.  The old rows are cleared too, not
+    -- only the new one: it is the same file, and showing one message's copy as broken and
+    -- another's as fine would be showing the same bytes two ways.
+    --
+    -- The value is *why*: the file server's status for a server answer -- 404 for an upload it
+    -- does not hold -- and `ATTACHMENT_UNREADABLE` for bytes that arrived and could not be turned
+    -- back into the file they claimed to be.  Only the first is worth telling the user to ask for
+    -- a resend about.
+    --
+    -- NULL means only that nothing has proved otherwise.
+    unavailable INTEGER,
+
+    -- The local copy of this file, or NULL for no local copy -- which is also what eviction leaves
+    -- behind, since ON DELETE SET NULL clears this as the cache row goes.  That is what makes "this
+    -- row says cached" and "that file has an entry" impossible to disagree in the direction that
+    -- matters: the only way to be marked is to reference a living row.
+    --
+    -- Stored rather than derived from `url`.  The cached file is *named* by a keyed hash of the
+    -- url, so deriving it would make that hash load-bearing for everything already downloaded
+    -- rather than only for what is being written -- which is why changing the naming in 005 could
+    -- only be done by discarding the cache.
+    --
+    -- The other direction of disagreement -- a row naming a file something outside us deleted -- is
+    -- still possible, and is what the reconcile sweep is for.
+    cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
+
+-- Which messages show a given file.  Every question the attachment cache asks of this table is
+-- that one -- marking a file unfetchable, clearing it again on a resend, reporting a transfer
+-- starting, finishing or being evicted -- and more than one message routinely quotes the same
+-- file, because an attachment url is a hash of the encrypted body: the same file sent twice by the
+-- same account lands at the same url.  Without this, each of those answers scans the whole table
+-- to touch a handful of rows.
+--
+-- Partial because a row with no url has nothing to fetch and is never the subject of any of them:
+-- an outgoing attachment before its upload finishes, which on a sending-heavy account is a large
+-- share of the table.
+CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;
+
+-- Which messages show a file that is being evicted, which is the question a keyed hash cannot
+-- answer: it does not run backwards, so without this the only route from a cached file to the
+-- messages drawing it is to hash every url in the table.
+--
+-- Partial for the same reason as above: most rows are not cached at any given moment, and those
+-- are never the subject of this question.
+CREATE INDEX message_attachments_cached ON message_attachments(cached) WHERE cached IS NOT NULL;

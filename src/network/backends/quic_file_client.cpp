@@ -256,11 +256,13 @@ void QuicFileClient::upload(
 void QuicFileClient::download(
         std::string file_id,
         std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data,
-        std::function<void(std::variant<file_metadata, int16_t> result)> on_complete) {
+        std::function<void(std::variant<file_metadata, int16_t> result)> on_complete,
+        std::shared_ptr<std::atomic<bool>> cancelled) {
     _loop->call([this,
                  file_id = std::move(file_id),
                  on_data = std::move(on_data),
-                 on_complete = std::move(on_complete)]() mutable {
+                 on_complete = std::move(on_complete),
+                 cancelled = std::move(cancelled)]() mutable {
         try {
             auto conn = _ensure_connection();
             if (!conn) {
@@ -279,14 +281,32 @@ void QuicFileClient::download(
                 int64_t received = 0;
                 std::function<void(const file_metadata&, std::span<const std::byte>)> on_data;
                 std::function<void(std::variant<file_metadata, int16_t>)> on_complete;
+                std::shared_ptr<std::atomic<bool>> cancelled;
+                // The stream close this asked for is what gets reported, and the close carries only
+                // a QUIC error code; without this it would surface as an abort like any other.
+                bool gave_up = false;
             };
             auto state = std::make_shared<download_state>();
             state->file_id = file_id;
             state->on_data = std::move(on_data);
             state->on_complete = std::move(on_complete);
+            state->cancelled = std::move(cancelled);
 
             auto data_cb = [this, state](quic::Stream& s, std::span<const std::byte> data) {
                 _touch();
+
+                // Checked per chunk, which is the only moment this end of a transfer is given: a
+                // download is driven by the server, so there is nowhere else to notice.  It is also
+                // the moment that matters, since what asks for a download to stop is almost always
+                // something a chunk itself revealed -- a chunk that failed to authenticate, or one
+                // that took the file past the length its sender claimed -- and everything after it
+                // is bandwidth spent on a file already known to be unusable.
+                if (state->cancelled && state->cancelled->load()) {
+                    log::debug(cat, "Download of {} cancelled", state->file_id);
+                    state->gave_up = true;
+                    s.close(QUIC_FILES_CLIENT_ABORT);
+                    return;
+                }
 
                 // Phase 1: parse the size prefix of the metadata block
                 if (state->meta_size < 0) {
@@ -361,6 +381,11 @@ void QuicFileClient::download(
 
             auto close_cb = [this, state](quic::Stream&, uint64_t error_code) {
                 _touch();
+
+                if (state->gave_up) {
+                    state->on_complete(ERROR_REQUEST_CANCELLED);
+                    return;
+                }
 
                 if (error_code != 0) {
                     log::warning(

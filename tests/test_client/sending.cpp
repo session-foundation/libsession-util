@@ -116,8 +116,9 @@ TEST_CASE("Client: the application is told what changed", "[client][signals]") {
     REQUIRE(r.added.size() == 1);
     CHECK(r.added[0].id() == convo);
     REQUIRE(r.msg_added.size() == 1);
-    CHECK(r.msg_added[0].first == convo);
-    CHECK(r.msg_added[0].second.body == "ping");
+    REQUIRE(r.msg_added[0].size() == 1);
+    CHECK(r.msg_added[0][0].conversation == convo);
+    CHECK(r.msg_added[0][0].body == "ping");
     REQUIRE(r.updated.size() == 1);
     CHECK(preview_body(r.updated[0]) == "ping");
     CHECK(r.updated[0].unread() == 1);
@@ -180,9 +181,9 @@ TEST_CASE("Client: state is committed before the handler fires", "[client][signa
     std::optional<std::string> body_seen_from_handler;
     Client* self = nullptr;
 
-    TempClient c{callbacks{.message_added = [&](const ConversationId&, const Message& m) {
+    TempClient c{callbacks{.messages_added = [&](std::vector<Message>&& m) {
         // Waiting from inside a handler: the loop runs it inline, since it is already this thread.
-        body_seen_from_handler = self->message(m.id, await)->body;
+        body_seen_from_handler = self->message(m.at(0).id, await)->body;
     }}};
     self = &*c;
 
@@ -192,7 +193,7 @@ TEST_CASE("Client: state is committed before the handler fires", "[client][signa
 
 TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
     SenderKeys sender;
-    TempClient c{callbacks{.message_added = [](const ConversationId&, const Message&) {
+    TempClient c{callbacks{.messages_added = [](std::vector<Message>&&) {
         throw std::runtime_error{"deliberate"};
     }}};
 
@@ -203,7 +204,7 @@ TEST_CASE("Client: a throwing handler is contained", "[client][signals]") {
           1);
 }
 
-TEST_CASE("Client: send status changes are reported as message_updated", "[client][signals]") {
+TEST_CASE("Client: send status changes are reported as messages_updated", "[client][signals]") {
     Recorder r;
     TempClient c{r.handlers()};
     auto* net = attach_mock_network(c->core);
@@ -223,14 +224,15 @@ TEST_CASE("Client: send status changes are reported as message_updated", "[clien
 
     REQUIRE(accept_stores(*net) == 1);
 
-    CHECK(r.order == std::vector<std::string>{"message_updated"});
+    CHECK(r.order == std::vector<std::string>{"messages_updated"});
     REQUIRE(r.msg_updated.size() == 1);
-    CHECK(r.msg_updated[0].second.id == id);
-    CHECK(r.msg_updated[0].second.send_state == SendState::sent);
+    REQUIRE(r.msg_updated[0].size() == 1);
+    CHECK(r.msg_updated[0][0].id == id);
+    CHECK(r.msg_updated[0][0].send_state == SendState::sent);
 
     // The only store that landed was the recipient's, and that hash belongs to their swarm: it is
     // not something we could ever look up, so it is not recorded as ours.
-    CHECK_FALSE(r.msg_updated[0].second.hash.has_value());
+    CHECK_FALSE(r.msg_updated[0][0].hash.has_value());
 }
 
 TEST_CASE("Client: priority orders the list and hides", "[client][convos]") {

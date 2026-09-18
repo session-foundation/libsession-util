@@ -46,7 +46,7 @@
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::client::callbacks{
 ///             .conversation_updated = [&](const auto& convo) { redraw(convo); },
-///             .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
+///             .messages_added = [&](auto&& msgs) { for (auto& m : msgs) append(m); },
 ///         }};
 ///
 ///     for (const auto& convo : client.conversations())
@@ -551,6 +551,23 @@ class Client {
     void attachment_cache_limit(failable_function<void(std::optional<int64_t>)> cb);
     std::optional<int64_t> attachment_cache_limit(await_t);
 
+    /// How much disk the cached attachments occupy at the moment, in bytes.
+    ///
+    /// The same measure as the limit, and the same total eviction compares against it: bytes on
+    /// disk, which is more than the attachments themselves are, since what is cached is encrypted
+    /// and padded.  Being the same measure is what makes the two worth showing together.
+    ///
+    /// Display pictures are excluded, exactly as they are from the limit: they are not counted
+    /// towards it and are never evicted for it.
+    ///
+    /// Read from the index rather than by walking the directory, so it costs a query -- and is
+    /// exact only for as long as the index is.  A file deleted from under us still counts until the
+    /// sweep that `set_cache_dir` starts finds it gone.
+    ///
+    /// 0 when nothing is cached, which includes having no cache directory at all.
+    void attachment_cache_size(failable_function<void(int64_t)> cb);
+    int64_t attachment_cache_size(await_t);
+
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
     ///
     /// Compared against the size in the pointer, which is the file's own length — so a limit of 2MB
@@ -729,7 +746,81 @@ class Client {
         std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
         std::vector<failable_function<void(std::vector<std::byte>)>> waiting;
     };
+    //
+    // Keyed by url rather than by the name the file is cached under.  Nothing outside this process
+    // sees these keys, and the hashed name exists to keep a directory listing from naming what was
+    // downloaded -- which is a question about the disk, not about a map in memory.
     std::unordered_map<std::string, InFlight> _in_flight;
+
+    /// What to tell a reader about an attachment's local copy: the `Attachment` fields that report
+    /// it, given the `cached` reference already read from its row.
+    ///
+    /// The one thing the message builders below need that is not in the database: whether a
+    /// transfer is running, which is ours and in memory.  Which is why this is a member rather
+    /// than the file-local helper it used to be.
+    struct CacheStatus {
+        AttachmentAvailability availability = AttachmentAvailability::absent;
+        int64_t done = 0, total = 0;
+    };
+    // `url` by reference rather than a view: `_in_flight` is keyed by std::string with no
+    // transparent hashing, and this runs once per attachment on a page.
+    CacheStatus _attachment_availability(const std::string& url, std::optional<int64_t> cached);
+
+    /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
+    /// every message showing that file.
+    ///
+    /// More than one message routinely shows the same file -- forwarded, or quoted -- which is
+    /// also why the cache is keyed on the file rather than on the message that wanted it.
+    void _emit_attachment_availability(std::string_view url);
+
+    /// Every message showing the file at `url`, and the one report covering all of them.
+    ///
+    /// Two halves rather than one call because a caller with a condition of its own does the query
+    /// itself; and collected rather than streamed because every caller goes on to write the table
+    /// it is reading, and the emits can call back in.
+    std::vector<int64_t> _messages_showing(sqlite::Connection& c, std::string_view url);
+    void _emit_messages_showing(sqlite::Connection& c, const std::vector<int64_t>& messages);
+
+    /// Records why the file at `url` could not be fetched, or -- with nullopt -- that something
+    /// has happened to make it worth trying again.
+    ///
+    /// Applied to every message showing that file, in both directions: they are the same bytes, so
+    /// a transcript must not show one message's copy as broken and another's as fine.  See
+    /// `Attachment::unavailable` for why this is a cached answer rather than a permanent one.
+    void _set_attachment_unavailable(
+            std::string_view url, std::optional<AttachmentUnavailable> code);
+
+    // How deep a read goes when a message turns out to be a reply.
+    enum class ReplyDepth {
+        // Load the replied-to message, so a caller can draw the reply from one read.
+        with_target,
+        // Resolve the reference but leave `Reply::message` null.  This is what a *nested* message
+        // gets, and is the whole of the depth limit: without it, reading one message could walk a
+        // chain of replies of unbounded length.
+        reference_only,
+    };
+
+    // Turns a bound statement over MESSAGE_COLUMNS into whole Messages: attachments loaded,
+    // gallery decided, and replied-to messages filled in unless this is already a nested read.
+    //
+    // Takes a bare statement rather than a `StatementWrapper` so that it serves both a cached
+    // statement and a one-off; see `_load_reply_targets` for why one of its callers cannot use the
+    // cache.
+    std::vector<Message> _build_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            SQLite::Statement& st);
+    template <typename... Bind>
+    std::vector<Message> _query_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            const std::string& query,
+            const Bind&... bind);
+    void _load_attachments(sqlite::Connection& c, std::vector<Message>& msgs);
+    void _load_reply_targets(
+            sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
 
     // What an attachment row says about where its file is and how to open it.
     struct StoredPointer {
@@ -740,19 +831,62 @@ class Client {
     // Throws if there is no such attachment, or if its sender gave no url.
     StoredPointer _attachment_pointer(int64_t message_id, size_t index);
 
-    // Writes `data` into the attachment cache under `url`, and records it.  The row is an index
-    // over the file, so it is written after the file exists.
-    void _cache_attachment(
+    // Writes `data` into the attachment cache under `url`, records it, and tells every message
+    // showing that file that it is now here.  The row is an index over the file, so it is written
+    // after the file exists.
+    //
+    // Returns whether it got that far, which is what says the messages have been told: a caller
+    // that gets false has left them where they were and owes them the news itself.
+    bool _cache_attachment(
             const std::string& url,
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
+
+    /// Keeps a copy of a file we just uploaded, so that a message we sent can be drawn without
+    /// fetching back a file that came off this disk in the first place.
+    ///
+    /// Under the rule that would have applied had the same file arrived, plus anything on a
+    /// gallery-viewable message whatever that rule says -- see the definition.  Best effort: the
+    /// source is re-read, since the upload streamed it rather than holding it, and a file that has
+    /// since moved or changed is simply not cached.
+    ///
+    /// Call once the row carries the url, which is both where the copy belongs and what says the
+    /// upload is done.
+    void _cache_outgoing_attachment(int64_t client_id, size_t index, const std::string& url);
+
+    // The cache entry holding `url`, as (id, file name), found through the attachment rows that
+    // reference it rather than by hashing the url.
+    //
+    // That is the point of the reference: the name is whatever the entry was written under, so one
+    // written under an older naming is still found, and the hash stays something applied to a file
+    // being created rather than to every lookup.
+    std::optional<std::pair<int64_t, std::string>> _cached_entry(
+            sqlite::Connection& c, std::string_view url);
+
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
-    void _touch_cached(const std::string& name);
+    void _touch_cached(int64_t id);
 
     // Removes least-recently-used entries until the cache fits its limit, never touching `keep` --
     // which is whatever was just written, so that a download cannot complete and immediately
     // vanish.  Does nothing when no limit is set.
-    void _evict_cache(const std::string& keep);
+    void _evict_cache(int64_t keep);
+
+    // Removes one cache entry, file and row, and returns the messages that were drawing it for the
+    // caller to report -- which it does rather than reporting them itself so that a pass dropping
+    // several files is one report and not one each.
+    //
+    // The messages have to be read before the row goes: the foreign key clears their reference as
+    // it is deleted, and nothing afterwards can say which they were.
+    std::vector<int64_t> _drop_cached(sqlite::Connection& c, int64_t id, const std::string& name);
+
+    // Every message whose attachment names cache entry `id`.
+    std::vector<int64_t> _messages_cached_as(sqlite::Connection& c, int64_t id);
+
+    // What the cache index says its files add up to, in bytes on disk.  The overload taking a
+    // connection is for callers that already hold one and are about to write through it -- eviction
+    // reads this to decide whether it has work to do.
+    int64_t _attachment_cache_size();
+    int64_t _attachment_cache_size(sqlite::Connection& c);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
@@ -822,6 +956,19 @@ class Client {
     std::optional<b32> _cache_key;
     // Must be called on the loop: it touches globals.
     const b32& _cache_encryption_key();
+
+    /// What to call a cached file, and where to put it, with the cache key applied.
+    ///
+    /// One place rather than at every call site: the name is keyed (see `cache::name_for`), and a
+    /// caller that forgot the key would silently get the old, guessable naming back.  Taking the
+    /// key out of the caller's hands is what stops that being possible.
+    ///
+    /// For an *attachment* this is only ever used to name a file being written -- finding one that
+    /// already exists goes through `_cached_entry`, which reads the name the entry was stored with.
+    /// That is what lets the naming change without orphaning everything already downloaded.  A
+    /// profile picture has no such entry, so for those it remains the way in as well.
+    std::filesystem::path _cache_path(std::string_view kind, std::string_view url);
+    std::string _cache_name(std::string_view url);
     void _profile_picture(
             const ConversationId& id,
             std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
@@ -916,7 +1063,9 @@ class Client {
             std::optional<int64_t> claimed_size,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            std::function<void(std::optional<std::string> error)> on_done);
+            std::function<
+                    void(std::optional<std::string> error,
+                         std::optional<AttachmentUnavailable> permanent)> on_done);
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {
@@ -934,18 +1083,25 @@ class Client {
     // second request attaches to the first, picking up its progress from wherever it has reached,
     // rather than fetching the same bytes twice and caching them twice.
     //
-    // `on_hit` runs when the cache answered and `store` after a fetch completes, both on the loop.
-    // They are the whole of the difference between a cached attachment, which is indexed and
-    // evictable, and a cached picture, which is neither.
+    // `store` runs on the loop after a fetch completes, and is the whole of the difference between
+    // a cached attachment, which is indexed and evictable, and a cached picture, which is neither:
+    // `target.dir` is what says which of the two this is, so finding an existing copy and
+    // recording its use follow from that rather than from anything the caller supplies.
+    //
+    // It returns whether it kept the file *and told the messages showing it*, which is what decides
+    // whether this has to report the transfer ending: a fetch with nothing to show for it leaves
+    // them where they were, and every way of having nothing to show -- a failure, a file that could
+    // not be written, no cache at all -- looks the same to them.
     void _fetch_cached(
             FetchTarget target,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
             failable_function<void(std::vector<std::byte>)> cb,
-            std::function<void(const std::string& name)> on_hit,
-            std::function<void(std::span<const std::byte>)> store);
+            std::function<bool(std::span<const std::byte>)> store);
 
-    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.
-    std::function<void(std::span<const std::byte>)> _store_picture(std::string url);
+    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.  Always
+    // answers false: a picture belongs to a conversation rather than to a message, so there is
+    // never a message to have told.
+    std::function<bool(std::span<const std::byte>)> _store_picture(std::string url);
 
     // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
     // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a
@@ -1213,16 +1369,28 @@ class Client {
     // the replies pointing at it: one arriving makes them resolve, one being deleted changes what
     // they show.  Cascading here rather than at the ten call sites means none of them can forget
     // it, which would show up only as a display that quietly stops matching the database.
-    void _emit_message(bool added, const ConversationId& id, int64_t message_id);
+    //
+    // An added message and its replies are two reports, since they are two callbacks; the replies
+    // of a *changed* message join it in one.
+    void _emit_message(bool added, int64_t message_id);
 
-    // The above without the cascade, which is what the cascade itself uses.
+    // Every message that replies to `message_id`, which is what the cascade above reports.
     //
     // One level is enough, and is why this terminates: reporting B refreshes what A shows for the
     // message it replied to, but reporting A cannot change what anything shows for *A*, because a
     // message reached through a reply carries the reference to what it answered and never the
     // answer itself.  So there is no visited set, and two messages claiming to reply to each other
     // cannot loop.
-    void _emit_message_alone(bool added, const ConversationId& id, int64_t message_id);
+    std::vector<int64_t> _repliers(sqlite::Connection& c, int64_t message_id);
+
+    // Reports `ids` as one call, deduplicated and ordered oldest first -- the order the callback
+    // promises, and the reverse of the one `messages()` pages in.
+    //
+    // Built here rather than by the caller: whatever prompted this may have reached a message more
+    // than once, and building at the end means one build per message in its settled state.  Ids
+    // that no longer resolve are dropped, so a report for something deleted along the way is simply
+    // not made.
+    void _emit_messages(bool added, std::vector<int64_t> ids);
 
     // Conversations whose settled state still has to be reported.  A conversation is marked here
     // rather than reported immediately so that a poll delivering fifty messages to one conversation

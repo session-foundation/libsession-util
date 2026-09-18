@@ -5,3 +5,30 @@
 # reviewable change rather than a silent one.
 #
 # Format:  <short-hash>  <reason>
+
+# The attachment-availability branch: every commit of it except the last, which is the only state
+# of it anything can start from.
+#
+# It grew its schema over four migrations while it was being built and collapsed them into one
+# (client 005_attachment_availability) before merging, so a database made partway through has some
+# of those four recorded and cannot take the replacement.  None exists outside the branch, which is
+# the whole reason they were collapsed -- one migration per merged change, not one per commit.
+#
+# Listed in full rather than only the commits that touched full_schema.sql.  The walk skips before
+# it deduplicates, so omitting one merely promotes it to stand for the schema of the commit before
+# it; and "no intermediate state of this work is a starting point" is the rule worth writing down,
+# whichever commits happened to carry the schema.
+191a7b30  attachment-availability, mid-branch
+d618ac72  attachment-availability, mid-branch
+518b1581  attachment-availability, mid-branch
+73dc04a5  attachment-availability, mid-branch
+9a8e48b6  attachment-availability, mid-branch
+69fc150d  attachment-availability, mid-branch
+4cf479b4  attachment-availability, mid-branch
+8360b802  attachment-availability, mid-branch
+a73c3a07  attachment-availability, mid-branch
+51a2e015  attachment-availability, mid-branch
+f772848d  attachment-availability, mid-branch
+bcb8602b  attachment-availability, mid-branch
+7c7754c1  attachment-availability, mid-branch
+2829ac0a  attachment-availability, mid-branch
