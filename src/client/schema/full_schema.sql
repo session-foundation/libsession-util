@@ -378,7 +378,6 @@ CREATE TABLE message_attachments (
     -- null.  On an incoming attachment these are the sender's claims and nothing more.
     content_type TEXT,
     filename TEXT,
-    caption TEXT,
     flags INTEGER NOT NULL DEFAULT 0,
     width INTEGER,
     height INTEGER,

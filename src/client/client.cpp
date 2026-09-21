@@ -1439,8 +1439,8 @@ static void load_preview_attachments(
 
     // A row per attachment rather than an aggregate, because the names are wanted individually; the
     // three summary fields are then folded from the same rows instead of being asked for again.
-    // Only the three columns a preview uses, so a list does not carry the sizes, captions and urls
-    // that a message view reads.
+    // Only the three columns a preview uses, so a list does not carry the sizes and urls that a
+    // message view reads.
     //
     // `substr(...) = 'image/'` rather than `LIKE 'image/%'` because LIKE is ASCII-case-insensitive
     // in SQLite while `gallery_viewable`'s `starts_with` is not, and the two deciding differently
@@ -3197,7 +3197,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
 
     auto st = c.prepared_st(
             R"(
-        SELECT message, idx, content_type, filename, caption, flags, width, height,
+        SELECT message, idx, content_type, filename, flags, width, height,
                size, url, unavailable, cached, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(sqlite::placeholders(msgs.size())));
@@ -3210,7 +3210,6 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  idx,
                  ctype,
                  fname,
-                 caption,
                  flags,
                  width,
                  height,
@@ -3222,7 +3221,6 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
          sqlite::IterableStatementWrapper<
                  int64_t,
                  int64_t,
-                 std::optional<std::string>,
                  std::optional<std::string>,
                  std::optional<std::string>,
                  int,
@@ -3242,7 +3240,6 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                 .index = static_cast<size_t>(idx),
                 .content_type = std::move(ctype),
                 .filename = std::move(fname),
-                .caption = std::move(caption),
                 .voice_message = (flags & ATTACHMENT_FLAG_VOICE_MESSAGE) != 0,
                 .width = width ? std::optional{static_cast<uint32_t>(*width)} : std::nullopt,
                 .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
@@ -3885,15 +3882,14 @@ int64_t Client::_send_message(
             c.prepared_exec(
                     R"(
                 INSERT INTO message_attachments
-                    (message, idx, path, content_type, filename, caption, flags, width, height)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (message, idx, path, content_type, filename, flags, width, height)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             )",
                     client_id,
                     static_cast<int64_t>(i),
                     a.path.string(),
                     a.content_type ? *a.content_type : infer_content_type(a.path),
                     a.filename ? a.filename : std::optional{a.path.filename().string()},
-                    a.caption,
                     a.voice_message ? ATTACHMENT_FLAG_VOICE_MESSAGE : 0,
                     a.width ? std::optional<int64_t>{*a.width} : std::nullopt,
                     a.height ? std::optional<int64_t>{*a.height} : std::nullopt);
@@ -5057,19 +5053,18 @@ void Client::_finish_attachment_send(int64_t client_id) {
                             .timestamp = from_epoch_ms(*reply_ts),
                             .msgid = reply_msgid});
 
-        for (auto&& [url, key, size, ctype, fname, caption, flags, width, height] :
+        for (auto&& [url, key, size, ctype, fname, flags, width, height] :
              c.prepared_results<
                      std::string,
                      sqlite::blobn<32>,
                      int64_t,
                      std::optional<std::string>,
                      std::optional<std::string>,
-                     std::optional<std::string>,
                      int,
                      std::optional<int>,
                      std::optional<int>>(
                      R"(
-            SELECT url, key, size, content_type, filename, caption, flags, width, height
+            SELECT url, key, size, content_type, filename, flags, width, height
             FROM message_attachments WHERE message = ? ORDER BY idx
         )",
                      client_id)) {
@@ -5099,8 +5094,6 @@ void Client::_finish_attachment_send(int64_t client_id) {
                 attach->set_contenttype(*ctype);
             if (fname)
                 attach->set_filename(*fname);
-            if (caption)
-                attach->set_caption(*caption);
             if (flags != 0)
                 attach->set_flags(static_cast<uint32_t>(flags));
             if (width)
@@ -5211,9 +5204,9 @@ static std::vector<std::string> store_incoming_attachments(
         c.prepared_exec(
                 R"(
             INSERT INTO message_attachments
-                (message, idx, url, key, digest, size, content_type, filename, caption, flags,
+                (message, idx, url, key, digest, size, content_type, filename, flags,
                  width, height, cached)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )",
                 message_id,
                 static_cast<int64_t>(i),
@@ -5223,7 +5216,6 @@ static std::vector<std::string> store_incoming_attachments(
                 ptr.has_size() ? std::optional<int64_t>{ptr.size()} : std::nullopt,
                 ptr.has_contenttype() ? std::optional{ptr.contenttype()} : std::nullopt,
                 ptr.has_filename() ? std::optional{ptr.filename()} : std::nullopt,
-                ptr.has_caption() ? std::optional{ptr.caption()} : std::nullopt,
                 static_cast<int>(ptr.flags()),
                 ptr.has_width() ? std::optional<int64_t>{ptr.width()} : std::nullopt,
                 ptr.has_height() ? std::optional<int64_t>{ptr.height()} : std::nullopt,

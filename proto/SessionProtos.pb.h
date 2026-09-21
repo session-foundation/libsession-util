@@ -4141,7 +4141,6 @@ class AttachmentPointer final :
     kThumbnailFieldNumber = 5,
     kDigestFieldNumber = 6,
     kFileNameFieldNumber = 7,
-    kCaptionFieldNumber = 11,
     kUrlFieldNumber = 101,
     kIdFieldNumber = 1,
     kSizeFieldNumber = 4,
@@ -4237,24 +4236,6 @@ class AttachmentPointer final :
   const std::string& _internal_filename() const;
   inline PROTOBUF_ALWAYS_INLINE void _internal_set_filename(const std::string& value);
   std::string* _internal_mutable_filename();
-  public:
-
-  // optional string caption = 11;
-  bool has_caption() const;
-  private:
-  bool _internal_has_caption() const;
-  public:
-  void clear_caption();
-  const std::string& caption() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_caption(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_caption();
-  PROTOBUF_NODISCARD std::string* release_caption();
-  void set_allocated_caption(std::string* caption);
-  private:
-  const std::string& _internal_caption() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_caption(const std::string& value);
-  std::string* _internal_mutable_caption();
   public:
 
   // optional string url = 101;
@@ -4355,7 +4336,6 @@ class AttachmentPointer final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr thumbnail_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr digest_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr filename_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr caption_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr url_;
     uint64_t id_;
     uint32_t size_;
@@ -11030,7 +11010,7 @@ ReceiptMessage::mutable_msgid() {
 
 // required fixed64 id = 1;
 inline bool AttachmentPointer::_internal_has_id() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000080u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000040u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_id() const {
@@ -11038,7 +11018,7 @@ inline bool AttachmentPointer::has_id() const {
 }
 inline void AttachmentPointer::clear_id() {
   _impl_.id_ = uint64_t{0u};
-  _impl_._has_bits_[0] &= ~0x00000080u;
+  _impl_._has_bits_[0] &= ~0x00000040u;
 }
 inline uint64_t AttachmentPointer::_internal_id() const {
   return _impl_.id_;
@@ -11048,7 +11028,7 @@ inline uint64_t AttachmentPointer::id() const {
   return _internal_id();
 }
 inline void AttachmentPointer::_internal_set_id(uint64_t value) {
-  _impl_._has_bits_[0] |= 0x00000080u;
+  _impl_._has_bits_[0] |= 0x00000040u;
   _impl_.id_ = value;
 }
 inline void AttachmentPointer::set_id(uint64_t value) {
@@ -11194,7 +11174,7 @@ inline void AttachmentPointer::set_allocated_key(std::string* key) {
 
 // optional uint32 size = 4;
 inline bool AttachmentPointer::_internal_has_size() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000080u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_size() const {
@@ -11202,7 +11182,7 @@ inline bool AttachmentPointer::has_size() const {
 }
 inline void AttachmentPointer::clear_size() {
   _impl_.size_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000100u;
+  _impl_._has_bits_[0] &= ~0x00000080u;
 }
 inline uint32_t AttachmentPointer::_internal_size() const {
   return _impl_.size_;
@@ -11212,7 +11192,7 @@ inline uint32_t AttachmentPointer::size() const {
   return _internal_size();
 }
 inline void AttachmentPointer::_internal_set_size(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000100u;
+  _impl_._has_bits_[0] |= 0x00000080u;
   _impl_.size_ = value;
 }
 inline void AttachmentPointer::set_size(uint32_t value) {
@@ -11426,7 +11406,7 @@ inline void AttachmentPointer::set_allocated_filename(std::string* filename) {
 
 // optional uint32 flags = 8;
 inline bool AttachmentPointer::_internal_has_flags() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_flags() const {
@@ -11434,7 +11414,7 @@ inline bool AttachmentPointer::has_flags() const {
 }
 inline void AttachmentPointer::clear_flags() {
   _impl_.flags_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000200u;
+  _impl_._has_bits_[0] &= ~0x00000100u;
 }
 inline uint32_t AttachmentPointer::_internal_flags() const {
   return _impl_.flags_;
@@ -11444,7 +11424,7 @@ inline uint32_t AttachmentPointer::flags() const {
   return _internal_flags();
 }
 inline void AttachmentPointer::_internal_set_flags(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000200u;
+  _impl_._has_bits_[0] |= 0x00000100u;
   _impl_.flags_ = value;
 }
 inline void AttachmentPointer::set_flags(uint32_t value) {
@@ -11454,7 +11434,7 @@ inline void AttachmentPointer::set_flags(uint32_t value) {
 
 // optional uint32 width = 9;
 inline bool AttachmentPointer::_internal_has_width() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_width() const {
@@ -11462,7 +11442,7 @@ inline bool AttachmentPointer::has_width() const {
 }
 inline void AttachmentPointer::clear_width() {
   _impl_.width_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000400u;
+  _impl_._has_bits_[0] &= ~0x00000200u;
 }
 inline uint32_t AttachmentPointer::_internal_width() const {
   return _impl_.width_;
@@ -11472,7 +11452,7 @@ inline uint32_t AttachmentPointer::width() const {
   return _internal_width();
 }
 inline void AttachmentPointer::_internal_set_width(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000400u;
+  _impl_._has_bits_[0] |= 0x00000200u;
   _impl_.width_ = value;
 }
 inline void AttachmentPointer::set_width(uint32_t value) {
@@ -11482,7 +11462,7 @@ inline void AttachmentPointer::set_width(uint32_t value) {
 
 // optional uint32 height = 10;
 inline bool AttachmentPointer::_internal_has_height() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000800u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_height() const {
@@ -11490,7 +11470,7 @@ inline bool AttachmentPointer::has_height() const {
 }
 inline void AttachmentPointer::clear_height() {
   _impl_.height_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000800u;
+  _impl_._has_bits_[0] &= ~0x00000400u;
 }
 inline uint32_t AttachmentPointer::_internal_height() const {
   return _impl_.height_;
@@ -11500,7 +11480,7 @@ inline uint32_t AttachmentPointer::height() const {
   return _internal_height();
 }
 inline void AttachmentPointer::_internal_set_height(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000800u;
+  _impl_._has_bits_[0] |= 0x00000400u;
   _impl_.height_ = value;
 }
 inline void AttachmentPointer::set_height(uint32_t value) {
@@ -11508,77 +11488,9 @@ inline void AttachmentPointer::set_height(uint32_t value) {
   // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.height)
 }
 
-// optional string caption = 11;
-inline bool AttachmentPointer::_internal_has_caption() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
-  return value;
-}
-inline bool AttachmentPointer::has_caption() const {
-  return _internal_has_caption();
-}
-inline void AttachmentPointer::clear_caption() {
-  _impl_.caption_.ClearToEmpty();
-  _impl_._has_bits_[0] &= ~0x00000020u;
-}
-inline const std::string& AttachmentPointer::caption() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.AttachmentPointer.caption)
-  return _internal_caption();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AttachmentPointer::set_caption(ArgT0&& arg0, ArgT... args) {
- _impl_._has_bits_[0] |= 0x00000020u;
- _impl_.caption_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.caption)
-}
-inline std::string* AttachmentPointer::mutable_caption() {
-  std::string* _s = _internal_mutable_caption();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.AttachmentPointer.caption)
-  return _s;
-}
-inline const std::string& AttachmentPointer::_internal_caption() const {
-  return _impl_.caption_.Get();
-}
-inline void AttachmentPointer::_internal_set_caption(const std::string& value) {
-  _impl_._has_bits_[0] |= 0x00000020u;
-  _impl_.caption_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AttachmentPointer::_internal_mutable_caption() {
-  _impl_._has_bits_[0] |= 0x00000020u;
-  return _impl_.caption_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AttachmentPointer::release_caption() {
-  // @@protoc_insertion_point(field_release:SessionProtos.AttachmentPointer.caption)
-  if (!_internal_has_caption()) {
-    return nullptr;
-  }
-  _impl_._has_bits_[0] &= ~0x00000020u;
-  auto* p = _impl_.caption_.Release();
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.caption_.IsDefault()) {
-    _impl_.caption_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  return p;
-}
-inline void AttachmentPointer::set_allocated_caption(std::string* caption) {
-  if (caption != nullptr) {
-    _impl_._has_bits_[0] |= 0x00000020u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000020u;
-  }
-  _impl_.caption_.SetAllocated(caption, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.caption_.IsDefault()) {
-    _impl_.caption_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.AttachmentPointer.caption)
-}
-
 // optional string url = 101;
 inline bool AttachmentPointer::_internal_has_url() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000040u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
   return value;
 }
 inline bool AttachmentPointer::has_url() const {
@@ -11586,7 +11498,7 @@ inline bool AttachmentPointer::has_url() const {
 }
 inline void AttachmentPointer::clear_url() {
   _impl_.url_.ClearToEmpty();
-  _impl_._has_bits_[0] &= ~0x00000040u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
 }
 inline const std::string& AttachmentPointer::url() const {
   // @@protoc_insertion_point(field_get:SessionProtos.AttachmentPointer.url)
@@ -11595,7 +11507,7 @@ inline const std::string& AttachmentPointer::url() const {
 template <typename ArgT0, typename... ArgT>
 inline PROTOBUF_ALWAYS_INLINE
 void AttachmentPointer::set_url(ArgT0&& arg0, ArgT... args) {
- _impl_._has_bits_[0] |= 0x00000040u;
+ _impl_._has_bits_[0] |= 0x00000020u;
  _impl_.url_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
   // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.url)
 }
@@ -11608,11 +11520,11 @@ inline const std::string& AttachmentPointer::_internal_url() const {
   return _impl_.url_.Get();
 }
 inline void AttachmentPointer::_internal_set_url(const std::string& value) {
-  _impl_._has_bits_[0] |= 0x00000040u;
+  _impl_._has_bits_[0] |= 0x00000020u;
   _impl_.url_.Set(value, GetArenaForAllocation());
 }
 inline std::string* AttachmentPointer::_internal_mutable_url() {
-  _impl_._has_bits_[0] |= 0x00000040u;
+  _impl_._has_bits_[0] |= 0x00000020u;
   return _impl_.url_.Mutable(GetArenaForAllocation());
 }
 inline std::string* AttachmentPointer::release_url() {
@@ -11620,7 +11532,7 @@ inline std::string* AttachmentPointer::release_url() {
   if (!_internal_has_url()) {
     return nullptr;
   }
-  _impl_._has_bits_[0] &= ~0x00000040u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
   auto* p = _impl_.url_.Release();
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
   if (_impl_.url_.IsDefault()) {
@@ -11631,9 +11543,9 @@ inline std::string* AttachmentPointer::release_url() {
 }
 inline void AttachmentPointer::set_allocated_url(std::string* url) {
   if (url != nullptr) {
-    _impl_._has_bits_[0] |= 0x00000040u;
+    _impl_._has_bits_[0] |= 0x00000020u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000040u;
+    _impl_._has_bits_[0] &= ~0x00000020u;
   }
   _impl_.url_.SetAllocated(url, GetArenaForAllocation());
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING

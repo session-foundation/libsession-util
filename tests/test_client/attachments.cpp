@@ -48,7 +48,6 @@ TEST_CASE("Client: an arriving message records the files it names", "[client][at
                     a->set_size(99);
                     a->set_contenttype("application/pdf");
                     a->set_filename("invoice.pdf");
-                    a->set_caption("last month");
                     a->set_flags(1);
                 });
                 // A pointer with no url at all: unfetchable, but still one of three files the
@@ -74,7 +73,6 @@ TEST_CASE("Client: an arriving message records the files it names", "[client][at
     // Always true on an incoming attachment: the file server is where it came from.
     CHECK(m.attachments[0].uploaded);
 
-    CHECK(m.attachments[1].caption == "last month");
     CHECK(m.attachments[1].voice_message);
     CHECK(m.attachments[1].uploaded);
 
@@ -107,7 +105,7 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     auto id = c->send_message(
             ConversationId::dm(me),
             {.attachments =
-                     {OutgoingAttachment{.path = photo, .caption = "on the beach"},
+                     {OutgoingAttachment{.path = photo},
                       OutgoingAttachment{
                               .path = doc, .content_type = "application/x-my-own", .width = 4},
                       OutgoingAttachment{.path = mystery, .voice_message = true}}},
@@ -129,7 +127,6 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     // Inferred from the last extension, case-insensitively, when the caller named none...
     CHECK(msg->attachments[0].content_type == "image/png");
     CHECK(msg->attachments[0].filename == "holiday.snap.PNG");
-    CHECK(msg->attachments[0].caption == "on the beach");
     CHECK_FALSE(msg->attachments[0].voice_message);
 
     // ...and never overriding one the caller did name.

@@ -354,6 +354,9 @@ message AttachmentPointer {
     VOICE_MESSAGE = 1;
   }
 
+  reserved 11;
+  reserved "caption";
+
   // @required
   required fixed64 id          = 1;
   optional string  contentType = 2;
@@ -365,7 +368,6 @@ message AttachmentPointer {
   optional uint32  flags       = 8;
   optional uint32  width       = 9;
   optional uint32  height      = 10;
-  optional string  caption     = 11;
   optional string  url         = 101;
 }
 
