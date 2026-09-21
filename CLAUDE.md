@@ -79,5 +79,9 @@ Many headers come in pairs: `foo.h` (C API for FFI use) and `foo.hpp` (C++ API).
 
 ## Code Style
 
+- **Format with `./utils/format.sh` before every commit**, and check it with `./utils/format.sh verify`
+  (exit 0 means clean).  Do not run `clang-format` yourself: the script pins **clang-format-19** and
+  formats the whole source list, and other versions — including whatever `clang-format` points at —
+  produce different output that fails CI.
 - **Prefer DRY code**: when logic is duplicated across two or more call sites, extract a shared helper.  Do this proactively when writing new code, not only when asked.
 - **Specify the shape upfront**: when asked to implement something that overlaps with existing code, identify and extract the shared piece before writing the new code, so duplication never appears in the first place.
