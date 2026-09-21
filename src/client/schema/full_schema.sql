@@ -454,6 +454,10 @@ CREATE TABLE message_attachments (
     -- still possible, and is what the reconcile sweep is for.
     cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL,
 
+    -- BlurHash of the image, as the sender supplied it: a placeholder a recipient can draw before
+    -- the file arrives.  Never validated or derived here; encoding one needs an image decoder.
+    blurhash TEXT,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
 

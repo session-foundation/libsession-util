@@ -20,6 +20,14 @@ constexpr int ATTACHMENT_FILE_MISSING = -20001;
 /// worth retrying -- the bytes on the file server will be the same bytes next time.
 constexpr int ATTACHMENT_UNREADABLE = -20002;
 
+/// Longest blurhash we will store, which is a 4x3-component one.
+///
+/// A blurhash's length is fixed by its component counts as `4 + 2 * numX * numY`, so this admits
+/// everything up to 4x3 and nothing beyond. A bound on what a remote peer can put in the database
+/// rather than a parse: the string stays opaque here, and nothing checks its alphabet or that its
+/// length agrees with the size it declares.
+constexpr size_t MAX_BLURHASH_LENGTH = 28;
+
 /// A file to attach to an outgoing message.  Attaching costs nothing: the file is read, encrypted
 /// and uploaded when the message is sent, not when it is attached, so a caller can hold these
 /// against a draft for as long as the user takes to write it.
@@ -48,6 +56,14 @@ struct OutgoingAttachment {
     /// at which point every client stops needing its own.
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
+
+    /// BlurHash of the image, for a recipient to draw in the attachment's place until the file
+    /// itself arrives.  Advisory and unvalidated: libsession carries the string and never looks
+    /// inside it.
+    ///
+    /// The caller's to supply for the same reason as `width`/`height` above: encoding one needs an
+    /// image decoder, which is the dependency that comment declines to take on.
+    std::optional<std::string> blurhash;
 };
 
 /// An attachment on a stored message, in either direction, as reported on `Message::attachments`.
@@ -152,6 +168,7 @@ struct Attachment {
 
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
+    std::optional<std::string> blurhash;
 
     /// The file's size in bytes, before encryption -- what the file server holds is larger, since
     /// it carries the stream's per-chunk overhead and the padding that hides the true length.

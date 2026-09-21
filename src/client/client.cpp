@@ -607,6 +607,12 @@ void Client::_require_readable(const std::vector<OutgoingAttachment>& attachment
         if (std::filesystem::file_size(a.path, ec) == 0 || ec)
             throw std::invalid_argument{
                     "send_message: attachment {} is empty"_format(a.path.string())};
+        // Thrown rather than dropped, unlike the incoming side: this is our own caller's value, so
+        // the mistake is reported where it was made -- the same reason the checks above throw.
+        if (a.blurhash && a.blurhash->size() > MAX_BLURHASH_LENGTH)
+            throw std::invalid_argument{
+                    "send_message: attachment {} has a blurhash longer than {} characters"_format(
+                            a.path.string(), MAX_BLURHASH_LENGTH)};
     }
 }
 
@@ -3208,7 +3214,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
 
     auto st = c.prepared_st(
             R"(
-        SELECT message, idx, content_type, filename, flags, width, height,
+        SELECT message, idx, content_type, filename, flags, width, height, blurhash,
                size, url, unavailable, cached, saved_at
         FROM message_attachments WHERE message IN ({}) ORDER BY message, idx
     )"_format(sqlite::placeholders(msgs.size())));
@@ -3224,6 +3230,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  flags,
                  width,
                  height,
+                 blurhash,
                  size,
                  url,
                  unavailable,
@@ -3237,6 +3244,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  int,
                  std::optional<int>,
                  std::optional<int>,
+                 std::optional<std::string>,
                  std::optional<int64_t>,
                  std::optional<std::string>,
                  std::optional<AttachmentUnavailable>,
@@ -3254,6 +3262,7 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                 .voice_message = (flags & ATTACHMENT_FLAG_VOICE_MESSAGE) != 0,
                 .width = width ? std::optional{static_cast<uint32_t>(*width)} : std::nullopt,
                 .height = height ? std::optional{static_cast<uint32_t>(*height)} : std::nullopt,
+                .blurhash = std::move(blurhash),
                 .size = size,
                 // A url is what says it reached the file server, and is also the only thing that
                 // identifies its cached copy -- so one column answers both questions.
@@ -3893,8 +3902,8 @@ int64_t Client::_send_message(
             c.prepared_exec(
                     R"(
                 INSERT INTO message_attachments
-                    (message, idx, path, content_type, filename, flags, width, height)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (message, idx, path, content_type, filename, flags, width, height, blurhash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             )",
                     client_id,
                     static_cast<int64_t>(i),
@@ -3903,7 +3912,8 @@ int64_t Client::_send_message(
                     a.filename ? a.filename : std::optional{a.path.filename().string()},
                     a.voice_message ? ATTACHMENT_FLAG_VOICE_MESSAGE : 0,
                     a.width ? std::optional<int64_t>{*a.width} : std::nullopt,
-                    a.height ? std::optional<int64_t>{*a.height} : std::nullopt);
+                    a.height ? std::optional<int64_t>{*a.height} : std::nullopt,
+                    a.blurhash);
         }
 
         approved = approve_recipient(c, id, *this);
@@ -5063,7 +5073,7 @@ void Client::_finish_attachment_send(int64_t client_id) {
                             .timestamp = from_epoch_ms(*reply_ts),
                             .msgid = reply_msgid});
 
-        for (auto&& [url, key, size, ctype, fname, flags, width, height] :
+        for (auto&& [url, key, size, ctype, fname, flags, width, height, blurhash] :
              c.prepared_results<
                      std::string,
                      sqlite::blobn<32>,
@@ -5072,9 +5082,10 @@ void Client::_finish_attachment_send(int64_t client_id) {
                      std::optional<std::string>,
                      int,
                      std::optional<int>,
-                     std::optional<int>>(
+                     std::optional<int>,
+                     std::optional<std::string>>(
                      R"(
-            SELECT url, key, size, content_type, filename, flags, width, height
+            SELECT url, key, size, content_type, filename, flags, width, height, blurhash
             FROM message_attachments WHERE message = ? ORDER BY idx
         )",
                      client_id)) {
@@ -5110,6 +5121,8 @@ void Client::_finish_attachment_send(int64_t client_id) {
                 attach->set_width(static_cast<uint32_t>(*width));
             if (height)
                 attach->set_height(static_cast<uint32_t>(*height));
+            if (blurhash)
+                attach->set_blurhash(*blurhash);
         }
     }
 
@@ -5215,8 +5228,8 @@ static std::vector<std::string> store_incoming_attachments(
                 R"(
             INSERT INTO message_attachments
                 (message, idx, url, key, digest, size, content_type, filename, flags,
-                 width, height, cached)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 width, height, blurhash, cached)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )",
                 message_id,
                 static_cast<int64_t>(i),
@@ -5229,6 +5242,11 @@ static std::vector<std::string> store_incoming_attachments(
                 static_cast<int>(ptr.flags()),
                 ptr.has_width() ? std::optional<int64_t>{ptr.width()} : std::nullopt,
                 ptr.has_height() ? std::optional<int64_t>{ptr.height()} : std::nullopt,
+                // Dropped rather than rejected when it is too long: a blurhash is decoration a
+                // remote peer supplied, and losing the placeholder must not cost the attachment.
+                ptr.has_blurhash() && ptr.blurhash().size() <= MAX_BLURHASH_LENGTH
+                        ? std::optional{ptr.blurhash()}
+                        : std::nullopt,
                 cached);
 
         if (ptr.has_url() && std::find(urls.begin(), urls.end(), ptr.url()) == urls.end())
