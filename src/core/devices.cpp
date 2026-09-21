@@ -30,21 +30,28 @@
 
 #include "../internal-util.hpp"
 
+namespace fmt {
+
 /// Logs a key pair as "X25519[abcd…wxyz], MLKEM768[abcd…wxyz]".
 ///
 /// Out here, rather than beside the type, because a formatter specialization belongs to namespace
 /// fmt and `session::core` does not enclose it.  A specialization rather than fmt's ADL `format_as`
 /// hook because that hook only reaches non-enum types from fmt 10 onwards, and because this is also
 /// the form `std::format` takes.
-/// (`fmt::format_context` spelled out: an out-of-line partial specialization like this one does
-/// not get namespace fmt into its unqualified lookup on gcc 12 / fmt 9.)
+///
+/// Reopening namespace fmt rather than writing this out-of-line as `fmt::formatter<Keys, char>`:
+/// gcc 11 does not take the constraints of an out-of-line constrained partial specialization into
+/// account and so rejects this one as a redefinition of libquic's `formatter<T, char>` for
+/// to_string-ables.
 template <std::derived_from<session::core::Devices::XWingKeys> Keys>
-struct fmt::formatter<Keys, char> : fmt::formatter<std::string> {
-    auto format(const Keys& k, fmt::format_context& ctx) const {
+struct formatter<Keys, char> : formatter<std::string> {
+    auto format(const Keys& k, format_context& ctx) const {
         return formatter<std::string>::format(
                 fmt::format("X25519[{:9.4}], MLKEM768[{:9.4}]", k.x25519_pub, k.mlkem768_pub), ctx);
     }
 };
+
+}  // namespace fmt
 
 namespace session::core {
 
