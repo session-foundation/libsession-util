@@ -79,6 +79,7 @@ target_link_libraries(test_libs INTERFACE
     libsession::config
     libsession::core
     libsession::crypto
+    sessiondep::nettle
     session::SQLite
     sessiondep::libsodium
     mlkem_native::mlkem768
