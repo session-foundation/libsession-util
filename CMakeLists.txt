@@ -65,10 +65,17 @@ set(BUILD_STATIC_DEPS ${static_default} CACHE BOOL "Build all dependencies stati
 
 include(cmake/session-deps/Deps.cmake)
 
-option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${BUILD_STATIC_DEPS})
+option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" OFF)
 
 if(STATIC_BUNDLE AND NOT BUILD_STATIC_DEPS)
     message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS to be enabled")
+endif()
+
+# A shared build has no static archives for our own libraries, and libsession_static_bundle()
+# silently skips non-static targets: the bundle would come out holding only the dependencies, which
+# only shows up as undefined libsession symbols when something links against it.
+if(STATIC_BUNDLE AND BUILD_SHARED_LIBS)
+    message(FATAL_ERROR "STATIC_BUNDLE is incompatible with BUILD_SHARED_LIBS")
 endif()
 
 if(BUILD_SHARED_LIBS OR libsession_IS_TOPLEVEL_PROJECT)
