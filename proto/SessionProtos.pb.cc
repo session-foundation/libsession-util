@@ -299,6 +299,7 @@ PROTOBUF_CONSTEXPR AttachmentPointer::AttachmentPointer(
   , /*decltype(_impl_.thumbnail_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.digest_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.filename_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.blurhash_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.url_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.id_)*/uint64_t{0u}
   , /*decltype(_impl_.size_)*/0u
@@ -7233,7 +7234,7 @@ class AttachmentPointer::_Internal {
  public:
   using HasBits = decltype(std::declval<AttachmentPointer>()._impl_._has_bits_);
   static void set_has_id(HasBits* has_bits) {
-    (*has_bits)[0] |= 64u;
+    (*has_bits)[0] |= 128u;
   }
   static void set_has_contenttype(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
@@ -7242,7 +7243,7 @@ class AttachmentPointer::_Internal {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_size(HasBits* has_bits) {
-    (*has_bits)[0] |= 128u;
+    (*has_bits)[0] |= 256u;
   }
   static void set_has_thumbnail(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
@@ -7254,19 +7255,22 @@ class AttachmentPointer::_Internal {
     (*has_bits)[0] |= 16u;
   }
   static void set_has_flags(HasBits* has_bits) {
-    (*has_bits)[0] |= 256u;
-  }
-  static void set_has_width(HasBits* has_bits) {
     (*has_bits)[0] |= 512u;
   }
-  static void set_has_height(HasBits* has_bits) {
+  static void set_has_width(HasBits* has_bits) {
     (*has_bits)[0] |= 1024u;
   }
-  static void set_has_url(HasBits* has_bits) {
+  static void set_has_height(HasBits* has_bits) {
+    (*has_bits)[0] |= 2048u;
+  }
+  static void set_has_blurhash(HasBits* has_bits) {
     (*has_bits)[0] |= 32u;
   }
+  static void set_has_url(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
+  }
   static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000040) ^ 0x00000040) != 0;
+    return ((has_bits[0] & 0x00000080) ^ 0x00000080) != 0;
   }
 };
 
@@ -7287,6 +7291,7 @@ AttachmentPointer::AttachmentPointer(const AttachmentPointer& from)
     , decltype(_impl_.thumbnail_){}
     , decltype(_impl_.digest_){}
     , decltype(_impl_.filename_){}
+    , decltype(_impl_.blurhash_){}
     , decltype(_impl_.url_){}
     , decltype(_impl_.id_){}
     , decltype(_impl_.size_){}
@@ -7335,6 +7340,14 @@ AttachmentPointer::AttachmentPointer(const AttachmentPointer& from)
     _this->_impl_.filename_.Set(from._internal_filename(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.blurhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.blurhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_blurhash()) {
+    _this->_impl_.blurhash_.Set(from._internal_blurhash(), 
+      _this->GetArenaForAllocation());
+  }
   _impl_.url_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.url_.Set("", GetArenaForAllocation());
@@ -7361,6 +7374,7 @@ inline void AttachmentPointer::SharedCtor(
     , decltype(_impl_.thumbnail_){}
     , decltype(_impl_.digest_){}
     , decltype(_impl_.filename_){}
+    , decltype(_impl_.blurhash_){}
     , decltype(_impl_.url_){}
     , decltype(_impl_.id_){uint64_t{0u}}
     , decltype(_impl_.size_){0u}
@@ -7388,6 +7402,10 @@ inline void AttachmentPointer::SharedCtor(
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.filename_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.blurhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.blurhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   _impl_.url_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.url_.Set("", GetArenaForAllocation());
@@ -7410,6 +7428,7 @@ inline void AttachmentPointer::SharedDtor() {
   _impl_.thumbnail_.Destroy();
   _impl_.digest_.Destroy();
   _impl_.filename_.Destroy();
+  _impl_.blurhash_.Destroy();
   _impl_.url_.Destroy();
 }
 
@@ -7424,7 +7443,7 @@ void AttachmentPointer::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     if (cached_has_bits & 0x00000001u) {
       _impl_.contenttype_.ClearNonDefaultToEmpty();
     }
@@ -7441,18 +7460,17 @@ void AttachmentPointer::Clear() {
       _impl_.filename_.ClearNonDefaultToEmpty();
     }
     if (cached_has_bits & 0x00000020u) {
+      _impl_.blurhash_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000040u) {
       _impl_.url_.ClearNonDefaultToEmpty();
     }
   }
-  if (cached_has_bits & 0x000000c0u) {
-    ::memset(&_impl_.id_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&_impl_.size_) -
-        reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.size_));
-  }
-  if (cached_has_bits & 0x00000700u) {
-    ::memset(&_impl_.flags_, 0, static_cast<size_t>(
+  _impl_.id_ = uint64_t{0u};
+  if (cached_has_bits & 0x00000f00u) {
+    ::memset(&_impl_.size_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.height_) -
-        reinterpret_cast<char*>(&_impl_.flags_)) + sizeof(_impl_.height_));
+        reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.height_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -7555,6 +7573,15 @@ const char* AttachmentPointer::_InternalParse(const char* ptr, ::_pbi::ParseCont
         } else
           goto handle_unusual;
         continue;
+      // optional string blurhash = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          auto str = _internal_mutable_blurhash();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // optional string url = 101;
       case 101:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
@@ -7596,7 +7623,7 @@ uint8_t* AttachmentPointer::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // required fixed64 id = 1;
-  if (cached_has_bits & 0x00000040u) {
+  if (cached_has_bits & 0x00000080u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteFixed64ToArray(1, this->_internal_id(), target);
   }
@@ -7614,7 +7641,7 @@ uint8_t* AttachmentPointer::_InternalSerialize(
   }
 
   // optional uint32 size = 4;
-  if (cached_has_bits & 0x00000080u) {
+  if (cached_has_bits & 0x00000100u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_size(), target);
   }
@@ -7638,25 +7665,31 @@ uint8_t* AttachmentPointer::_InternalSerialize(
   }
 
   // optional uint32 flags = 8;
-  if (cached_has_bits & 0x00000100u) {
+  if (cached_has_bits & 0x00000200u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(8, this->_internal_flags(), target);
   }
 
   // optional uint32 width = 9;
-  if (cached_has_bits & 0x00000200u) {
+  if (cached_has_bits & 0x00000400u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(9, this->_internal_width(), target);
   }
 
   // optional uint32 height = 10;
-  if (cached_has_bits & 0x00000400u) {
+  if (cached_has_bits & 0x00000800u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(10, this->_internal_height(), target);
   }
 
-  // optional string url = 101;
+  // optional string blurhash = 12;
   if (cached_has_bits & 0x00000020u) {
+    target = stream->WriteStringMaybeAliased(
+        12, this->_internal_blurhash(), target);
+  }
+
+  // optional string url = 101;
+  if (cached_has_bits & 0x00000040u) {
     target = stream->WriteStringMaybeAliased(
         101, this->_internal_url(), target);
   }
@@ -7682,7 +7715,7 @@ size_t AttachmentPointer::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     // optional string contentType = 2;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -7718,32 +7751,39 @@ size_t AttachmentPointer::ByteSizeLong() const {
           this->_internal_filename());
     }
 
-    // optional string url = 101;
+    // optional string blurhash = 12;
     if (cached_has_bits & 0x00000020u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+          this->_internal_blurhash());
+    }
+
+    // optional string url = 101;
+    if (cached_has_bits & 0x00000040u) {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
           this->_internal_url());
     }
 
   }
-  // optional uint32 size = 4;
-  if (cached_has_bits & 0x00000080u) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_size());
-  }
-
-  if (cached_has_bits & 0x00000700u) {
-    // optional uint32 flags = 8;
+  if (cached_has_bits & 0x00000f00u) {
+    // optional uint32 size = 4;
     if (cached_has_bits & 0x00000100u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_size());
+    }
+
+    // optional uint32 flags = 8;
+    if (cached_has_bits & 0x00000200u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
     }
 
     // optional uint32 width = 9;
-    if (cached_has_bits & 0x00000200u) {
+    if (cached_has_bits & 0x00000400u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_width());
     }
 
     // optional uint32 height = 10;
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000800u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_height());
     }
 
@@ -7787,24 +7827,27 @@ void AttachmentPointer::MergeFrom(const AttachmentPointer& from) {
       _this->_internal_set_filename(from._internal_filename());
     }
     if (cached_has_bits & 0x00000020u) {
-      _this->_internal_set_url(from._internal_url());
+      _this->_internal_set_blurhash(from._internal_blurhash());
     }
     if (cached_has_bits & 0x00000040u) {
-      _this->_impl_.id_ = from._impl_.id_;
+      _this->_internal_set_url(from._internal_url());
     }
     if (cached_has_bits & 0x00000080u) {
-      _this->_impl_.size_ = from._impl_.size_;
+      _this->_impl_.id_ = from._impl_.id_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
-  if (cached_has_bits & 0x00000700u) {
+  if (cached_has_bits & 0x00000f00u) {
     if (cached_has_bits & 0x00000100u) {
-      _this->_impl_.flags_ = from._impl_.flags_;
+      _this->_impl_.size_ = from._impl_.size_;
     }
     if (cached_has_bits & 0x00000200u) {
-      _this->_impl_.width_ = from._impl_.width_;
+      _this->_impl_.flags_ = from._impl_.flags_;
     }
     if (cached_has_bits & 0x00000400u) {
+      _this->_impl_.width_ = from._impl_.width_;
+    }
+    if (cached_has_bits & 0x00000800u) {
       _this->_impl_.height_ = from._impl_.height_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -7849,6 +7892,10 @@ void AttachmentPointer::InternalSwap(AttachmentPointer* other) {
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.filename_, lhs_arena,
       &other->_impl_.filename_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.blurhash_, lhs_arena,
+      &other->_impl_.blurhash_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.url_, lhs_arena,

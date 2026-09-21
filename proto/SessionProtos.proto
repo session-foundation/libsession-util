@@ -368,6 +368,7 @@ message AttachmentPointer {
   optional uint32  flags       = 8;
   optional uint32  width       = 9;
   optional uint32  height      = 10;
+  optional string  blurhash    = 12;
   optional string  url         = 101;
 }
 
