@@ -42,15 +42,14 @@ local default_system_deps = [
   'nettle-dev',
 ];
 
-local system_deps_llvm = [
-  'libevent-dev',
-  'liboxenc-dev',
-  'libsodium-dev',
-  'libsqlite3-dev',
-  'libutf8proc-dev',
-  'libzstd-dev',
-  'nettle-dev',
-];
+// Filters out packages from `deps` that are known not to link on a full llvm-with-libc++ build
+// (mostly due to incompatibilities in some C++ linking):
+local llvm_deps(deps) = std.setDiff(std.set(deps), std.set([
+  'libprotobuf-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'libspdlog-dev',
+]));
 
 local default_test_deps = libngtcp2_deps + default_system_deps;
 
@@ -311,11 +310,16 @@ local full_llvm(version) = debian_build(
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version, ' lld-' + version, ' libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
-  system_deps=system_deps_llvm,
+  system_deps=llvm_deps(default_system_deps),
   shared_libs=false,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
               ' -DCMAKE_CXX_FLAGS="-stdlib=libc++ -fcolor-diagnostics" ' +
+              ' -DOXEN_LOGGING_FORCE_SUBMODULES=ON ' +
+              std.join(' ', [
+                '-DDEPS_FORCE_' + m + '_SUBMODULE=ON'
+                for m in ['protobuf-lite', 'liboxenquic', 'liboxenmq']
+              ]) +
               std.join(' ', [
                 '-DCMAKE_' + type + '_LINKER_FLAGS=-fuse-ld=lld-' + version
                 for type in ['EXE', 'MODULE', 'SHARED']
