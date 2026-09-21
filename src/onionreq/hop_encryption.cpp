@@ -15,6 +15,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 
+#include "../nettle-compat.hpp"
 #include "session/export.h"
 #include "session/hash.hpp"
 #include "session/network/key_types.hpp"
@@ -132,7 +133,7 @@ std::vector<std::byte> HopEncryption::encrypt_aesgcm(
     o += plaintext.size();
 
     // Append digest
-    gcm_aes256_digest(&ctx, GCM_DIGEST_SIZE, to_unsigned(o));
+    nettle_digest<gcm_aes256_digest>(&ctx, GCM_DIGEST_SIZE, to_unsigned(o));
     o += GCM_DIGEST_SIZE;
 
     assert(o == output.data() + output.size());
@@ -167,7 +168,7 @@ std::vector<std::byte> HopEncryption::decrypt_aesgcm(
             &ctx, ciphertext.size(), to_unsigned(plaintext.data()), to_unsigned(ciphertext.data()));
 
     std::array<unsigned char, GCM_DIGEST_SIZE> digest_out;
-    gcm_aes256_digest(&ctx, digest_out.size(), digest_out.data());
+    nettle_digest<gcm_aes256_digest>(&ctx, digest_out.size(), digest_out.data());
 
     if (sodium_memcmp(digest_out.data(), digest_in.data(), GCM_DIGEST_SIZE) != 0)
         throw std::runtime_error{"Decryption failed (AES256-GCM)"};

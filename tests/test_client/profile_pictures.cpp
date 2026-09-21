@@ -5,6 +5,7 @@
 #include <session/random.hpp>
 
 #include "../../src/client/download_cache.hpp"
+#include "../../src/nettle-compat.hpp"
 #include "config_helpers.hpp"
 
 namespace cache = session::client::cache;
@@ -28,7 +29,8 @@ std::vector<std::byte> gcm_encrypt(
             plain.size(),
             session::to_unsigned(out.data() + 12),
             session::to_unsigned(plain.data()));
-    gcm_aes256_digest(&ctx, 16, session::to_unsigned(out.data() + 12 + plain.size()));
+    session::nettle_digest<gcm_aes256_digest>(
+            &ctx, 16, session::to_unsigned(out.data() + 12 + plain.size()));
     return out;
 }
 

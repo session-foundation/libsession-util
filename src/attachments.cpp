@@ -23,6 +23,7 @@
 #include <type_traits>
 
 #include "internal-util.hpp"
+#include "nettle-compat.hpp"
 #include "session/hash.hpp"
 
 namespace session::attachment {
@@ -431,7 +432,7 @@ std::vector<std::byte> legacy_display_pic_decrypt(
     gcm_aes256_decrypt(&ctx, body.size(), to_unsigned(plaintext.data()), to_unsigned(body.data()));
 
     std::array<unsigned char, LEGACY_DISPLAY_PIC_TAG_SIZE> tag_out;
-    gcm_aes256_digest(&ctx, tag_out.size(), tag_out.data());
+    nettle_digest<gcm_aes256_digest>(&ctx, tag_out.size(), tag_out.data());
 
     // Constant time, as everywhere else a MAC is compared: leaking where two tags first differ is
     // what lets an attacker find a valid one a byte at a time.
@@ -477,7 +478,8 @@ std::vector<std::byte> legacy_decrypt(
         hmac_sha256_ctx ctx;
         hmac_sha256_set_key(&ctx, 32, to_unsigned(key.data()) + 32);
         hmac_sha256_update(&ctx, authenticated.size(), to_unsigned(authenticated.data()));
-        hmac_sha256_digest(&ctx, expected_mac.size(), to_unsigned(expected_mac.data()));
+        nettle_digest<hmac_sha256_digest>(
+                &ctx, expected_mac.size(), to_unsigned(expected_mac.data()));
     }
     if (!memeql_sec(expected_mac.data(), mac.data(), LEGACY_MAC_SIZE))
         throw std::runtime_error{"Legacy attachment decryption failed: HMAC mismatch"};
@@ -507,7 +509,8 @@ std::vector<std::byte> legacy_decrypt(
     //     sha256_ctx ctx;
     //     sha256_init(&ctx);
     //     sha256_update(&ctx, encrypted.size(), to_unsigned(encrypted.data()));
-    //     sha256_digest(&ctx, expected_digest.size(), to_unsigned(expected_digest.data()));
+    //     nettle_digest<sha256_digest>(
+    //             &ctx, expected_digest.size(), to_unsigned(expected_digest.data()));
     // }
     // if (!memeql_sec(expected_digest.data(), digest.data(), LEGACY_DIGEST_SIZE))
     //     throw std::runtime_error{"Legacy attachment decryption failed: digest mismatch"};
