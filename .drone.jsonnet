@@ -42,7 +42,7 @@ local system_deps = [
   'nettle-dev',
 ];
 
-local default_test_deps = libngtcp2_deps;
+local default_test_deps = libngtcp2_deps + system_deps;
 
 local docker_base = 'registry.oxen.rocks/';
 
@@ -84,7 +84,6 @@ local debian_pipeline(name,
                       allow_fail=false,
                       cmake_pkg='cmake',
                       build=['echo "Error: drone build argument not set"', 'exit 1'],
-                      extra_setup=[],
                       extra_steps=[])
       = {
   kind: 'pipeline',
@@ -113,7 +112,7 @@ local debian_pipeline(name,
           'echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ' + kitware_repo + ' main" >/etc/apt/sources.list.d/kitware.list',
           'eatmydata ' + apt_get_quiet + ' update',
         ] else []
-      ) + extra_setup + [
+      ) + [
         'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + cmake_pkg + ' make git ccache ca-certificates ' + std.join(' ', deps),
       ] + build,
@@ -138,7 +137,6 @@ local debian_build(name,
                    tests=true,
                    stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
-                   extra_setup=[],
                    extra_steps=[],
                    allow_fail=false)
       = debian_pipeline(
@@ -163,7 +161,6 @@ local debian_build(name,
     ci_dep_mirror(local_mirror),
     'make VERBOSE=1 -j' + jobs,
   ],
-  extra_setup=extra_setup,
   extra_steps=(if tests then
                  [{
                    name: 'tests',
@@ -261,7 +258,7 @@ local pro_backend_pkgs = [
   'git',
   'curl',
   'ca-certificates',
-] + default_test_deps;
+];
 
 local pro_backend_live_pipeline(name, image) = debian_build(
   name,
@@ -275,7 +272,7 @@ local pro_backend_live_pipeline(name, image) = debian_build(
     name: 'pro-backend live tests',
     image: image,
     pull: 'always',
-    commands: apt_setup(image, pro_backend_pkgs) + [
+    commands: apt_setup(image, pro_backend_pkgs + default_test_deps) + [
       // Check out + provision the backend (venv reuses the apt-installed python3-* via system site
       // packages; only the pip-only provider libraries are installed).
       'git clone --depth=1 --branch ' + pro_backend_ref + ' ' + pro_backend_git + ' /opt/pro-backend',
@@ -405,7 +402,7 @@ local static_build(name,
     kind: 'pipeline',
     type: 'docker',
     steps: [{
-      name: 'build',
+      name: 'formatting',
       image: docker_base + 'lint',
       pull: 'always',
       commands: [
