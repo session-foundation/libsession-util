@@ -2,12 +2,13 @@ include(../cmake/session-deps/Deps.cmake)
 
 message(STATUS "Checking submodules")
 check_submodule(ios-cmake)
-check_submodule(session-router
-    external/oxen-libquic
-    external/oxen-libquic/external/oxen-logging
-    external/oxen-libquic/external/oxen-logging/fmt
-    external/oxen-libquic/external/oxen-logging/spdlog
-    external/nlohmann)
+check_submodule(session-router external/nlohmann external/oxen-libquic)
+# check_submodule's extra arguments are resolved as gitlinks of the first argument's repo, and it
+# only recurses one level, so anything deeper needs its own call rooted at the repo that records it:
+# oxen-encoding and oxen-logging belong to oxen-libquic, and fmt/spdlog to oxen-logging.
+set(libquic_dir "${CMAKE_CURRENT_SOURCE_DIR}/session-router/external/oxen-libquic")
+check_submodule(external/oxen-encoding WORKING_DIRECTORY "${libquic_dir}")
+check_submodule(external/oxen-logging fmt spdlog WORKING_DIRECTORY "${libquic_dir}")
 check_submodule(protobuf)
 check_submodule(date)
 check_submodule(session-sqlite SQLiteCpp cmake/session-deps)
