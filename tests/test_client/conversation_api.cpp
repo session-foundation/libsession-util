@@ -134,7 +134,7 @@ TEST_CASE("Client: a page size has to be a page", "[client][convos]") {
 
     // The handler form refuses on the calling thread too, rather than reporting it: the caller is
     // still there to catch, and a bad page size is its bug rather than a runtime condition.
-    auto ignore = [](std::optional<std::string>, std::vector<Message>) {};
+    auto ignore = [](Expected<std::vector<Message>>) {};
     CHECK_THROWS_AS(c->conversation(id, await)->messages(0, ignore), std::invalid_argument);
 
     CHECK(c->conversation(id, await)->messages(1, await).size() == 1);
