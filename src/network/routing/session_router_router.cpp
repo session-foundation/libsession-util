@@ -5,6 +5,8 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 
+#include <algorithm>
+#include <array>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <session/router.hpp>
@@ -530,17 +532,34 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
 }
 
 void SessionRouter::_send_direct_request(Request request, network_response_callback_t callback) {
+    // Both the request and the callback are handed off partway through -- to _send_via_tunnel, or
+    // to the pending queue -- so nothing after that point may touch either one, the error handler
+    // included.  A moved-from std::function is valid but unspecified rather than guaranteed empty,
+    // so `if (callback)` is not a safe test; track the hand-off instead.  Keep the id and the key
+    // in locals of our own for the same reason: they are what the error path has left to report.
+    std::string req_id = request.request_id;
+    std::string remote_pubkey_hex;
+    bool handed_off = false;
+
     try {
         if (std::holds_alternative<ServerDestination>(request.destination))
             throw std::runtime_error{"Attempted to send server request directly"};
 
-        auto [remote_pubkey, remote_port] =
-                remote_info_for_destination(request.destination, request.request_id);
-        const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
+        auto [remote_pubkey_view, remote_port] =
+                remote_info_for_destination(request.destination, req_id);
+
+        // Copy the key out rather than carrying the view: it points into request.destination, and
+        // for a RemoteAddress destination that is a vector whose buffer the queued copy takes
+        // ownership of below -- so the view outlives its owner, and _fail_tunnel erasing that queue
+        // entry would free the bytes while _establish_tunnel is still reading them.
+        std::array<std::byte, 32> remote_pubkey;
+        std::ranges::copy(remote_pubkey_view, remote_pubkey.begin());
+        remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
         if (auto it = _active_tunnels.find(remote_pubkey_hex);
             it != _active_tunnels.end() && it->second->established) {
-            log::trace(cat, "[Request {}] Found active tunnel.", request.request_id);
+            log::trace(cat, "[Request {}] Found active tunnel.", req_id);
+            handed_off = true;
             _send_via_tunnel(
                     it->second->tunnel->remote,
                     it->second->tunnel->local_port,
@@ -550,7 +569,7 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         }
 
         // Add the request to the pending queue to be picked up once we have a tunnel for it
-        std::string initiating_req_id = request.request_id;
+        handed_off = true;
         _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
 
         // If there is only a single pending request then we wouldn't have started establishing a
@@ -559,21 +578,24 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
             log::info(
                     cat,
                     "[Request {}] No tunnel to {}, initiating new tunnel.",
-                    initiating_req_id,
+                    req_id,
                     remote_pubkey_hex);
-            _establish_tunnel(remote_pubkey, remote_port, initiating_req_id);
+            _establish_tunnel(remote_pubkey, remote_port, req_id);
         } else
             log::debug(
                     cat,
                     "[Request {}] Tunnel to {} is pending, queueing request.",
-                    initiating_req_id,
+                    req_id,
                     remote_pubkey_hex);
     } catch (const std::exception& e) {
-        log::error(
-                cat,
-                "[Request {}] Failed to send request due to error: {}",
-                request.request_id,
-                e.what());
+        log::error(cat, "[Request {}] Failed to send request due to error: {}", req_id, e.what());
+
+        // Once queued, the queue owns the callback and _fail_tunnel is what reports the error --
+        // to every other request waiting on the same tunnel as well, which calling the one callback
+        // here would have left stranded.
+        if (handed_off)
+            return _fail_tunnel(remote_pubkey_hex, true);
+
         return callback(
                 false,
                 false,
