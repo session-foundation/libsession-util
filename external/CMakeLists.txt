@@ -130,7 +130,7 @@ endif()
 if(NOT TARGET nlohmann_json::nlohmann_json)
     set(JSON_BuildTests OFF CACHE INTERNAL "")
     set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-    sessiondep_or_submodule(nlohmann_json 3.7.0 nlohmann-json nlohmann_json::nlohmann_json)
+    sessiondep_or_submodule(nlohmann_json 3.7.0 session-router/external/nlohmann nlohmann_json::nlohmann_json)
 endif()
 
 
