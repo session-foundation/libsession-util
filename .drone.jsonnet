@@ -29,7 +29,7 @@ local default_deps = ['g++'] + default_deps_nocxx;
 //
 // A too-old system library is not an error: cmake falls back to building that one dependency.
 // libsodium is that case on Debian 12 and Ubuntu 22.04, which ship less than the 1.0.21 we need.
-local system_deps = [
+local default_system_deps = [
   'libevent-dev',
   'libfmt-dev',
   'liboxen-quic-dev',
@@ -42,7 +42,17 @@ local system_deps = [
   'nettle-dev',
 ];
 
-local default_test_deps = libngtcp2_deps + system_deps;
+local system_deps_llvm = [
+  'libevent-dev',
+  'liboxenc-dev',
+  'libsodium-dev',
+  'libsqlite3-dev',
+  'libutf8proc-dev',
+  'libzstd-dev',
+  'nettle-dev',
+];
+
+local default_test_deps = libngtcp2_deps + default_system_deps;
 
 local docker_base = 'registry.oxen.rocks/';
 
@@ -125,6 +135,7 @@ local debian_build(name,
                    image,
                    arch='amd64',
                    deps=default_deps,
+                   system_deps=default_system_deps,
                    static_deps=false/* build our own dependencies instead of using the distro's */,
                    test_deps=default_test_deps,
                    build_type='Release',
@@ -300,6 +311,7 @@ local full_llvm(version) = debian_build(
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version, ' lld-' + version, ' libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
+  system_deps=system_deps_llvm,
   shared_libs=false,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
