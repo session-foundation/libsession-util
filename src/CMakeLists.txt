@@ -209,8 +209,10 @@ target_link_libraries(network
     PUBLIC
     crypto
     oxen::quic
-    PRIVATE
+    # service_node.hpp declares `service_node::from_json(nlohmann::json)`, so anything including it
+    # -- which core.hpp does, and so anything using core -- needs the json headers.
     nlohmann_json::nlohmann_json
+    PRIVATE
     sessiondep::libsodium
     sessiondep::nettle
     date::date

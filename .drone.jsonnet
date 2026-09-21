@@ -18,7 +18,40 @@ local default_deps_nocxx = [
 
 local default_deps = ['g++'] + default_deps_nocxx;
 
-local default_test_deps = libngtcp2_deps;
+// Everything we can link against rather than compiling our own copy of, for builds that are not
+// deliberately static (see `static_deps` in debian_build).  Two reasons: such a build is much
+// faster, and it is the only thing that tests us against the library versions distros actually
+// ship -- Debian 12's fmt 9, for instance, which our own code has to stay compatible with.
+//
+// liboxen-quic-dev pulls in liboxen-logging-dev, which is older than we accept
+// (OXEN_LOGGING_MIN_VERSION in external/CMakeLists.txt); the submodule is used for that one and
+// builds against the system fmt/spdlog, which is what puts fmt 9 in front of our code.
+//
+// A too-old system library is not an error: cmake falls back to building that one dependency.
+// libsodium is that case on Debian 12 and Ubuntu 22.04, which ship less than the 1.0.21 we need.
+local default_system_deps = [
+  'libevent-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'liboxenc-dev',
+  'libsodium-dev',
+  'libspdlog-dev',
+  'libsqlite3-dev',
+  'libutf8proc-dev',
+  'libzstd-dev',
+  'nettle-dev',
+];
+
+// Filters out packages from `deps` that are known not to link on a full llvm-with-libc++ build
+// (mostly due to incompatibilities in some C++ linking):
+local llvm_deps(deps) = std.setDiff(std.set(deps), std.set([
+  'libprotobuf-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'libspdlog-dev',
+]));
+
+local default_test_deps = libngtcp2_deps + default_system_deps;
 
 local docker_base = 'registry.oxen.rocks/';
 
@@ -60,7 +93,6 @@ local debian_pipeline(name,
                       allow_fail=false,
                       cmake_pkg='cmake',
                       build=['echo "Error: drone build argument not set"', 'exit 1'],
-                      extra_setup=[],
                       extra_steps=[])
       = {
   kind: 'pipeline',
@@ -89,7 +121,7 @@ local debian_pipeline(name,
           'echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ' + kitware_repo + ' main" >/etc/apt/sources.list.d/kitware.list',
           'eatmydata ' + apt_get_quiet + ' update',
         ] else []
-      ) + extra_setup + [
+      ) + [
         'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + cmake_pkg + ' make git ccache ca-certificates ' + std.join(' ', deps),
       ] + build,
@@ -102,6 +134,8 @@ local debian_build(name,
                    image,
                    arch='amd64',
                    deps=default_deps,
+                   system_deps=default_system_deps,
+                   static_deps=false/* build our own dependencies instead of using the distro's */,
                    test_deps=default_test_deps,
                    build_type='Release',
                    lto=false,
@@ -113,14 +147,13 @@ local debian_build(name,
                    tests=true,
                    stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
-                   extra_setup=[],
                    extra_steps=[],
                    allow_fail=false)
       = debian_pipeline(
   name,
   image,
   arch=arch,
-  deps=deps,
+  deps=deps + (if static_deps then [] else system_deps),
   stf_repo=stf_repo,
   kitware_repo=kitware_repo,
   allow_fail=allow_fail,
@@ -130,6 +163,7 @@ local debian_build(name,
     'cmake .. -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' ' +
     (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
     (if shared_libs then '-DBUILD_SHARED_LIBS=ON ' else '') +
+    '-DBUILD_STATIC_DEPS=' + (if static_deps then 'ON ' else 'OFF ') +
     '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
@@ -137,7 +171,6 @@ local debian_build(name,
     ci_dep_mirror(local_mirror),
     'make VERBOSE=1 -j' + jobs,
   ],
-  extra_setup=extra_setup,
   extra_steps=(if tests then
                  [{
                    name: 'tests',
@@ -235,7 +268,7 @@ local pro_backend_pkgs = [
   'git',
   'curl',
   'ca-certificates',
-] + default_test_deps;
+];
 
 local pro_backend_live_pipeline(name, image) = debian_build(
   name,
@@ -249,7 +282,7 @@ local pro_backend_live_pipeline(name, image) = debian_build(
     name: 'pro-backend live tests',
     image: image,
     pull: 'always',
-    commands: apt_setup(image, pro_backend_pkgs) + [
+    commands: apt_setup(image, pro_backend_pkgs + default_test_deps) + [
       // Check out + provision the backend (venv reuses the apt-installed python3-* via system site
       // packages; only the pip-only provider libraries are installed).
       'git clone --depth=1 --branch ' + pro_backend_ref + ' ' + pro_backend_git + ' /opt/pro-backend',
@@ -277,10 +310,16 @@ local full_llvm(version) = debian_build(
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version, ' lld-' + version, ' libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
+  system_deps=llvm_deps(default_system_deps),
   shared_libs=false,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
               ' -DCMAKE_CXX_FLAGS="-stdlib=libc++ -fcolor-diagnostics" ' +
+              ' -DOXEN_LOGGING_FORCE_SUBMODULES=ON ' +
+              std.join(' ', [
+                '-DDEPS_FORCE_' + m + '_SUBMODULE=ON'
+                for m in ['protobuf-lite', 'liboxenquic', 'liboxenmq']
+              ]) +
               std.join(' ', [
                 '-DCMAKE_' + type + '_LINKER_FLAGS=-fuse-ld=lld-' + version
                 for type in ['EXE', 'MODULE', 'SHARED']
@@ -379,7 +418,7 @@ local static_build(name,
     kind: 'pipeline',
     type: 'docker',
     steps: [{
-      name: 'build',
+      name: 'formatting',
       image: docker_base + 'lint',
       pull: 'always',
       commands: [
@@ -444,6 +483,10 @@ local static_build(name,
   debian_build('Debian 12', docker_base + 'debian-bookworm'),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
   debian_build('Ubuntu LTS', docker_base + 'ubuntu-lts'),
+  // The one build that compiles every dependency itself rather than taking the distro's, on the
+  // oldest distro we support: what the release artifacts do, and the only thing that notices when
+  // a dependency we vendor stops building.
+  debian_build('Ubuntu 22.04 (static deps)', docker_base + 'ubuntu-jammy', static_deps=true),
 
   // ARM builds (ARM64 and armhf)
   debian_build('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', jobs=4),

@@ -30,6 +30,29 @@
 
 #include "../internal-util.hpp"
 
+namespace fmt {
+
+/// Logs a key pair as "X25519[abcd…wxyz], MLKEM768[abcd…wxyz]".
+///
+/// Out here, rather than beside the type, because a formatter specialization belongs to namespace
+/// fmt and `session::core` does not enclose it.  A specialization rather than fmt's ADL `format_as`
+/// hook because that hook only reaches non-enum types from fmt 10 onwards, and because this is also
+/// the form `std::format` takes.
+///
+/// Reopening namespace fmt rather than writing this out-of-line as `fmt::formatter<Keys, char>`:
+/// gcc 11 does not take the constraints of an out-of-line constrained partial specialization into
+/// account and so rejects this one as a redefinition of libquic's `formatter<T, char>` for
+/// to_string-ables.
+template <std::derived_from<session::core::Devices::XWingKeys> Keys>
+struct formatter<Keys, char> : formatter<std::string> {
+    auto format(const Keys& k, format_context& ctx) const {
+        return formatter<std::string>::format(
+                fmt::format("X25519[{:9.4}], MLKEM768[{:9.4}]", k.x25519_pub, k.mlkem768_pub), ctx);
+    }
+};
+
+}  // namespace fmt
+
 namespace session::core {
 
 using namespace fmt::literals;
@@ -148,13 +171,6 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
 namespace {
 
 }  // namespace
-
-// format_as for XWingKeys-derived types (DeviceKeys, AccountKeys), defined in session::core so
-// that fmtlib's ADL-based lookup can find it when logging these types.
-template <std::derived_from<Devices::XWingKeys> Keys>
-std::string format_as(const Keys& k) {
-    return "X25519[{:9.4}], MLKEM768[{:9.4}]"_format(k.x25519_pub, k.mlkem768_pub);
-}
 
 Devices::DeviceKeys Devices::rotate_device_keys() {
     // We store just one single seed value, then use SHAKE256 to expand it into separate X25519
@@ -771,7 +787,7 @@ namespace {
         Removed = 3,      // device newly transitioned to Unregistered
     };
 
-    constexpr std::string_view format_as(Processing p) {
+    constexpr std::string_view to_string(Processing p) {
         switch (p) {
             case Processing::LinkRequest: return "link-request";
             case Processing::Registered: return "registered";
@@ -815,6 +831,20 @@ namespace {
     static_assert(bt_bytes_encoded(100) == 104);  // "100:…"
 
 }  // namespace
+
+}  // namespace session::core
+
+/// Logs a `Processing` as the word `to_string` gives for it.  Out here for the reason given at the
+/// top of this file; `session::core::Processing` names the type because the unnamed namespace it
+/// lives in is reachable from its enclosing namespace.
+template <>
+struct fmt::formatter<session::core::Processing, char> : fmt::formatter<std::string_view> {
+    auto format(session::core::Processing p, fmt::format_context& ctx) const {
+        return formatter<std::string_view>::format(to_string(p), ctx);
+    }
+};
+
+namespace session::core {
 
 std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) {
     cleared_b32 a;

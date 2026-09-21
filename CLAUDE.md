@@ -67,7 +67,7 @@ Public headers are in `include/session/`:
 
 ### Dependency System
 
-Dependencies are managed via `cmake/session-deps/` which provides `session_dep()` and `session_dep_or_submodule()` macros. These first try system libraries; if not found they fall back to static builds. External submodules live in `external/` (oxen-logging, nlohmann-json, ios-cmake, protobuf, oxen-libquic).
+Dependencies are managed via `cmake/session-deps/` which provides `session_dep()` and `sessiondep_or_submodule()` macros. These first try system libraries; if not found they fall back to static builds. External submodules live in `external/` (ios-cmake, protobuf, session-router, session-sqlite, date). oxen-libquic, oxen-logging, oxenc and nlohmann-json are not submodules here: they are taken from the nested copies under `external/session-router/external/`.
 
 ### Tests
 
