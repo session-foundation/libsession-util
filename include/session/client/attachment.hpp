@@ -35,10 +35,6 @@ struct OutgoingAttachment {
     /// local file is a temporary whose name means nothing to the recipient.
     std::optional<std::string> filename;
 
-    /// Text shown with the attachment.  Distinct from the message body, which is shown as its own
-    /// message.
-    std::optional<std::string> caption;
-
     /// Marks this as a recorded voice message rather than an ordinary audio file, which clients
     /// present differently.
     bool voice_message = false;
@@ -149,7 +145,6 @@ struct Attachment {
 
     std::optional<std::string> content_type;
     std::optional<std::string> filename;
-    std::optional<std::string> caption;
 
     /// A recorded voice message rather than an ordinary audio file, which clients present
     /// differently.
