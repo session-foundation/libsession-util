@@ -46,6 +46,7 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
     .url_terms_of_service     = "https://getsession.org/terms-of-service",
     .url_token                = "https://token.getsession.org",
     .url_translate            = "https://getsession.org/translate",
+    .url_website              = "https://getsession.org",
 };
 // clang-format on
 
