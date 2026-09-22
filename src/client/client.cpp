@@ -1129,11 +1129,6 @@ void Client::_fetch_cached(
     }
 
     auto& entry = _in_flight[name];
-    // A transfer starting is a change to what every message showing this file can offer: `absent`
-    // a moment ago, `fetching` now.  Attachments only -- a display picture belongs to a
-    // conversation rather than to a message, and has its own progress handler to say so.
-    if (target.dir == cache::ATTACHMENT_DIR)
-        _emit_attachment_availability(target.remote.url);
     entry.plain = std::make_shared<std::vector<std::byte>>();
     if (progress)
         entry.progress.push_back(std::move(progress));
@@ -1141,87 +1136,106 @@ void Client::_fetch_cached(
         entry.waiting.push_back(std::move(cb));
     auto plain = entry.plain;
 
-    _download_decrypted(
-            target.remote.url,
-            target.kind,
-            target.remote.key,
-            target.remote.digest,
-            target.remote.size,
-            [plain](std::span<const std::byte> chunk) {
-                plain->insert(plain->end(), chunk.begin(), chunk.end());
-            },
-            // Onto the loop before touching the registry -- this arrives on the network thread, and
-            // `_in_flight` is ours.
-            [this, name](int64_t done, int64_t total, std::optional<int> r) {
-                call([this, name, done, total, r] {
-                    auto found = _in_flight.find(name);
-                    if (found == _in_flight.end())
-                        return;
-                    found->second.done = done;
-                    found->second.total = total;
-                    for (const auto& p : found->second.progress)
-                        p(done, total, r);
-                });
-            },
-            // A copy of the claim rather than a move out of `target`: the arguments before this one
-            // read it, and the order they are evaluated in is not ours to rely on.
-            [this, name, dir = target.dir, claim = target.remote, store = std::move(store)](
-                    std::optional<Error> error,
-                    std::optional<AttachmentUnavailable> permanent) {
-                call([this,
-                      name,
-                      dir,
-                      claim,
-                      store,
-                      permanent,
-                      error = std::move(error)]() mutable {
-                    auto found = _in_flight.find(name);
-                    if (found == _in_flight.end())
-                        return;
+    auto on_plain = [plain](std::span<const std::byte> chunk) {
+        plain->insert(plain->end(), chunk.begin(), chunk.end());
+    };
 
-                    // Lifted out before anything else, because everything below can be seen from
-                    // outside and none of it should show a transfer that has finished as still
-                    // running.  Storing the file tells the messages showing it, and would report
-                    // them as `fetching` while this entry stood; a waiter may ask for the same file
-                    // again, and must find a finished transfer rather than join one about to be
-                    // erased.
-                    auto entry = std::move(found->second);
-                    _in_flight.erase(found);
+    // Onto the loop before touching the registry -- this arrives on the network thread, and
+    // `_in_flight` is ours.
+    auto on_progress = [this, name](int64_t done, int64_t total, std::optional<int> r) {
+        call([this, name, done, total, r] {
+            auto found = _in_flight.find(name);
+            if (found == _in_flight.end())
+                return;
+            found->second.done = done;
+            found->second.total = total;
+            for (const auto& p : found->second.progress)
+                p(done, total, r);
+        });
+    };
 
-                    // Stored before anyone is told, since a waiter may go straight back to the
-                    // cache -- and only on success, because what a failed download produced is not
-                    // the file.
-                    bool stored = false;
-                    if (!error && store)
-                        stored = store(*entry.plain);
+    auto on_done = [this, name, dir = target.dir, claim = target.remote, store = std::move(store)](
+                           std::optional<Error> error,
+                           std::optional<AttachmentUnavailable> permanent) {
+        call([this, name, dir, claim, store, permanent, error = std::move(error)]() mutable {
+            auto found = _in_flight.find(name);
+            if (found == _in_flight.end())
+                return;
 
-                    // The transfer has stopped either way, so what a message can offer has changed
-                    // -- and it is `absent` for every outcome this has to report itself.  A success
-                    // that was kept has already said so from where the keeping happened; what is
-                    // left here is a download that failed, one whose file could not be written, and
-                    // one with nowhere to put it at all, none of which leave anything behind.
-                    //
-                    // A failure that says retrying is pointless is recorded first, so the same
-                    // report carries why.  The report is still for every message showing the file
-                    // even when the verdict is narrower: all of them were `fetching` while this
-                    // ran.
-                    //
-                    // Before the waiters, so that one of them reading a message finds the settled
-                    // state rather than the old one.
-                    if (dir == cache::ATTACHMENT_DIR && !stored) {
-                        if (permanent) {
-                            auto c = core.database().conn();
-                            _mark_unavailable(c, claim, *permanent);
-                        }
-                        _emit_attachment_availability(claim.url);
-                    }
+            // Lifted out before anything else, because everything below can be seen from outside
+            // and none of it should show a transfer that has finished as still running.  Storing
+            // the file tells the messages showing it, and would report them as `fetching` while
+            // this entry stood; a waiter may ask for the same file again, and must find a finished
+            // transfer rather than join one about to be erased.
+            auto entry = std::move(found->second);
+            _in_flight.erase(found);
 
-                    for (const auto& w : entry.waiting)
-                        _report(w,
-                                error ? Expected<std::vector<std::byte>>{unexpected{*error}}
-                                      : Expected<std::vector<std::byte>>{*entry.plain});
-                });
-            });
+            // Stored before anyone is told, since a waiter may go straight back to the cache --
+            // and only on success, because what a failed download produced is not the file.
+            bool stored = false;
+            if (!error && store)
+                stored = store(*entry.plain);
+
+            // The transfer has stopped either way, so what a message can offer has changed -- and
+            // it is `absent` for every outcome this has to report itself.  A success that was kept
+            // has already said so from where the keeping happened; what is left here is a download
+            // that failed, one whose file could not be written, and one with nowhere to put it at
+            // all, none of which leave anything behind.
+            //
+            // A failure that says retrying is pointless is recorded first, so the same report
+            // carries why.  The report is still for every message showing the file even when the
+            // verdict is narrower: all of them were `fetching` while this ran.
+            //
+            // Before the waiters, so that one of them reading a message finds the settled state
+            // rather than the old one.
+            if (dir == cache::ATTACHMENT_DIR && !stored) {
+                if (permanent) {
+                    auto c = core.database().conn();
+                    _mark_unavailable(c, claim, *permanent);
+                }
+                _emit_attachment_availability(claim.url);
+            }
+
+            for (const auto& w : entry.waiting)
+                _report(w,
+                        error ? Expected<std::vector<std::byte>>{unexpected{*error}}
+                              : Expected<std::vector<std::byte>>{*entry.plain});
+        });
+    };
+
+    // A download that cannot even start -- no network, a url that is not one, a key of the wrong
+    // length -- throws before anything is sent, so `on_done` never runs, and that is the only thing
+    // that removes this entry.  Left in place it would say `fetching` for the life of the process
+    // and swallow every later request for the file.
+    //
+    // Reported here rather than rethrown: the caller's handler is among these waiters, and not
+    // every caller still holds it to report through.  The entry is new, so nobody else is on it --
+    // nothing can join before this returns.
+    try {
+        _download_decrypted(
+                target.remote.url,
+                target.kind,
+                target.remote.key,
+                target.remote.digest,
+                target.remote.size,
+                std::move(on_plain),
+                std::move(on_progress),
+                std::move(on_done));
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not start a fetch of {}: {}", target.remote.url, e.what());
+        auto dead = std::move(_in_flight.at(name));
+        _in_flight.erase(name);
+        for (const auto& w : dead.waiting)
+            _report(w, Expected<std::vector<std::byte>>{unexpected{error_from(e)}});
+        return;
+    }
+
+    // Only once it has actually started: a transfer beginning is a change to what every message
+    // showing this file can offer -- `absent` a moment ago, `fetching` now.  Attachments only; a
+    // display picture belongs to a conversation rather than to a message, and has its own progress
+    // handler to say so.
+    if (target.dir == cache::ATTACHMENT_DIR)
+        _emit_attachment_availability(target.remote.url);
 }
 
 void Client::set_gallery(int64_t message_id, bool gallery, result_function<bool> cb) {
@@ -2279,14 +2293,27 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
         //
         // Progress is broadcast rather than handed to a caller, because there is no caller: a
         // display that opens midway learns from this that something is already happening.
-        _attachment_data(
-                message_id,
-                a.index,
-                [this, convo_id](const AttachmentProgress& p) {
-                    if (const auto& h = _cbs->attachment_progress)
-                        h(convo_id, p);
-                },
-                nullptr);
+        //
+        // Best effort, per attachment.  This runs while the message is still arriving and before it
+        // is announced, so a pointer that cannot be fetched -- one with no url, say -- must cost
+        // that one attachment, not the rest of them and not the announcement.
+        try {
+            _attachment_data(
+                    message_id,
+                    a.index,
+                    [this, convo_id](const AttachmentProgress& p) {
+                        if (const auto& h = _cbs->attachment_progress)
+                            h(convo_id, p);
+                    },
+                    nullptr);
+        } catch (const std::exception& e) {
+            log::warning(
+                    cat,
+                    "Not auto-downloading attachment {} of message {}: {}",
+                    a.index,
+                    message_id,
+                    e.what());
+        }
     }
 }
 
@@ -4892,17 +4919,27 @@ void Client::_save_attachment(
         return;
     }
 
-    _download_decrypted(
-            url,
-            DownloadKind::attachment,
-            remote.key,
-            remote.digest,
-            remote.size,
-            [state](std::span<const std::byte> plain) {
-                state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
-            },
-            report,
-            finish);
+    // A download that cannot start never calls `finish`, which is what removes the temporary file,
+    // so it has to go here or be left beside the destination.  Rethrown for `save_attachment` to
+    // report, which still holds the caller's handler.
+    try {
+        _download_decrypted(
+                url,
+                DownloadKind::attachment,
+                remote.key,
+                remote.digest,
+                remote.size,
+                [state](std::span<const std::byte> plain) {
+                    state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
+                },
+                report,
+                finish);
+    } catch (...) {
+        state->out.close();
+        std::error_code ec;
+        std::filesystem::remove(state->partial, ec);
+        throw;
+    }
 }
 
 void Client::_on_media_saved(

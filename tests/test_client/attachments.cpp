@@ -2344,6 +2344,102 @@ TEST_CASE(
 }
 
 TEST_CASE(
+        "Client: a fetch that cannot start leaves nothing behind",
+        "[client][attachments][availability]") {
+    // No network yet, so the download cannot even begin.  The caller is told so -- and the file
+    // must go back to being something to fetch, not sit at `fetching` for ever with every later
+    // request for it waiting on a transfer that was never sent.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("later", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    std::optional<bool> succeeded;
+    c->attachment_data(id, 0, nullptr, [&](auto r) { succeeded = r.has_value(); });
+    sync(*c);
+    REQUIRE(succeeded.has_value());
+    CHECK_FALSE(*succeeded);
+    CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::absent);
+
+    // Once there is a network the same request works, rather than joining the one that never was.
+    auto* net = attach_mock_network(c->core);
+    net->served["later"] = ciphertext;
+    std::optional<std::vector<std::byte>> got;
+    c->attachment_data(id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        got = *std::move(r);
+    });
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(got);
+    CHECK(*got == plaintext);
+}
+
+TEST_CASE(
+        "Client: an attachment that cannot be auto-downloaded does not lose its message",
+        "[client][attachments][auto]") {
+    // A pointer with no url is still stored -- it is one of the files the sender said were there --
+    // but there is nothing to fetch.  Fetching it on arrival must cost that attachment and nothing
+    // else: the arrival is announced after auto-download runs, so a failure escaping it would mean
+    // the message was stored and never reported.
+    TempCacheDir dir;
+    Recorder r;
+    TempClient c{r.handlers()};
+    SenderKeys peer;
+    attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, await);
+    c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+    r.msg_added.clear();
+
+    deliver(*c,
+            peer,
+            "no url",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_key(std::string(32, 'k'));
+                a->set_contenttype("image/png");
+            });
+    sync(*c);
+
+    auto added = Recorder::messages(r.msg_added);
+    REQUIRE(added.size() == 1);
+    CHECK(added[0].body == "no url");
+}
+
+TEST_CASE(
         "Client: a bad pointer to a good file does not break the good one",
         "[client][attachments][unavailable]") {
     // Nothing ties a pointer's key to the bytes its url names.  Alice sends a file; Mallory sends a
