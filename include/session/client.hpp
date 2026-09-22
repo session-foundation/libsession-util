@@ -758,6 +758,21 @@ class Client {
 
     static std::string _transfer_key(const RemoteFile& f);
 
+    // Why a fetch failed, when it failed in a way that trying again will not fix; stored in
+    // `message_attachments.unavailable` and shown as the matching `AttachmentAvailability`.
+    //
+    // Its own type rather than those public values because the numbers are what is on disk, and
+    // the public enum's are not meant to be anything in particular.  They are the status each
+    // failure carried: the file server's for a server answer, and `ATTACHMENT_UNREADABLE` for bytes
+    // that arrived and could not be read.
+    //
+    // Nothing transient is ever one of these.  A timeout, a connection failure or a server error
+    // says nothing about the file, and the next attempt may well succeed.
+    enum class Unavailable : int {
+        not_found = 404,
+        unreadable = ATTACHMENT_UNREADABLE,
+    };
+
     // Keyed by the whole claim (see `_transfer_key`) rather than the url, because joining a
     // transfer means taking its answer: a caller whose pointer carries a different key must not be
     // handed the failure of somebody else's.  Pointers that agree -- which is what every honest
@@ -771,17 +786,21 @@ class Client {
     // downloaded -- which is a question about the disk, not about a map in memory.
     std::map<std::string, InFlight> _in_flight;
 
-    /// What to tell a reader about an attachment's local copy: the `Attachment` fields that report
-    /// it, given the `cached` reference already read from its row.
+    /// What to tell a reader about an attachment's file: the `Attachment` fields that report it,
+    /// given the `cached` reference and `unavailable` verdict already read from its row.
     ///
     /// The one thing the message builders below need that is not in the database: whether a
     /// transfer is running, which is ours and in memory.  Which is why this is a member rather
-    /// than the file-local helper it used to be.
+    /// than the file-local helper it used to be.  It is also where the states are ranked, so that
+    /// a display is handed one answer rather than the pieces of one.
     struct CacheStatus {
         AttachmentAvailability availability = AttachmentAvailability::absent;
         int64_t done = 0, total = 0;
     };
-    CacheStatus _attachment_availability(std::string_view url, std::optional<int64_t> cached);
+    CacheStatus _attachment_availability(
+            std::string_view url,
+            std::optional<int64_t> cached,
+            std::optional<Unavailable> unavailable);
 
     /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
     /// every message showing that file.
@@ -809,7 +828,7 @@ class Client {
     /// rows making the same claim -- otherwise one bad pointer, sent by anyone, would mark every
     /// honest copy of the file as broken.
     std::vector<int64_t> _mark_unavailable(
-            sqlite::Connection& c, const RemoteFile& claim, AttachmentUnavailable why);
+            sqlite::Connection& c, const RemoteFile& claim, Unavailable why);
 
     /// A new pointer to `url` arrived, which is the resend a `not_found` tells the user to ask
     /// for: clears the server's verdicts on that url so the file is offered again.  Leaves
@@ -1080,8 +1099,8 @@ class Client {
             DownloadKind kind,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            std::function<void(std::optional<Error> error,
-                               std::optional<AttachmentUnavailable> permanent)> on_done);
+            std::function<void(std::optional<Error> error, std::optional<Unavailable> permanent)>
+                    on_done);
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {

@@ -90,55 +90,59 @@ struct AttachmentProgress {
     std::optional<int> result;
 };
 
-/// Whether an attachment's bytes are already here, on their way, or neither.
+/// What can be done about an attachment's bytes right now: read them, wait for them, fetch them, or
+/// nothing at all.
 ///
-/// What this is for is deciding what to *draw*: show the file, show a progress indicator, or show
-/// something the user can press to fetch it.  It says nothing the caller could not eventually find
-/// out by asking for the bytes -- `attachment_data` does the right thing in all three cases -- but
-/// asking is how you start a download, and a client with auto-download off needs to know before it
-/// decides whether to.
+/// What this is for is deciding what to *draw* -- the file, a progress indicator, something the
+/// user can press to fetch it, or an explanation of why there is nothing to press -- so it is one
+/// value rather than several a display would have to rank.  It says nothing the caller could not
+/// eventually find out by asking for the bytes, but asking is how you start a download, and a
+/// client with auto-download off needs to know before it decides whether to.
 ///
 /// It is a *hint about what the next call will do*, not a promise about the file.  A `cached` that
 /// is evicted before you ask for it just means `attachment_data` fetches instead of reading, which
 /// is correct and merely slower.  Changes to it are reported through `messages_updated`, since this
 /// is part of the message -- and for every message showing the same file at once, since it is one
 /// file and one thing that happened to it.
+///
+/// **A switch over this needs a default.**  It may gain values, and a display that does not know
+/// one should treat it as a file it cannot draw rather than guess.
 enum class AttachmentAvailability {
     /// In the local cache: `attachment_data` will read it from disk without touching the network.
     cached,
+
     /// A transfer is already under way, whoever started it -- an auto-download, another message
     /// quoting the same file, or another part of the application.  `attachment_data` joins it
     /// rather than starting a second one, and reports progress from wherever it has reached.
+    ///
+    /// This outranks either failure below: a transfer running is about to settle the question,
+    /// so what the last one found is not what to draw.
     fetching,
-    /// Neither, so `attachment_data` would start a download.  With auto-download off, that is the
-    /// case where the decision belongs to the user.
+
+    /// Not here, and fetching it is worth trying, so `attachment_data` would start a download.
+    /// With auto-download off, that is the case where the decision belongs to the user.
     absent,
-};
 
-/// Why a fetch of an attachment failed, when it failed in a way that trying again will not fix.
-///
-/// An int under the names rather than a closed set: what is recorded is the code the failure
-/// actually carried, so a status nothing here anticipated is kept as itself instead of being
-/// flattened into "some other problem".  **A switch over this needs a default**, and a client that
-/// does not recognise a value should say the file could not be fetched rather than guess why.
-///
-/// What is *not* here is anything transient.  A timeout, a connection failure or a server error
-/// says nothing about the file and the next attempt may well succeed, so those are never recorded:
-/// the question this answers is why a retry would be pointless.
-enum class AttachmentUnavailable : int {
-    /// The file server does not hold it.  Usually an upload that has expired, which is the case
-    /// that makes this worth reporting at all: the fix is in the sender's hands, so a display
-    /// should say to ask them for it again rather than offer a button that cannot work.
-    not_found = 404,
+    /// The last attempt found the file server does not hold it.  Usually an upload that has
+    /// expired, which is the case that makes this worth reporting at all: the fix is in the
+    /// sender's hands, so a display should say to ask them for it again rather than offer a button
+    /// that cannot work.
+    ///
+    /// **A cached answer, not a fact about the url.**  An attachment url is a hash of the
+    /// encrypted body and the encryption is deterministic, so the same file from the same account
+    /// lands at the same url, and a re-upload puts those bytes back where they were.  That resend
+    /// turns this back into `absent` -- for the original message as well as the new one, since it
+    /// is the same file.
+    not_found,
 
-    /// It arrived and could not be read the way this message said to read it -- it failed to
-    /// authenticate under the key it came with, or it is not the size its sender claimed.  A url is
-    /// a hash of the encrypted body and the encryption is deterministic, so a resend of the same
-    /// file reproduces these same bytes and this same failure.
+    /// The last attempt arrived and could not be read the way this message said to read it -- it
+    /// failed to authenticate under the key it came with, or it is not the size its sender
+    /// claimed.  A resend would reproduce the same bytes and the same failure, so "ask them to send
+    /// it again" is not the advice here.
     ///
     /// A verdict on this message's key and size rather than on the file: another message naming
     /// the same url with a different key may read it perfectly well, and is not marked by this.
-    unreadable = ATTACHMENT_UNREADABLE,
+    unreadable,
 };
 
 struct Attachment {
@@ -177,32 +181,7 @@ struct Attachment {
     /// somewhere the application happens to have put a copy.
     bool uploaded = false;
 
-    /// The last attempt to fetch this file failed in a way that looked permanent: the file server
-    /// does not hold it -- which is also how an expired upload answers -- or the bytes arrived and
-    /// failed to authenticate.  Offering to fetch it again is offering the same failure, so a
-    /// display should say it cannot be had rather than invite another attempt.
-    ///
-    /// **A cached answer, not a fact about the url**, and the difference decides what a client
-    /// should do about it.  The repair is to ask the sender to send it again: an attachment url is
-    /// a hash of the encrypted body and the encryption is deterministic, so the same file from the
-    /// same account lands at the same url, and the re-upload puts those bytes back where they were.
-    /// That resend clears a `not_found` -- for the original message as well as the new one, since
-    /// it is the same file -- and the fetch is worth trying again.  It does not clear `unreadable`,
-    /// which the resent bytes would only reproduce.
-    ///
-    /// Never set alongside `availability == cached`: a file that arrives by any route clears this
-    /// on every message showing it, since all of them are then served it from disk.
-    ///
-    /// The value says *which*, because they are different things to tell a user: a file server
-    /// status -- 404 for an upload it does not hold, which is how an expired one answers -- or
-    /// `ATTACHMENT_UNREADABLE` for bytes that arrived and were not the file they claimed to be.
-    /// "Ask them to send it again" is the right advice for the first and not the second.
-    ///
-    /// Unset means only that nothing has proved otherwise: an attachment nobody has tried to fetch
-    /// is indistinguishable from one that will succeed.
-    std::optional<AttachmentUnavailable> unavailable;
-
-    /// Whether the bytes are already here, on their way, or neither -- see
+    /// Whether the bytes are here, on their way, fetchable, or not to be had -- see
     /// `AttachmentAvailability`.
     ///
     /// Reported the same way for an outgoing attachment as an incoming one: what we send is kept

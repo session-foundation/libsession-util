@@ -1155,8 +1155,7 @@ void Client::_fetch_cached(
     };
 
     auto on_done = [this, name, dir = target.dir, claim = target.remote, store = std::move(store)](
-                           std::optional<Error> error,
-                           std::optional<AttachmentUnavailable> permanent) {
+                           std::optional<Error> error, std::optional<Unavailable> permanent) {
         call([this, name, dir, claim, store, permanent, error = std::move(error)]() mutable {
             auto found = _in_flight.find(name);
             if (found == _in_flight.end())
@@ -3269,14 +3268,14 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                  std::optional<int>,
                  std::optional<int64_t>,
                  std::optional<std::string>,
-                 std::optional<AttachmentUnavailable>,
+                 std::optional<Unavailable>,
                  std::optional<int64_t>,
                  std::optional<int64_t>>{std::move(st)}) {
         auto found = by_id.find(message);
         if (found == by_id.end())
             continue;
 
-        auto status = url ? _attachment_availability(*url, cached) : CacheStatus{};
+        auto status = url ? _attachment_availability(*url, cached, unavailable) : CacheStatus{};
         found->second->attachments.push_back(Attachment{
                 .index = static_cast<size_t>(idx),
                 .content_type = std::move(ctype),
@@ -3288,7 +3287,6 @@ void Client::_load_attachments(sqlite::Connection& c, std::vector<Message>& msgs
                 // A url is what says it reached the file server, and is also the only thing that
                 // identifies its cached copy -- so one column answers both questions.
                 .uploaded = url.has_value(),
-                .unavailable = unavailable,
                 .availability = status.availability,
                 .fetch_done = status.done,
                 .fetch_total = status.total,
@@ -3516,10 +3514,10 @@ void Client::_emit_messages_showing(sqlite::Connection& c, const std::vector<int
 // statement would change is also what keeps a repeated failure from re-announcing anything.
 
 std::vector<int64_t> Client::_mark_unavailable(
-        sqlite::Connection& c, const RemoteFile& claim, AttachmentUnavailable why) {
+        sqlite::Connection& c, const RemoteFile& claim, Unavailable why) {
     std::vector<int64_t> changed;
 
-    if (why != AttachmentUnavailable::unreadable) {
+    if (why != Unavailable::unreadable) {
         // The server's answer about the url, true of every message showing the file.
         for (auto message : c.prepared_results<int64_t>(
                      R"(
@@ -3568,7 +3566,7 @@ void Client::_clear_resendable(std::string_view url) {
             RETURNING message
         )"s,
                  url,
-                 AttachmentUnavailable::unreadable))
+                 Unavailable::unreadable))
         changed.push_back(message);
     _emit_messages_showing(c, changed);
 }
@@ -3598,10 +3596,28 @@ std::optional<std::pair<int64_t, std::string>> Client::_cached_entry(
 }
 
 Client::CacheStatus Client::_attachment_availability(
-        std::string_view url, std::optional<int64_t> cached) {
+        std::string_view url,
+        std::optional<int64_t> cached,
+        std::optional<Unavailable> unavailable) {
+    // What is left once nothing is here or coming: whether the last attempt found that trying is
+    // pointless.  A fact about that attempt rather than about the disk, so it stands whether or not
+    // there is a cache.
+    //
+    // A value nothing here recognises -- written by a later version -- is shown as fetchable: an
+    // attempt will either work or write a verdict this version does know.
+    auto otherwise = [unavailable]() -> CacheStatus {
+        if (!unavailable)
+            return {};
+        switch (*unavailable) {
+            case Unavailable::not_found: return {AttachmentAvailability::not_found};
+            case Unavailable::unreadable: return {AttachmentAvailability::unreadable};
+        }
+        return {};
+    };
+
     // No cache configured means nothing is ever kept, so every file is a download away.
     if (_cache_dir.empty())
-        return {};
+        return otherwise();
 
     // In flight first: a transfer under way has no cache row yet -- that is written when it
     // finishes -- and answering `absent` while the bytes are arriving is what puts a download
@@ -3619,7 +3635,7 @@ Client::CacheStatus Client::_attachment_availability(
     // makes it trustworthy -- an entry cannot go without taking this with it.
     if (cached)
         return {AttachmentAvailability::cached, 0, 0};
-    return {};
+    return otherwise();
 }
 
 std::optional<Message> Client::_message(int64_t id) {
@@ -4302,7 +4318,7 @@ void Client::_download_decrypted(
         DownloadKind kind,
         std::function<void(std::span<const std::byte>)> on_plain,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
-        std::function<void(std::optional<Error>, std::optional<AttachmentUnavailable>)> on_done) {
+        std::function<void(std::optional<Error>, std::optional<Unavailable>)> on_done) {
     auto& [url, key, digest, claimed_size] = remote;
 
     auto info = network::file_server::parse_download_url(url);
@@ -4448,11 +4464,11 @@ void Client::_download_decrypted(
             // Only a failure the file itself explains is worth recording: a timeout, a connection
             // failure or a server error says nothing about the file, and the next attempt may well
             // succeed, so those are reported and forgotten.
-            std::optional<AttachmentUnavailable> permanent;
+            std::optional<Unavailable> permanent;
             if (code == 404)
-                permanent = AttachmentUnavailable::not_found;
+                permanent = Unavailable::not_found;
             else if (code == ATTACHMENT_UNREADABLE)
-                permanent = AttachmentUnavailable::unreadable;
+                permanent = Unavailable::unreadable;
 
             on_done(Error{what, std::move(why)}, permanent);
         };
@@ -4798,8 +4814,7 @@ void Client::_save_attachment(
     auto report = _dispatch_progress(std::move(identified));
 
     auto finish = [this, state, claim = remote, message_id, index, notify_sender, replace, cb](
-                          std::optional<Error> error,
-                          std::optional<AttachmentUnavailable> permanent) {
+                          std::optional<Error> error, std::optional<Unavailable> permanent) {
         // A save is as good a witness as a background fetch, and records the same verdict on the
         // same rows.  Onto the loop like the rest of this lambda's state changes, since this
         // arrives on the network thread.

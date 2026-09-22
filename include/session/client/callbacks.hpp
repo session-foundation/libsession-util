@@ -78,9 +78,7 @@ struct callbacks {
     std::function<void(std::vector<Message>&&)> messages_added;
 
     /// Existing messages changed: a send state, whether one is shown as a gallery, when its
-    /// recipient saved an attachment, or what we hold of an attachment's file — which of the three
-    /// `AttachmentAvailability` states it is in, and whether a fetch of it has been found to be
-    /// pointless.
+    /// recipient saved an attachment, or an attachment's `AttachmentAvailability`.
     ///
     /// **Ordered oldest first**, by the timestamp history is ordered on and then by id — the
     /// reverse of `Conversation::messages`, which pages backwards from the newest. A handler

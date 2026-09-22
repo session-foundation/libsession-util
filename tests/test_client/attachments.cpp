@@ -2130,26 +2130,24 @@ TEST_CASE(
     }
     c->set_attachment_cache_limit(std::nullopt, await);
 
-    // fetching -> absent, for a failure that does say something: both are told, and both are told
-    // why rather than merely that nothing is here.
+    // fetching -> not_found, for a failure that does say something: both are told, and both are
+    // told why rather than merely that nothing is here.
     start_fetch();
     told();
     REQUIRE(fail_downloads(*net, 404) == 1);
     sync(*c);
-    told_both(AttachmentAvailability::absent);
-    for (auto id : both)
-        CHECK(c->message(id, await)->attachments[0].unavailable ==
-              AttachmentUnavailable::not_found);
+    told_both(AttachmentAvailability::not_found);
 
-    // ...and a resend clears it, for the message that first failed as well as the new arrival.
+    // not_found -> absent: a resend makes it fetchable again, for the message that first failed as
+    // well as the new arrival.
     arrive("h4", 4000, "watched");
     {
         auto seen = told();
-        for (auto id : both)
-            CHECK(seen.count(id) == 1);
+        for (auto id : both) {
+            REQUIRE(seen.count(id) == 1);
+            CHECK(seen.at(id) == AttachmentAvailability::absent);
+        }
     }
-    for (auto id : both)
-        CHECK_FALSE(c->message(id, await)->attachments[0].unavailable.has_value());
 }
 
 TEST_CASE(
@@ -2288,16 +2286,17 @@ TEST_CASE(
 
     auto convo = ConversationId::dm(peer.session_id);
     auto verdicts = [&] {
-        std::vector<std::optional<AttachmentUnavailable>> found;
+        std::vector<AttachmentAvailability> found;
         for (const auto& m : c->conversation(convo, await)->messages(await)) {
             REQUIRE(m.attachments.size() == 1);
-            found.push_back(m.attachments[0].unavailable);
+            found.push_back(m.attachments[0].availability);
         }
         return found;
     };
 
-    using V = std::vector<std::optional<AttachmentUnavailable>>;
-    CHECK(verdicts() == V{std::nullopt, std::nullopt});
+    using V = std::vector<AttachmentAvailability>;
+    constexpr auto absent = AttachmentAvailability::absent;
+    CHECK(verdicts() == V{absent, absent});
 
     // Asks for the bytes and answers the download `status`; the error it produces is not the point
     // of any of these, only what the row is left saying afterwards.
@@ -2313,7 +2312,7 @@ TEST_CASE(
     // A server error says nothing about the file -- the next attempt may well work -- so nothing is
     // recorded and the fetch stays on offer.
     try_fetch([&] { REQUIRE(fail_downloads(*net, 500) == 1); });
-    CHECK(verdicts() == V{std::nullopt, std::nullopt});
+    CHECK(verdicts() == V{absent, absent});
 
     r.msg_updated.clear();
 
@@ -2321,7 +2320,7 @@ TEST_CASE(
     // one looks like: worth recording, and recorded for both messages rather than the one that
     // asked.
     try_fetch([&] { REQUIRE(fail_downloads(*net, 404) == 1); });
-    CHECK(verdicts() == V{AttachmentUnavailable::not_found, AttachmentUnavailable::not_found});
+    CHECK(verdicts() == V{AttachmentAvailability::not_found, AttachmentAvailability::not_found});
     // One report carrying both, rather than one report each: it is one file, and what happened
     // happened to both of them at once.
     REQUIRE_FALSE(r.msg_updated.empty());
@@ -2331,16 +2330,16 @@ TEST_CASE(
     // encrypted body -- lands at the same url.  That clears the verdict for the messages that
     // already carried it, not only for the new arrival, so all three are fetchable again.
     arrive("h3", 3000);
-    CHECK(verdicts() == V{std::nullopt, std::nullopt, std::nullopt});
+    CHECK(verdicts() == V{absent, absent, absent});
 
     // Bytes that arrive and do not authenticate are the other permanent failure, and a different
     // thing to tell a user: a resend would reproduce them, so asking for one is no use.
     auto corrupt = ciphertext;
     corrupt[corrupt.size() / 2] ^= std::byte{0xff};
     try_fetch([&] { REQUIRE(serve_downloads(*net, corrupt) == 1); });
-    CHECK(verdicts() == V{AttachmentUnavailable::unreadable,
-                          AttachmentUnavailable::unreadable,
-                          AttachmentUnavailable::unreadable});
+    CHECK(verdicts() == V{AttachmentAvailability::unreadable,
+                          AttachmentAvailability::unreadable,
+                          AttachmentAvailability::unreadable});
 }
 
 TEST_CASE(
@@ -2484,50 +2483,48 @@ TEST_CASE(
     auto alices = send(alice, key, "h1");
     auto mallorys = send(mallory, garbage, "h2");
 
-    auto unavailable = [&](int64_t id) {
-        return c->message(id, await)->attachments[0].unavailable;
+    auto availability = [&](int64_t id) {
+        return c->message(id, await)->attachments[0].availability;
+    };
+    auto fetch = [&](int64_t id, std::optional<Error>& error, auto&... got) {
+        c->attachment_data(id, 0, nullptr, [&](auto r) {
+            error.reset();
+            if (r)
+                ((got = *r), ...);
+            else
+                error = std::move(r).error();
+        });
+        sync(*c);
     };
 
-    std::optional<std::string> mallory_error, alice_error;
-    std::optional<std::vector<std::byte>> alice_got;
-    c->attachment_data(
-            mallorys, 0, nullptr, [&](std::optional<std::string> e, std::vector<std::byte>) {
-                mallory_error = std::move(e);
-            });
-    sync(*c);
-
-    // Asked while Mallory's transfer is running.  Joining it would mean taking its answer, which is
-    // decided by Mallory's key; so it is a transfer of its own.
-    c->attachment_data(
-            alices, 0, nullptr, [&](std::optional<std::string> e, std::vector<std::byte> d) {
-                alice_error = std::move(e);
-                alice_got = std::move(d);
-            });
-    sync(*c);
-    REQUIRE(net->downloads.size() == 2);
-
-    // Mallory's first, checked before Alice's lands: a file that arrives is served from the cache
-    // to every row naming it, whatever key that row carries.
-    serve_one_download(net->downloads[0], "shared", ciphertext);
+    // Mallory's alone: its failure is a verdict on Mallory's pointer, and Alice's is untouched.
+    std::optional<Error> mallory_error;
+    fetch(mallorys, mallory_error);
+    REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
     CHECK(mallory_error.has_value());
-    CHECK(unavailable(mallorys) == AttachmentUnavailable::unreadable);
-    CHECK_FALSE(unavailable(alices).has_value());
+    CHECK(availability(mallorys) == AttachmentAvailability::unreadable);
+    CHECK(availability(alices) == AttachmentAvailability::absent);
 
-    serve_one_download(net->downloads[1], "shared", ciphertext);
-    net->downloads.clear();
+    // Mallory's again, and Alice's asked for while it runs.  Joining would mean taking its answer,
+    // which Mallory's key decides; so Alice's is a transfer of its own.
+    std::optional<Error> alice_error;
+    std::optional<std::vector<std::byte>> alice_got;
+    fetch(mallorys, mallory_error);
+    fetch(alices, alice_error, alice_got);
+    REQUIRE(net->downloads.size() == 2);
+    REQUIRE(serve_downloads(*net) == 2);
     sync(*c);
+
     CHECK_FALSE(alice_error.has_value());
     REQUIRE(alice_got);
     CHECK(*alice_got == plaintext);
-    CHECK_FALSE(unavailable(alices).has_value());
 
     // And now the file is here, Mallory's message is served it from the cache like every other
     // message naming it -- so it can no longer say the file cannot be had, which would draw "gone"
     // over a file sitting on this disk.
-    auto hers = c->message(mallorys, await)->attachments[0];
-    CHECK(hers.availability == AttachmentAvailability::cached);
-    CHECK_FALSE(hers.unavailable.has_value());
+    CHECK(availability(alices) == AttachmentAvailability::cached);
+    CHECK(availability(mallorys) == AttachmentAvailability::cached);
 }
 
 TEST_CASE(
