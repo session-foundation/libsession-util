@@ -4597,9 +4597,17 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
             return;
     }
 
-    // The same ceiling a download is held to: what it bounds is disk, and a copy of a file we sent
-    // costs exactly what a copy of one we received does.
+    // The same ceilings a download is held to.  The configured one bounds disk: a copy of a file we
+    // sent costs exactly what a copy of one we received does.
     if (auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY); max_size && size > *max_size)
+        return;
+
+    // The fixed one bounds the loop, and applies whether or not the other is set.  What follows
+    // reads and encrypts the whole file here, as caching a download does -- but a download is
+    // refused past this size and an upload is not, so without it the cost of sending a large file
+    // would be unbounded.  The price is that such a file cannot be drawn from the sender's own
+    // transcript, which is where it already stands for every recipient: none of them can fetch it.
+    if (size > static_cast<int64_t>(attachment::MAX_REGULAR_SIZE))
         return;
 
     // Not on `Attachment`, deliberately: where a file is locally is the application's business, and

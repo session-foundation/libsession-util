@@ -1742,6 +1742,17 @@ TEST_CASE(
     in.read(reinterpret_cast<char*>(got.data()), got.size());
     CHECK(!!(got == contents));
 
+    // Nothing larger than a download may be, whatever the settings say: keeping it means reading
+    // and encrypting all of it on the loop, and nothing could fetch it back anyway.
+    auto large = dir / "large.png";
+    {
+        std::vector<std::byte> big(attachment::MAX_REGULAR_SIZE + 1);
+        std::ofstream out{large, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(big.data()), big.size());
+    }
+    CHECK(availability(send({{.path = large, .content_type = "image/png"}}), 0) ==
+          AttachmentAvailability::absent);
+
     std::filesystem::remove_all(dir);
 }
 
