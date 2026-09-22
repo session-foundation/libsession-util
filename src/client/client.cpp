@@ -894,7 +894,7 @@ void Client::_profile_picture(
         };
 
     _fetch_cached(
-            {pic.url, pic.key, {}, std::nullopt, DownloadKind::display_pic, cache::PROFILE_DIR},
+            {{pic.url, pic.key, {}, std::nullopt}, DownloadKind::display_pic, cache::PROFILE_DIR},
             on_progress ? _dispatch_progress(std::move(on_progress)) : nullptr,
             std::move(bytes),
             _store_picture(pic.url));
@@ -1044,7 +1044,7 @@ void Client::_attachment_data(
         std::function<void(const AttachmentProgress&)> on_progress,
         result_function<std::vector<std::byte>> cb) {
 
-    auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
+    auto remote = _remote_file(message_id, index);
 
     // The caller's own progress reporting, identified and hopped out to their thread.
     std::function<void(int64_t, int64_t, std::optional<int>)> progress;
@@ -1056,20 +1056,29 @@ void Client::_attachment_data(
 
     std::function<bool(std::span<const std::byte>)> store;
     if (!_cache_dir.empty())
-        store = [this, url, k = _cache_encryption_key()](std::span<const std::byte> data) {
+        store = [this, url = remote.url, k = _cache_encryption_key()](
+                        std::span<const std::byte> data) {
             return _cache_attachment(url, k, data);
         };
 
     _fetch_cached(
-            {url,
-             std::move(key),
-             std::move(digest),
-             claimed_size,
-             DownloadKind::attachment,
-             cache::ATTACHMENT_DIR},
+            {std::move(remote), DownloadKind::attachment, cache::ATTACHMENT_DIR},
             std::move(progress),
             std::move(cb),
             std::move(store));
+}
+
+std::string Client::_transfer_key(const RemoteFile& f) {
+    // The url first and then a NUL, which no url contains: everything under one url then sorts
+    // together, and `lower_bound(url + '\0')` finds the first of them.
+    std::string key = f.url;
+    key += '\0';
+    key += oxenc::to_hex(f.key.begin(), f.key.end());
+    key += '\0';
+    key += oxenc::to_hex(f.digest.begin(), f.digest.end());
+    key += '\0';
+    key += f.size ? std::to_string(*f.size) : "-"s;
+    return key;
 }
 
 void Client::_fetch_cached(
@@ -1086,12 +1095,12 @@ void Client::_fetch_cached(
         std::optional<int64_t> entry_id;
         if (target.dir == cache::ATTACHMENT_DIR) {
             auto c = core.database().conn();
-            if (auto entry = _cached_entry(c, target.url)) {
+            if (auto entry = _cached_entry(c, target.remote.url)) {
                 entry_id = entry->first;
                 file = _cache_dir / target.dir / entry->second;
             }
         } else
-            file = _cache_path(target.dir, target.url);
+            file = _cache_path(target.dir, target.remote.url);
 
         if (!file.empty())
             if (auto cached = cache::read(file, _cache_encryption_key())) {
@@ -1104,8 +1113,9 @@ void Client::_fetch_cached(
             }
     }
 
-    // Already being fetched: wait on that rather than asking for the same bytes again.
-    const auto& name = target.url;
+    // Already being fetched under the same claim: wait on that rather than asking for the same
+    // bytes again.
+    auto name = _transfer_key(target.remote);
     if (auto found = _in_flight.find(name); found != _in_flight.end()) {
         if (progress) {
             // Told where it has got to before anything else happens, so a display that arrives
@@ -1123,7 +1133,7 @@ void Client::_fetch_cached(
     // a moment ago, `fetching` now.  Attachments only -- a display picture belongs to a
     // conversation rather than to a message, and has its own progress handler to say so.
     if (target.dir == cache::ATTACHMENT_DIR)
-        _emit_attachment_availability(target.url);
+        _emit_attachment_availability(target.remote.url);
     entry.plain = std::make_shared<std::vector<std::byte>>();
     if (progress)
         entry.progress.push_back(std::move(progress));
@@ -1132,11 +1142,11 @@ void Client::_fetch_cached(
     auto plain = entry.plain;
 
     _download_decrypted(
-            target.url,
+            target.remote.url,
             target.kind,
-            std::move(target.key),
-            std::move(target.digest),
-            target.claimed_size,
+            target.remote.key,
+            target.remote.digest,
+            target.remote.size,
             [plain](std::span<const std::byte> chunk) {
                 plain->insert(plain->end(), chunk.begin(), chunk.end());
             },
@@ -1153,10 +1163,18 @@ void Client::_fetch_cached(
                         p(done, total, r);
                 });
             },
-            [this, name, dir = target.dir, url = target.url, store = std::move(store)](
+            // A copy of the claim rather than a move out of `target`: the arguments before this one
+            // read it, and the order they are evaluated in is not ours to rely on.
+            [this, name, dir = target.dir, claim = target.remote, store = std::move(store)](
                     std::optional<Error> error,
                     std::optional<AttachmentUnavailable> permanent) {
-                call([this, name, dir, url, store, permanent, error = std::move(error)]() mutable {
+                call([this,
+                      name,
+                      dir,
+                      claim,
+                      store,
+                      permanent,
+                      error = std::move(error)]() mutable {
                     auto found = _in_flight.find(name);
                     if (found == _in_flight.end())
                         return;
@@ -1183,17 +1201,19 @@ void Client::_fetch_cached(
                     // left here is a download that failed, one whose file could not be written, and
                     // one with nowhere to put it at all, none of which leave anything behind.
                     //
-                    // A failure the file itself explains is recorded instead, which emits for the
-                    // same messages and says more: not merely that nothing is here, but that
-                    // asking again is pointless and why.
+                    // A failure that says retrying is pointless is recorded first, so the same
+                    // report carries why.  The report is still for every message showing the file
+                    // even when the verdict is narrower: all of them were `fetching` while this
+                    // ran.
                     //
                     // Before the waiters, so that one of them reading a message finds the settled
                     // state rather than the old one.
-                    if (dir == cache::ATTACHMENT_DIR) {
-                        if (permanent)
-                            _set_attachment_unavailable(url, permanent);
-                        else if (!stored)
-                            _emit_attachment_availability(url);
+                    if (dir == cache::ATTACHMENT_DIR && !stored) {
+                        if (permanent) {
+                            auto c = core.database().conn();
+                            _mark_unavailable(c, claim, *permanent);
+                        }
+                        _emit_attachment_availability(claim.url);
                     }
 
                     for (const auto& w : entry.waiting)
@@ -2550,10 +2570,7 @@ void Client::_fetch_picture(const ConversationId& id, std::string url, std::vect
         // coming, and a picture that will not come down now is tried again the moment something
         // asks for it.
         _fetch_cached(
-                {url,
-                 std::move(key),
-                 {},
-                 std::nullopt,
+                {{url, std::move(key), {}, std::nullopt},
                  DownloadKind::display_pic,
                  cache::PROFILE_DIR},
                 std::move(progress),
@@ -3469,39 +3486,66 @@ void Client::_emit_messages_showing(sqlite::Connection& c, const std::vector<int
     _emit_messages(false, std::move(all));
 }
 
-void Client::_set_attachment_unavailable(
-        std::string_view url, std::optional<AttachmentUnavailable> code) {
+// `IS NOT` rather than `!=` in each of these, on `unavailable`: one side is NULL in every case that
+// matters -- setting a code on a row that has none, or clearing one back to NULL -- and `!=`
+// answers NULL for those rather than true, so nothing would ever be updated.  Filtering to rows the
+// statement would change is also what keeps a repeated failure from re-announcing anything.
+
+std::vector<int64_t> Client::_mark_unavailable(
+        sqlite::Connection& c, const RemoteFile& claim, AttachmentUnavailable why) {
+    std::vector<int64_t> changed;
+
+    if (why != AttachmentUnavailable::unreadable) {
+        // The server's answer about the url, true of every message showing the file.
+        for (auto message : c.prepared_results<int64_t>(
+                     R"(
+            UPDATE message_attachments SET unavailable = ?2
+            WHERE url = ?1 AND unavailable IS NOT ?2
+            RETURNING message
+        )"s,
+                     claim.url,
+                     why))
+            changed.push_back(message);
+        return changed;
+    }
+
+    // Only rows making the same claim, which are the rows that would fail the same way.  Both sides
+    // coalesced, since an absent key or digest is stored as NULL but carried here as empty, and an
+    // empty blob can bind as either.
+    for (auto message : c.prepared_results<int64_t>(
+                 R"(
+            UPDATE message_attachments SET unavailable = ?2
+            WHERE url = ?1
+              AND coalesce(key, x'') = coalesce(?3, x'')
+              AND coalesce(digest, x'') = coalesce(?4, x'')
+              AND size IS ?5
+              AND unavailable IS NOT ?2
+            RETURNING message
+        )"s,
+                 claim.url,
+                 why,
+                 std::span<const std::byte>{claim.key},
+                 std::span<const std::byte>{claim.digest},
+                 claim.size))
+        changed.push_back(message);
+    return changed;
+}
+
+void Client::_clear_resendable(std::string_view url) {
     auto c = core.database().conn();
 
-    // Only the rows this would actually change, which is what keeps a repeated report from
-    // re-announcing anything: a failure is reported afresh every time something asks for the file,
-    // and a resend arrives once per message rather than once per file.  A *different* code is a
-    // change -- what to tell the user about it has changed -- so it is not filtered out.
+    // Every message showing the file, including the one that failed first: the resend is of the
+    // same file, so it is fetchable again for all of them.
     std::vector<int64_t> changed;
     for (auto message : c.prepared_results<int64_t>(
                  R"(
-            SELECT DISTINCT message FROM message_attachments
-            WHERE url = ?1 AND unavailable IS NOT ?2
-         )"s,
+            UPDATE message_attachments SET unavailable = NULL
+            WHERE url = ?1 AND unavailable IS NOT NULL AND unavailable IS NOT ?2
+            RETURNING message
+        )"s,
                  url,
-                 code))
+                 AttachmentUnavailable::unreadable))
         changed.push_back(message);
-
-    if (changed.empty())
-        return;
-
-    // `IS NOT` rather than `!=`, here and above: one side is NULL in every case that matters --
-    // setting a code on a row that has none, or clearing one back to NULL -- and `!=` answers NULL
-    // for those rather than true, so nothing would ever be updated.
-    c.prepared_exec(
-            "UPDATE message_attachments SET unavailable = ?2 WHERE url = ?1 AND unavailable IS NOT "
-            "?2",
-            url,
-            code);
-
-    // By url rather than by row, so every message quoting this file is answered at once rather
-    // than each discovering it in turn -- and in both directions: a resend makes the file
-    // fetchable again for the message that first failed, not only for the one that carried it.
     _emit_messages_showing(c, changed);
 }
 
@@ -3530,7 +3574,7 @@ std::optional<std::pair<int64_t, std::string>> Client::_cached_entry(
 }
 
 Client::CacheStatus Client::_attachment_availability(
-        const std::string& url, std::optional<int64_t> cached) {
+        std::string_view url, std::optional<int64_t> cached) {
     // No cache configured means nothing is ever kept, so every file is a download away.
     if (_cache_dir.empty())
         return {};
@@ -3538,7 +3582,13 @@ Client::CacheStatus Client::_attachment_availability(
     // In flight first: a transfer under way has no cache row yet -- that is written when it
     // finishes -- and answering `absent` while the bytes are arriving is what puts a download
     // button over the top of a progress bar.
-    if (auto found = _in_flight.find(url); found != _in_flight.end())
+    //
+    // Under *any* claim on this url, not only this row's: whichever transfer lands fills the cache,
+    // and a file in the cache is served to every row naming it whatever key it carries.
+    std::string prefix{url};
+    prefix += '\0';
+    if (auto found = _in_flight.lower_bound(prefix);
+        found != _in_flight.end() && found->first.starts_with(prefix))
         return {AttachmentAvailability::fetching, found->second.done, found->second.total};
 
     // No lookup for the rest: the reference came back with the row, and the foreign key is what
@@ -4449,8 +4499,8 @@ void Client::_download_decrypted(
     net->download(std::move(req));
 }
 
-Client::StoredPointer Client::_attachment_pointer(int64_t message_id, size_t index) {
-    StoredPointer p;
+Client::RemoteFile Client::_remote_file(int64_t message_id, size_t index) {
+    RemoteFile p;
     {
         auto c = core.database().conn();
         // `key` and `digest` vary in length -- 32 bytes for the stream scheme, 64 for legacy -- so
@@ -4694,7 +4744,8 @@ void Client::_save_attachment(
         bool notify_sender,
         bool replace) {
 
-    auto [url, key, digest, claimed_size] = _attachment_pointer(message_id, index);
+    auto remote = _remote_file(message_id, index);
+    const auto& url = remote.url;
 
     // Written to a temporary name beside the destination and renamed only once it is whole, so an
     // interrupted save leaves nothing that looks finished.
@@ -4716,15 +4767,17 @@ void Client::_save_attachment(
         };
     auto report = _dispatch_progress(std::move(identified));
 
-    auto finish = [this, state, url = url, message_id, index, notify_sender, replace, cb](
+    auto finish = [this, state, claim = remote, message_id, index, notify_sender, replace, cb](
                           std::optional<Error> error,
                           std::optional<AttachmentUnavailable> permanent) {
-        // A save is as good a witness as a background fetch: the file server said this url is gone,
-        // or the bytes did not authenticate, and that is true for every message quoting it and not
-        // just the one whose save provoked the attempt.  Onto the loop like the rest of this
-        // lambda's state changes, since this arrives on the network thread.
+        // A save is as good a witness as a background fetch, and records the same verdict on the
+        // same rows.  Onto the loop like the rest of this lambda's state changes, since this
+        // arrives on the network thread.
         if (permanent)
-            call([this, url, permanent] { _set_attachment_unavailable(url, permanent); });
+            call([this, claim, why = *permanent] {
+                auto c = core.database().conn();
+                _emit_messages_showing(c, _mark_unavailable(c, claim, why));
+            });
 
         auto fail = [&](Error why) {
             state->out.close();
@@ -4817,7 +4870,7 @@ void Client::_save_attachment(
     // The reverse does not hold, which is why nothing is registered below: this streams to the
     // destination as bytes arrive and keeps none of them, so there would be nothing to give a
     // joiner that turned up midway.
-    if (auto found = _in_flight.find(url); found != _in_flight.end()) {
+    if (auto found = _in_flight.find(_transfer_key(remote)); found != _in_flight.end()) {
         if (report) {
             report(found->second.done, found->second.total, std::nullopt);
             found->second.progress.push_back(report);
@@ -4834,9 +4887,9 @@ void Client::_save_attachment(
     _download_decrypted(
             url,
             DownloadKind::attachment,
-            std::move(key),
-            std::move(digest),
-            claimed_size,
+            remote.key,
+            remote.digest,
+            remote.size,
             [state](std::span<const std::byte> plain) {
                 state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
             },
@@ -5480,7 +5533,7 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         // this verdict was about, and before the announcement so the older messages quoting the
         // same file are corrected in the same breath as the new one appearing.
         for (const auto& url : arrived_urls)
-            _set_attachment_unavailable(url, std::nullopt);
+            _clear_resendable(url);
 
         // Before the message is announced, so that a display reacting to it already sees whether
         // this is a gallery rather than being told once and corrected a moment later.

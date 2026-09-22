@@ -427,10 +427,12 @@ CREATE TABLE message_attachments (
     -- puts those bytes back where they were.  A flag that never cleared would block precisely the
     -- action that fixes the problem.
     --
-    -- Set across every row naming a url when a fetch of it fails; cleared across every row naming
-    -- that url when a new attachment row quoting it arrives.  The old rows are cleared too, not
-    -- only the new one: it is the same file, and showing one message's copy as broken and
-    -- another's as fine would be showing the same bytes two ways.
+    -- Which rows a failure marks depends on what failed.  A file server status is its answer about
+    -- the url, so it is set on every row naming that url, and cleared on all of them when a new row
+    -- quoting it arrives -- the resend -- since showing one message's copy as gone and another's
+    -- as fine would be showing the same file two ways.  `ATTACHMENT_UNREADABLE` is about how this
+    -- row says to read the bytes: key, digest and size are the sender's claims, and nothing ties
+    -- them to the url, so it marks only rows making the same claim and a resend does not clear it.
     --
     -- The value is *why*: the file server's status for a server answer -- 404 for an upload it
     -- does not hold -- and `ATTACHMENT_UNREADABLE` for bytes that arrived and could not be turned

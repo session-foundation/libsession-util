@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <oxen/quic/loop.hpp>
 #include <session/client/attachment.hpp>
@@ -741,11 +742,34 @@ class Client {
         std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
         std::vector<result_function<std::vector<std::byte>>> waiting;
     };
+
+    // A file on the file server, and what it takes to read it: what an attachment row says about
+    // where its file is and how to open it.
     //
-    // Keyed by url rather than by the name the file is cached under.  Nothing outside this process
-    // sees these keys, and the hashed name exists to keep a directory listing from naming what was
+    // Everything past the url is the sender's claim: nothing ties the key, digest or size to the
+    // bytes the url names, so two rows can name one file and disagree about how to read it -- a
+    // client with a bug, or someone doing it on purpose.  What a fetch finds out about *reading* is
+    // therefore true of a claim, not of a url, and the transfers below are told apart accordingly.
+    struct RemoteFile {
+        std::string url;
+        std::vector<std::byte> key, digest;
+        std::optional<int64_t> size;
+    };
+
+    static std::string _transfer_key(const RemoteFile& f);
+
+    // Keyed by the whole claim (see `_transfer_key`) rather than the url, because joining a
+    // transfer means taking its answer: a caller whose pointer carries a different key must not be
+    // handed the failure of somebody else's.  Pointers that agree -- which is what every honest
+    // copy of a file is -- share one key, so they still share one download.
+    //
+    // Ordered so that everything under one url sits together: whether *anything* is fetching a
+    // file is a question about the url, asked once per attachment on a page.
+    //
+    // By url rather than by the name the file is cached under.  Nothing outside this process sees
+    // these keys, and the hashed name exists to keep a directory listing from naming what was
     // downloaded -- which is a question about the disk, not about a map in memory.
-    std::unordered_map<std::string, InFlight> _in_flight;
+    std::map<std::string, InFlight> _in_flight;
 
     /// What to tell a reader about an attachment's local copy: the `Attachment` fields that report
     /// it, given the `cached` reference already read from its row.
@@ -757,9 +781,7 @@ class Client {
         AttachmentAvailability availability = AttachmentAvailability::absent;
         int64_t done = 0, total = 0;
     };
-    // `url` by reference rather than a view: `_in_flight` is keyed by std::string with no
-    // transparent hashing, and this runs once per attachment on a page.
-    CacheStatus _attachment_availability(const std::string& url, std::optional<int64_t> cached);
+    CacheStatus _attachment_availability(std::string_view url, std::optional<int64_t> cached);
 
     /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
     /// every message showing that file.
@@ -776,14 +798,23 @@ class Client {
     std::vector<int64_t> _messages_showing(sqlite::Connection& c, std::string_view url);
     void _emit_messages_showing(sqlite::Connection& c, const std::vector<int64_t>& messages);
 
-    /// Records why the file at `url` could not be fetched, or -- with nullopt -- that something
-    /// has happened to make it worth trying again.
+    /// Records that fetching through `claim` failed in a way retrying will not fix, on every row
+    /// the verdict is actually true of, and returns the messages whose verdict changed.  Reporting
+    /// them is the caller's: a finished transfer changes more rows than its verdict does, and says
+    /// so in one report of its own.
     ///
-    /// Applied to every message showing that file, in both directions: they are the same bytes, so
-    /// a transcript must not show one message's copy as broken and another's as fine.  See
-    /// `Attachment::unavailable` for why this is a cached answer rather than a permanent one.
-    void _set_attachment_unavailable(
-            std::string_view url, std::optional<AttachmentUnavailable> code);
+    /// Which rows those are depends on what failed.  `not_found` is the file server's answer about
+    /// the url, and holds for every message showing that file.  `unreadable` is about the claim:
+    /// the same bytes under a different key or size may read perfectly well, so it holds only for
+    /// rows making the same claim -- otherwise one bad pointer, sent by anyone, would mark every
+    /// honest copy of the file as broken.
+    std::vector<int64_t> _mark_unavailable(
+            sqlite::Connection& c, const RemoteFile& claim, AttachmentUnavailable why);
+
+    /// A new pointer to `url` arrived, which is the resend a `not_found` tells the user to ask
+    /// for: clears the server's verdicts on that url so the file is offered again.  Leaves
+    /// `unreadable` alone, since a resend reproduces the bytes that failed.
+    void _clear_resendable(std::string_view url);
 
     // How deep a read goes when a message turns out to be a reply.
     enum class ReplyDepth {
@@ -817,14 +848,8 @@ class Client {
     void _load_reply_targets(
             sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
 
-    // What an attachment row says about where its file is and how to open it.
-    struct StoredPointer {
-        std::string url;
-        std::vector<std::byte> key, digest;
-        std::optional<int64_t> size;
-    };
     // Throws if there is no such attachment, or if its sender gave no url.
-    StoredPointer _attachment_pointer(int64_t message_id, size_t index);
+    RemoteFile _remote_file(int64_t message_id, size_t index);
 
     // Writes `data` into the attachment cache under `url`, records it, and tells every message
     // showing that file that it is now here.  The row is an index over the file, so it is written
@@ -1063,9 +1088,7 @@ class Client {
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {
-        std::string url;
-        std::vector<std::byte> key, digest;
-        std::optional<int64_t> claimed_size;
+        RemoteFile remote;
         DownloadKind kind;
         std::string_view dir;  // cache::ATTACHMENT_DIR or cache::PROFILE_DIR
     };

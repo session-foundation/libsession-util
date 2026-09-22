@@ -131,10 +131,13 @@ enum class AttachmentUnavailable : int {
     /// should say to ask them for it again rather than offer a button that cannot work.
     not_found = 404,
 
-    /// It arrived and was not the file it claimed to be -- it failed to authenticate, or its
-    /// sender described it wrongly.  A url is a hash of the encrypted body and the encryption is
-    /// deterministic, so a resend of the same file reproduces these same bytes and this same
-    /// failure; only a genuinely different file would come out differently.
+    /// It arrived and could not be read the way this message said to read it -- it failed to
+    /// authenticate under the key it came with, or it is not the size its sender claimed.  A url is
+    /// a hash of the encrypted body and the encryption is deterministic, so a resend of the same
+    /// file reproduces these same bytes and this same failure.
+    ///
+    /// A verdict on this message's key and size rather than on the file: another message naming
+    /// the same url with a different key may read it perfectly well, and is not marked by this.
     unreadable = ATTACHMENT_UNREADABLE,
 };
 
@@ -183,8 +186,9 @@ struct Attachment {
     /// should do about it.  The repair is to ask the sender to send it again: an attachment url is
     /// a hash of the encrypted body and the encryption is deterministic, so the same file from the
     /// same account lands at the same url, and the re-upload puts those bytes back where they were.
-    /// That resend clears this -- for the original message as well as the new one, since it is the
-    /// same file -- and the fetch is worth trying again.
+    /// That resend clears a `not_found` -- for the original message as well as the new one, since
+    /// it is the same file -- and the fetch is worth trying again.  It does not clear `unreadable`,
+    /// which the resent bytes would only reproduce.
     ///
     /// The value says *which*, because they are different things to tell a user: a file server
     /// status -- 404 for an upload it does not hold, which is how an expired one answers -- or

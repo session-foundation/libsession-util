@@ -2344,6 +2344,90 @@ TEST_CASE(
 }
 
 TEST_CASE(
+        "Client: a bad pointer to a good file does not break the good one",
+        "[client][attachments][unavailable]") {
+    // Nothing ties a pointer's key to the bytes its url names.  Alice sends a file; Mallory sends a
+    // pointer to the same url with a key of her own making.  Mallory's copy cannot be read, and
+    // that must stay a fact about Mallory's pointer rather than become one about Alice's file.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys alice, mallory;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    net->served["shared"] = ciphertext;
+    auto url = network::file_server::generate_download_url("shared", {}, true);
+    std::vector<std::byte> garbage(key.size());
+    random::fill(garbage);
+
+    auto send = [&](const SenderKeys& from, std::span<const std::byte> k, std::string hash) {
+        deliver(
+                *c,
+                from,
+                "",
+                from_epoch_ms(1000),
+                std::move(hash),
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(1);
+                    a->set_url(url);
+                    a->set_key(std::string{reinterpret_cast<const char*>(k.data()), k.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                7);
+        sync(*c);
+        return c->conversation(ConversationId::dm(from.session_id), await)->messages(await)[0].id;
+    };
+    auto alices = send(alice, key, "h1");
+    auto mallorys = send(mallory, garbage, "h2");
+
+    auto unavailable = [&](int64_t id) {
+        return c->message(id, await)->attachments[0].unavailable;
+    };
+
+    std::optional<std::string> mallory_error, alice_error;
+    std::optional<std::vector<std::byte>> alice_got;
+    c->attachment_data(
+            mallorys, 0, nullptr, [&](std::optional<std::string> e, std::vector<std::byte>) {
+                mallory_error = std::move(e);
+            });
+    sync(*c);
+
+    // Asked while Mallory's transfer is running.  Joining it would mean taking its answer, which is
+    // decided by Mallory's key; so it is a transfer of its own.
+    c->attachment_data(
+            alices, 0, nullptr, [&](std::optional<std::string> e, std::vector<std::byte> d) {
+                alice_error = std::move(e);
+                alice_got = std::move(d);
+            });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 2);
+
+    // Mallory's first, checked before Alice's lands: a file that arrives is served from the cache
+    // to every row naming it, whatever key that row carries.
+    serve_one_download(net->downloads[0], "shared", ciphertext);
+    sync(*c);
+    CHECK(mallory_error.has_value());
+    CHECK(unavailable(mallorys) == AttachmentUnavailable::unreadable);
+    CHECK_FALSE(unavailable(alices).has_value());
+
+    serve_one_download(net->downloads[1], "shared", ciphertext);
+    net->downloads.clear();
+    sync(*c);
+    CHECK_FALSE(alice_error.has_value());
+    REQUIRE(alice_got);
+    CHECK(*alice_got == plaintext);
+    CHECK_FALSE(unavailable(alices).has_value());
+}
+
+TEST_CASE(
         "Client: a download that cannot be used is stopped rather than finished",
         "[client][attachments][cancel]") {
     // The stream scheme authenticates each chunk as it arrives, so a file that has been tampered
