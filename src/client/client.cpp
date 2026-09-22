@@ -4645,8 +4645,16 @@ bool Client::_cache_attachment(
 
     // Every message showing this file, not only whoever asked for it: it is one file, and a row
     // that missed this would offer to fetch what is already here.
+    //
+    // Clearing `unavailable` too, whatever the verdict was: every one of these rows is now served
+    // from here, whatever its key, so none of them can honestly say the file cannot be had.  That
+    // includes a not_found that was the server's passing trouble, and a row whose own key never
+    // read it.
     c.prepared_exec(
-            "UPDATE message_attachments SET cached = ?2 WHERE url = ?1 AND cached IS NOT ?2",
+            R"(
+        UPDATE message_attachments SET cached = ?2, unavailable = NULL
+        WHERE url = ?1 AND (cached IS NOT ?2 OR unavailable IS NOT NULL)
+    )",
             url,
             id);
 

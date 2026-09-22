@@ -434,6 +434,9 @@ CREATE TABLE message_attachments (
     -- row says to read the bytes: key, digest and size are the sender's claims, and nothing ties
     -- them to the url, so it marks only rows making the same claim and a resend does not clear it.
     --
+    -- Either is cleared on every row when the file is cached, by whatever route: all of them are
+    -- then served it from disk, so none can say it cannot be had.
+    --
     -- The value is *why*: the file server's status for a server answer -- 404 for an upload it
     -- does not hold -- and `ATTACHMENT_UNREADABLE` for bytes that arrived and could not be turned
     -- back into the file they claimed to be.  Only the first is worth telling the user to ask for

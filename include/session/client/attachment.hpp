@@ -190,6 +190,9 @@ struct Attachment {
     /// it is the same file -- and the fetch is worth trying again.  It does not clear `unreadable`,
     /// which the resent bytes would only reproduce.
     ///
+    /// Never set alongside `availability == cached`: a file that arrives by any route clears this
+    /// on every message showing it, since all of them are then served it from disk.
+    ///
     /// The value says *which*, because they are different things to tell a user: a file server
     /// status -- 404 for an upload it does not hold, which is how an expired one answers -- or
     /// `ATTACHMENT_UNREADABLE` for bytes that arrived and were not the file they claimed to be.

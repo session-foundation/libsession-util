@@ -2425,6 +2425,13 @@ TEST_CASE(
     REQUIRE(alice_got);
     CHECK(*alice_got == plaintext);
     CHECK_FALSE(unavailable(alices).has_value());
+
+    // And now the file is here, Mallory's message is served it from the cache like every other
+    // message naming it -- so it can no longer say the file cannot be had, which would draw "gone"
+    // over a file sitting on this disk.
+    auto hers = c->message(mallorys, await)->attachments[0];
+    CHECK(hers.availability == AttachmentAvailability::cached);
+    CHECK_FALSE(hers.unavailable.has_value());
 }
 
 TEST_CASE(
