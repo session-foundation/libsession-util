@@ -321,6 +321,32 @@ class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
 
+    /// Runs `f` on Core's loop and hands back what it returned.
+    ///
+    /// Core's components are the loop's, not the caller's, and a test is on its own thread like
+    /// any other application.  Wrap the body of anything reaching into `configs` -- or any other
+    /// component state -- in one of these; there is no need for one per call, since everything
+    /// inside runs on the loop for as long as `f` does.
+    ///
+    /// This is a test's version of what `Client` does for every one of its own methods.  There is
+    /// deliberately no application-facing equivalent on `Configs`: nothing outside libsession
+    /// reaches its accessors, and `Client` wraps the parts an application actually wants.
+    template <typename F>
+    static auto on_loop(core::Core& core, F&& f) {
+        return core.call_get(std::forward<F>(f));
+    }
+
+    /// Runs everything already queued on Core's job queue and waits for it.
+    ///
+    /// Needed wherever a test drives a network response by hand: in production those arrive on the
+    /// Network's own loop and Core marshals them onto its queue, so the work is finished a moment
+    /// after the callback returns rather than during it.  A test calling the handler directly has
+    /// to wait for that in the same way, and the queue is FIFO, so a round-trip through it is
+    /// enough -- everything posted earlier has run by the time this returns.
+    static void drain(core::Core& core) {
+        on_loop(core, [] {});
+    }
+
     /// Puts a swarm straight into the pool's cache.  get_swarm consults it first and answers from
     /// it without touching the network, which is what lets swarm-level behaviour be tested at all:
     /// a test pool has no seed nodes, so nothing would ever resolve otherwise.
@@ -347,14 +373,18 @@ class TestHelper {
     ///
     /// A template so that this header need not know the client types; it is only ever instantiated
     /// where they are complete.
+    ///
+    /// Both hop onto the loop themselves rather than leaving it to the caller: what they reach is
+    /// a `_`-form on Client, which is what Client's own methods call from inside `_async`, and it
+    /// touches the configs.
     template <typename Client, typename Id>
     static void sync_contact(Client& c, const Id& id) {
-        c._sync_contact(id);
+        on_loop(c.core, [&] { c._sync_contact(id); });
     }
 
     template <typename Client, typename Id>
     static void sync_convo_volatile(Client& c, const Id& id) {
-        c._sync_convo_volatile(id);
+        on_loop(c.core, [&] { c._sync_convo_volatile(id); });
     }
 
     /// The push debounce, driven by hand.  A test that waited out real intervals would be both slow

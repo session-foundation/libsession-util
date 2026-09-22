@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <session/config/namespaces.hpp>
+#include <session/types.hpp>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "component.hpp"
@@ -37,6 +41,17 @@ namespace session::core {
 /// them before an account exists in any case: a network cannot be attached without one, so neither
 /// polling nor pushing can run, and a direct caller gets the same `no_account` any other
 /// account-dependent call would throw.
+///
+/// **Every method here belongs to Core's loop**, with no exceptions of the kind Globals has: there
+/// is no self-contained query on this class.  The accessors hand out a reference into an object
+/// that `merge()` rewrites on the loop as poll results arrive, and building them is itself lazy,
+/// so a caller on another thread races either the construction or the merge.  A debug build
+/// asserts it.
+///
+/// An application does not reach these directly.  `session::client::Client` wraps the parts it
+/// needs -- `display_name()` and the rest of "our own account" -- and does the hop for the caller;
+/// anything else wanting a config from another thread does the same thing, rather than reading one
+/// from where it happens to be standing.
 class Configs : public detail::CoreComponent {
     friend class session::TestHelper;
 
@@ -66,15 +81,35 @@ class Configs : public detail::CoreComponent {
     bool _push_scheduled = false;
     bool _push_in_flight = false;
 
-    // Deferred work is handed to the event loop, which outlives this component and has no way to
-    // cancel a call already scheduled.  Callbacks capture a weak reference to this and do nothing
-    // if it has expired, which is what stops a pending push firing into a destroyed Core.
+    // The network's callbacks outlive this component and are owned by the Network rather than by
+    // Core's job queue, so cancelling the queue cannot reach them: they capture a weak reference
+    // to this and do nothing if it has expired.  That is what stops a push completing into a
+    // destroyed Core -- the queue only takes over once the callback has safely got that far.
     std::shared_ptr<int> _alive = std::make_shared<int>(0);
+
+    // Which subrequests belong to which config, so that a result can be matched back to the config
+    // whose push produced it.  A sequence answers positionally, so this is the only link.
+    struct Pending {
+        config::ConfigBase* conf;
+        config::seqno_t seqno;
+        size_t first;
+        size_t count;
+    };
 
     void _schedule_push();
     void _arm_push_timer(std::chrono::milliseconds delay);
     void _push_if_due();
     void _send_push();
+
+    // Applies a config push's answer.  Split out from the callback that receives it because that
+    // one arrives on the Network's own loop, and all of this is Configs' state: the callback
+    // checks it is still alive and hands this to Core's queue.
+    void _handle_push_response(
+            std::vector<Pending> pending,
+            bool success,
+            bool timeout,
+            int16_t status,
+            std::optional<std::string> resp);
 
     // Constructs the configs from their stored dumps, or empty if there are none.  Requires an
     // account; throws globals::no_account if there is not one yet.

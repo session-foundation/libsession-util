@@ -1,6 +1,7 @@
 #include <oxenc/hex.h>
 #include <sodium/utils.h>
 
+#include <cassert>
 #include <concepts>
 #include <oxen/log.hpp>
 #include <session/core.hpp>
@@ -123,6 +124,12 @@ bool Globals::erase(std::string_view key) {
 }
 
 void Globals::_adopt_seed(const cleared_b32& seed, bool persist) {
+    // Everything below this line is cached state that Core's loop reads while polling, rewritten
+    // in place: the secure buffer reallocates and `_session_id_hex` is reassigned.  Reached from
+    // init() during construction, which on_loop() excuses, and otherwise only from the two public
+    // account methods.
+    assert(on_loop());
+
     // Layout: [ed25519_sk(64) | x25519_sk(32)] = 96 bytes
     auto rw = _account_seed.resize(96);
 
@@ -178,7 +185,16 @@ void Globals::init() {
     tx.commit();
 }
 
-void Globals::create_account() {
+void Globals::create_account(failable_function<void()> cb) {
+    async([this] { _create_account(); }, std::move(cb));
+}
+
+void Globals::create_account(await_t) {
+    jq().call_get([this] { _create_account(); });
+}
+
+void Globals::_create_account() {
+    assert(on_loop());
     if (_have_account)
         throw std::logic_error{"This account already has an identity"};
     auto c = conn();
@@ -202,7 +218,16 @@ void Globals::_mark_new_account() {
     core.devices._mark_group_owed();
 }
 
-void Globals::restore_account(const predefined_seed& seed) {
+void Globals::restore_account(predefined_seed seed, failable_function<void()> cb) {
+    async([this, seed = std::move(seed)] { _restore_account(seed); }, std::move(cb));
+}
+
+void Globals::restore_account(const predefined_seed& seed, await_t) {
+    jq().call_get([this, &seed] { _restore_account(seed); });
+}
+
+void Globals::_restore_account(const predefined_seed& seed) {
+    assert(on_loop());
     if (_have_account)
         throw std::logic_error{"This account already has an identity"};
     auto c = conn();
