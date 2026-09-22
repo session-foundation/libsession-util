@@ -213,7 +213,7 @@ TEST_CASE("thumbhash validity is exact, not a length cap", "[image][thumbhash]")
                 CHECK_FALSE(thumbhash::valid(padded));
             }
 
-    // Only eight lengths are reachable at all.
+    // Only six lengths are reachable at all.
     CHECK(lengths == std::set<size_t>{17, 19, 21, 23, 24, 25});
 
     // Too short to hold a header at all.
@@ -223,6 +223,19 @@ TEST_CASE("thumbhash validity is exact, not a length cap", "[image][thumbhash]")
     std::vector<std::byte> alpha_hdr(5, std::byte{0});
     alpha_hdr[2] = std::byte{0x80};
     CHECK(thumbhash::expected_size(alpha_hdr) == std::nullopt);
+
+    // A component count of 0 is not something any encoder emits, but it is one bit-field a peer
+    // controls, and the decoder's max(3, ...) clamp would otherwise wave it through while
+    // component_aspect_ratio -- which reads the field unclamped -- rejects it.  valid() has to
+    // agree with the rest of the API about what it will accept, or it is not a trust boundary.
+    for (auto [w, h] : {std::pair{100, 43}, {43, 100}}) {
+        auto hash = thumbhash::encode(test_image(w, h, false), w, h);
+        REQUIRE(thumbhash::valid(hash));
+        hash[3] &= std::byte{0xf8};
+        INFO(w << "x" << h << " with the component count zeroed");
+        CHECK_FALSE(thumbhash::valid(hash));
+        CHECK(thumbhash::expected_size(hash) == std::nullopt);
+    }
 }
 
 TEST_CASE("thumbhash rejects bad input", "[image][thumbhash]") {
@@ -269,5 +282,94 @@ TEST_CASE("thumbhash is bit-reproducible", "[image][thumbhash]") {
         auto hash = thumbhash::encode(test_image(v.w, v.h, v.alpha), v.w, v.h);
         INFO(v.w << "x" << v.h << (v.alpha ? " rgba" : " rgb"));
         CHECK(oxenc::to_hex(hash) == v.expected);
+    }
+}
+
+// The vectors above pin the encoder only.  Everything else that touches the decoder checks it
+// against itself -- resolution independence compares two decodes, and the average-colour test
+// compares two quantities that both derive from the same DC terms -- so a decoder that produced
+// consistently wrong pixels would pass the whole suite.  Pin its actual output too.
+//
+// Decoded at 8x6 so the expected bytes stay readable; that is enough pixels to exercise every
+// branch of the reconstruction, including the alpha channel on the RGBA entries.
+TEST_CASE("thumbhash decoder output is pinned", "[image][thumbhash]") {
+    struct {
+        int w, h;
+        bool alpha;
+        std::string_view expected;
+    } const vectors[] = {
+            {32,
+             32,
+             false,
+             "1200ebff2d0cfaff4819faff6715f4ff9001efffbc00ecffed00f5ffff00ffff0017beff1a33d1ff"
+             "3840d5ff583aceff8122c9ffad00c5ffda00cafff800d1ff005f8eff1b80a8ff3c8cadff5a7da3ff"
+             "805c99ffaa3092ffd50b93fff20099ff009859ff26bd79ff4dc983ff6ab377ff8f8869ffb5515cff"
+             "df255bfffd1061ff01ad28ff31d24aff5adb54ff7ac149ffa0913bffc6532dfff0232bffff0d32ff"
+             "008a00ff12aa05ff39af0eff5d9506ff8a6900ffb82f00ffe70100ffff0004ff"sv},
+            {64,
+             48,
+             false,
+             "1100eaff2c0af8ff4617f9ff6614f3ff9001efffbd00edffec00f4ffff00feff001ac2ff1e36d5ff"
+             "3b44d8ff5a3cd0ff8223c9ffae00c5ffdc00ccfffb00d4ff005a89ff177ca3ff3989abff577ba1ff"
+             "7d5996ffa72d8fffd30891fff00097ff009c5dff2ac17cff50cc86ff6eb67aff928c6dffb95560ff"
+             "e1285efffe1162ff00ac27ff2fcf47ff56d751ff76bd46ff9d8e39ffc4522bffee222affff0c31ff"
+             "008a00ff13ab06ff3bb110ff5f9708ff8b6a00ffb82f00ffe70200ffff0005ff"sv},
+            {48,
+             64,
+             false,
+             "1400edff2b09f7ff491afcff6715f4ff8d00ecffbe00eeffef00f7ffff00feff0018bfff1730ceff"
+             "3a43d7ff5a3cd0ff7e20c6ffad00c4ffdb00cbfff800d0ff006190ff167ba3ff3e8eafff5d80a7ff"
+             "7e5a97ffa92f91ffd60c94fff20099ff009b5cff21b873ff4dc983ff6db67aff8c8666ffb6515dff"
+             "e1275dfffb0f60ff04b12cff2ccd45ff5bdc56ff7cc34cff9c8e38ffc7542efff3262effff0b30ff"
+             "008b00ff0da501ff3cb211ff609809ff856400ffb82f00ffeb0500ffff0002ff"sv},
+            {32,
+             32,
+             true,
+             "6c559e096d559c2d71549a49784f9850824696538e3b9649983196169e2a9700696195396a619366"
+             "6e609190755b8fa27f528ea98a478e9b953c8e629b358f2365738649677385816b7183b9726b81d3"
+             "7c6280da885680c6924b8185984582426681774d678176886c7f74c2737973db7d6f73de896373c6"
+             "935774859a5075426a896c2d6c886b6570856999777f68ab827568ab8d686997985c6a5e9e556b22"
+             "6e8b66006f8a650f7487643d7b81634b8676634b9269643d9c5d650ea3566600"sv},
+            {64,
+             48,
+             true,
+             "6b569e006d559c2171539a4c794e98568543965b9336964b9f299600a62197006664953368639378"
+             "6d6191b7755b8fd181508edb8e438ec69b368e71a22e8f126177864b6377859f687483f4706e81ff"
+             "7c6280ff8a5480ff964781a69e3f824160877751628676aa678374ff6f7c73ff7c7073ff8a6273ff"
+             "975474a59e4c7541648f6c22668e6b766b8a69c4738368df807768df8e6769c09b596a6ba3516b11"
+             "689166006a9065006f8c643a7884634e8477634e93686439a05a6500a7516600"sv},
+            {100,
+             100,
+             false,
+             "0e00e7ff2d0bf9ff4a1bfdff6a18f7ff9002efffbb00ebffeb00f3ffff00ffff0011b9ff1831cfff"
+             "3942d6ff5a3bd0ff8022c8ffaa00c2ffd700c7fff600cfff005c8bff1b80a7ff3f90b1ff5d81a7ff"
+             "815d9bffa92f91ffd40a92fff20099ff009758ff29c07cff53d089ff71b97eff938c6dffb8535eff"
+             "e1285dffff1464ff00ab26ff32d34bff5ee059ff7fc64effa2933effc6542dfff0232bffff0f33ff"
+             "008200ff0ea601ff38af0eff5d9506ff886600ffb32a00ffe20000ffff0001ff"sv},
+            {17,
+             5,
+             true,
+             "6e5b96006f5b940c725a931878569120804f902689469018913e9000963890006e628f266f628e49"
+             "72618c73775d8a927f568a9c894d898391448a42963f8a066d6e84486e6d8381716c81c9776780fb"
+             "7f607fff885780dc914e80879648813e6d79794e6e78788b727677d7777276ff806a75ff896075dd"
+             "915776869651773e6e8170156f807047727e6e8078796da081716da08a676e7d935d6f3c98587005"
+             "6e856c0070846b0073826a07797c6919817469188b6a6a0693606b00995a6c00"sv},
+            {1,
+             1,
+             false,
+             "ffff00ffffff00ff000000ff9a8affff8475ffff000000ffffff00ff4a7600ff707b00ff000000ff"
+             "000000ff0000ffff0000ffff000000ff000000ff293b00ff5547d8ff0000ffff0000ffffffffffff"
+             "ffffffff0000ffff0000ffff1007f6ff3a2fe7ff0000ffff0000ffffffffffffffffffff0000ffff"
+             "0000ffff0f07f6ff546500ff000000ff000000ff0000ffff0000ffff000000ff000000ff273900ff"
+             "517d00fff5ff00ff000000ff5d51ffff5c51ffff000000ffedff00ff426f00ff"sv},
+    };
+    for (const auto& v : vectors) {
+        auto hash = thumbhash::encode(test_image(v.w, v.h, v.alpha), v.w, v.h);
+        auto img = thumbhash::decode(hash, 8, 6);
+        REQUIRE(img.width == 8);
+        REQUIRE(img.height == 6);
+        REQUIRE(img.rgba.size() == 8 * 6 * 4);
+        INFO(v.w << "x" << v.h << (v.alpha ? " rgba" : " rgb"));
+        CHECK(oxenc::to_hex(img.rgba) == v.expected);
     }
 }

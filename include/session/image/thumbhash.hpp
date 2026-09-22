@@ -53,20 +53,26 @@ std::vector<std::byte> encode(std::span<const std::byte> rgba, uint32_t width, u
 /// of the source's shape (see `component_aspect_ratio`), so the aspect ratio must come from the
 /// attachment metadata, not from here.
 ///
-/// Keep the resolution small and let the UI scale the result.  The hash holds at most 7 cycles
-/// across the image, so a 32px decode captures essentially everything: upscaling it 10x with any
-/// linear filter differs from a full-size decode by an RMSE of under 1, which is imperceptible,
-/// and decode cost grows with the *output* pixel count (0.085ms at 32x24, 4.6ms at 240x180).  Do
-/// not scale it with nearest-neighbour filtering, which will look blocky.
+/// **Decode small -- 100x100 or less -- and scale the result up.**  There is no enforced maximum,
+/// but decoding evaluates the DCT basis per output pixel, so cost grows with the output area and
+/// nothing is gained by it: the hash holds at most 7 cycles across the image, so a 32px decode
+/// already captures essentially everything it contains.  Upscaling that 10x with any linear filter
+/// differs from a full-size decode by an RMSE under 1, which is imperceptible, and costs 0.085ms
+/// against 4.6ms for decoding 240x180 directly.  To fill a larger area, decode small and scale
+/// with libvips (or the platform's own scaler), which handles a blurred image like this very well.
+/// Do not scale with nearest-neighbour filtering, which will look blocky.
 ///
 /// Inputs:
 /// - `hash` -- the bytes produced by `encode`.
-/// - `width`, `height` -- the output dimensions, each at least 1.
+/// - `width`, `height` -- the output dimensions, each at least 1.  There is no upper limit beyond
+///   what the arithmetic can represent, but see above: these are meant to be small.
 ///
 /// Outputs:
 /// - the decoded RGBA8 image.
 ///
-/// Throws `std::invalid_argument` if the hash is malformed or the dimensions are zero.
+/// Throws `std::invalid_argument` if the hash is malformed, the dimensions are zero, or they are
+/// large enough that the output size would not fit in a `size_t`.  A merely very large request is
+/// not rejected, and will throw `std::bad_alloc` or `std::length_error` if it cannot be allocated.
 image decode(std::span<const std::byte> hash, uint32_t width, uint32_t height);
 
 /// API: image/thumbhash/expected_size

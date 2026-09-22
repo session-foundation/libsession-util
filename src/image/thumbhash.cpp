@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "det_trig.hpp"
@@ -101,6 +102,7 @@ namespace {
     // of these, which is what lets `expected_size` work without decoding.
     struct shape {
         bool has_alpha;
+        int stored;  // the raw 3-bit count, before the decoder's max(3, ...) clamp
         int lx, ly;
         size_t ac_start;
     };
@@ -109,15 +111,32 @@ namespace {
         shape s{};
         uint32_t h16 = byte_at(hash, 3) | (uint32_t(byte_at(hash, 4)) << 8);
         s.has_alpha = (byte_at(hash, 2) & 0x80) != 0;
+        s.stored = int(h16 & 7);
         bool landscape = (h16 >> 15) != 0;
-        s.lx = std::max(3, landscape ? (s.has_alpha ? 5 : 7) : int(h16 & 7));
-        s.ly = std::max(3, landscape ? int(h16 & 7) : (s.has_alpha ? 5 : 7));
+        // The DCT needs at least three components per axis, so the decoder works with a clamped
+        // count even where the encoder stored 1 or 2.  component_aspect_ratio deliberately reports
+        // the unclamped value instead, which is what upstream does and what makes 7:1 reachable.
+        s.lx = std::max(3, landscape ? (s.has_alpha ? 5 : 7) : s.stored);
+        s.ly = std::max(3, landscape ? s.stored : (s.has_alpha ? 5 : 7));
         s.ac_start = s.has_alpha ? 6 : 5;
         return s;
     }
 
+    // LPQA -> RGBA8.  Used both per-pixel by `decode` and once by `average_rgba` for the DC terms;
+    // sharing it is what keeps the flat-colour placeholder from drifting away from the decoded
+    // image it stands in for.
+    std::array<std::byte, 4> lpqa_to_rgba8(double l, double p, double q, double a) {
+        double b = std::fma(-(2.0 / 3.0), p, l);
+        double r = (std::fma(3.0, l, -b) + q) / 2;
+        double g = r - q;
+        auto to8 = [](double v) {
+            return std::byte(uint8_t(std::max(0.0, 255 * std::min(1.0, v))));
+        };
+        return {to8(r), to8(g), to8(b), to8(a)};
+    }
+
     // Number of AC coefficients a channel contributes: the triangular set the format keeps, minus
-    // the DC term.  Must stay in step with the loop in `decode_at`'s decode_channel.
+    // the DC term.  Must stay in step with the loop in `decode`'s decode_channel.
     size_t ac_count(int nx, int ny) {
         size_t n = 0;
         for (int cy = 0; cy < ny; cy++)
@@ -167,6 +186,12 @@ std::optional<size_t> expected_size(std::span<const std::byte> hash) {
         return std::nullopt;
     auto s = read_shape(hash);
     if (s.has_alpha && hash.size() < 6)
+        return std::nullopt;
+    // No conforming encoder emits a component count of 0 -- both this one and upstream clamp to
+    // max(1, ...).  The decoder's max(3, ...) would silently accept it, but component_aspect_ratio
+    // reads the field unclamped and rejects it, so treating it as well-formed here would let a
+    // value through the trust boundary that the rest of the API refuses.
+    if (s.stored == 0)
         return std::nullopt;
     size_t nibbles = ac_count(s.lx, s.ly) + 2 * ac_count(3, 3) + (s.has_alpha ? ac_count(5, 5) : 0);
     return s.ac_start + (nibbles + 1) / 2;
@@ -284,16 +309,20 @@ double component_aspect_ratio(std::span<const std::byte> hash) {
 
 std::array<std::byte, 4> average_rgba(std::span<const std::byte> hash) {
     auto hd = read_header(hash);
-    double b = std::fma(-(2.0 / 3.0), hd.p_dc, hd.l_dc);
-    double r = (std::fma(3.0, hd.l_dc, -b) + hd.q_dc) / 2;
-    double g = r - hd.q_dc;
-    auto to8 = [](double v) { return std::byte(uint8_t(std::max(0.0, 255 * std::min(1.0, v)))); };
-    return {to8(r), to8(g), to8(b), to8(hd.a_dc)};
+    return lpqa_to_rgba8(hd.l_dc, hd.p_dc, hd.q_dc, hd.a_dc);
 }
 
 image decode(std::span<const std::byte> hash, uint32_t width, uint32_t height) {
     if (width < 1 || height < 1)
         throw std::invalid_argument{"thumbhash: output dimensions must be non-zero"};
+    // No policy cap on the size -- a big decode is merely slow -- but the arithmetic below has to
+    // survive one.  Both the byte count and the pixel index must fit in size_t, which they do not
+    // on a 32-bit target for anything over ~1G pixels, and `int` counters would overflow at 2^29
+    // pixels on any target.
+    uint64_t bytes = uint64_t(width) * height * 4;
+    if (bytes > std::numeric_limits<size_t>::max() ||
+        uint64_t(std::max(width, height)) > uint64_t(std::numeric_limits<int32_t>::max()))
+        throw std::invalid_argument{"thumbhash: output dimensions too large"};
     auto hd = read_header(hash);
     int w = int(width), h = int(height);
 
@@ -319,7 +348,7 @@ image decode(std::span<const std::byte> hash, uint32_t width, uint32_t height) {
     if (hd.has_alpha)
         a_ac = decode_channel(5, 5, hd.a_scale);
 
-    image out{width, height, std::vector<std::byte>(size_t(w) * h * 4)};
+    image out{width, height, std::vector<std::byte>(size_t(bytes))};
 
     // The basis separates: fx depends only on (cx, x) and fy only on (cy, y).
     int nx = std::max(hd.lx, hd.has_alpha ? 5 : 3) + 1;
@@ -332,8 +361,11 @@ image decode(std::span<const std::byte> hash, uint32_t width, uint32_t height) {
         for (int cy = 0; cy < ny; cy++)
             fyt[size_t(y) * ny + cy] = cos_dct(cy, y, h);
 
-    for (int y = 0, i = 0; y < h; y++) {
+    // `i` is size_t, not int: at 2^29 output pixels a 32-bit counter wraps and the stores below
+    // land outside the buffer.
+    for (int y = 0; y < h; y++) {
         const double* fy = &fyt[size_t(y) * ny];
+        size_t i = size_t(y) * w * 4;
         for (int x = 0; x < w; x++, i += 4) {
             double l = hd.l_dc, p = hd.p_dc, q = hd.q_dc, a = hd.a_dc;
             const double* fx = &fxt[size_t(x) * nx];
@@ -358,16 +390,11 @@ image decode(std::span<const std::byte> hash, uint32_t width, uint32_t height) {
                         a = std::fma(a_ac[size_t(j)] * fx[size_t(cx)], fy2, a);
                 }
 
-            double b = std::fma(-(2.0 / 3.0), p, l);
-            double r = (std::fma(3.0, l, -b) + q) / 2;
-            double g = r - q;
-            auto to8 = [](double v) {
-                return std::byte(uint8_t(std::max(0.0, 255 * std::min(1.0, v))));
-            };
-            out.rgba[size_t(i)] = to8(r);
-            out.rgba[size_t(i) + 1] = to8(g);
-            out.rgba[size_t(i) + 2] = to8(b);
-            out.rgba[size_t(i) + 3] = to8(a);
+            auto rgba = lpqa_to_rgba8(l, p, q, a);
+            out.rgba[i] = rgba[0];
+            out.rgba[i + 1] = rgba[1];
+            out.rgba[i + 2] = rgba[2];
+            out.rgba[i + 3] = rgba[3];
         }
     }
     return out;
