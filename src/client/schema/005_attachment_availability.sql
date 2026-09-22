@@ -67,6 +67,8 @@ CREATE INDEX attachment_cache_lru ON attachment_cache(last_used);
 -- indistinguishable from one that will succeed.
 ALTER TABLE message_attachments ADD COLUMN unavailable INTEGER;
 
+ALTER TABLE message_attachments DROP COLUMN caption;
+
 -- The local copy of this file, or NULL for no local copy -- which is also what eviction leaves
 -- behind: ON DELETE SET NULL clears this as the cache row goes.  That is what makes "this row says
 -- cached" and "that file has an entry" impossible to disagree in the direction that matters, since
