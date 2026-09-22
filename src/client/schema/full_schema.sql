@@ -269,24 +269,15 @@ BEGIN
     UPDATE conversations SET count = count + 1 WHERE id = NEW.conversation;
 END;
 
--- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
--- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
--- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
--- from 002_attachment_cache.sql
---
 -- An index over the files in the attachment cache directory, so that "how much disk is this using"
 -- and "what has gone longest without being wanted" are queries rather than a directory walk on
 -- every download.
 --
 -- Deliberately only an index: the disk is what is actually true.  A crash between writing a file
 -- and recording it, or between unlinking one and forgetting it, leaves this describing a directory
--- that no longer matches -- so eviction checks what it is about to remove rather than trusting a
--- row, and the sweep reconciles in both directions: rows without files are dropped, files without
--- rows are adopted at their size on disk.
---
--- `name` is the file's name, which is the hashed base url -- the same value `cache::path_for`
--- produces -- so a row can be matched to a file, and to a `message_attachments.url`, without
--- storing either the path or the url.
+-- that no longer matches, and the sweep reconciles in both directions: a row whose file is gone is
+-- dropped, and the messages drawing it are told; a file with no row is deleted, since nothing can
+-- look it up.
 --
 -- `size` is bytes on disk, encrypted and padded, because that is what the cache limit is a limit
 -- on.  `last_used` is touched on a cache hit as well as on write, which is what makes eviction
@@ -301,12 +292,13 @@ CREATE TABLE attachment_cache (
     -- copy of the name -- and so that the name is free to change shape later without the references
     -- to it meaning anything different.
     id INTEGER PRIMARY KEY,
-    -- The file on disk: a keyed hash of the url, deliberately not the url itself, so that someone
-    -- reading the cache directory cannot tell which files this account has fetched.
+    -- The file on disk: a keyed hash of the url (`cache::name_for`), deliberately not the url
+    -- itself, so that someone reading the cache directory cannot tell which files this account has
+    -- fetched.
     --
-    -- Nothing reads this to *find* an entry -- that is what the reference from message_attachments
-    -- is for -- so the hash is only ever applied to a file being written, and changing it costs
-    -- nothing already downloaded.
+    -- The hash does not run backwards, and nothing reads this to *find* an entry -- that is what
+    -- the reference from message_attachments is for -- so it is only ever applied to a file being
+    -- written, and changing it costs nothing already downloaded.
     name TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
     last_used INTEGER NOT NULL      -- ms since epoch
@@ -314,7 +306,9 @@ CREATE TABLE attachment_cache (
 
 CREATE INDEX attachment_cache_lru ON attachment_cache(last_used);
 
-
+-- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
+-- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
+-- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
 CREATE TABLE message_raw_content (
     message INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     content BLOB NOT NULL
