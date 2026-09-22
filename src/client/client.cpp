@@ -1213,11 +1213,8 @@ void Client::_fetch_cached(
     // nothing can join before this returns.
     try {
         _download_decrypted(
-                target.remote.url,
+                target.remote,
                 target.kind,
-                target.remote.key,
-                target.remote.digest,
-                target.remote.size,
                 std::move(on_plain),
                 std::move(on_progress),
                 std::move(on_done));
@@ -4301,14 +4298,12 @@ std::function<void(int64_t, int64_t, std::optional<int>)> Client::_dispatch_prog
 }
 
 void Client::_download_decrypted(
-        const std::string& url,
+        RemoteFile remote,
         DownloadKind kind,
-        std::vector<std::byte> key,
-        std::vector<std::byte> digest,
-        std::optional<int64_t> claimed_size,
         std::function<void(std::span<const std::byte>)> on_plain,
         std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
         std::function<void(std::optional<Error>, std::optional<AttachmentUnavailable>)> on_done) {
+    auto& [url, key, digest, claimed_size] = remote;
 
     auto info = network::file_server::parse_download_url(url);
     if (!info)
@@ -4924,11 +4919,8 @@ void Client::_save_attachment(
     // report, which still holds the caller's handler.
     try {
         _download_decrypted(
-                url,
+                remote,
                 DownloadKind::attachment,
-                remote.key,
-                remote.digest,
-                remote.size,
                 [state](std::span<const std::byte> plain) {
                     state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
                 },

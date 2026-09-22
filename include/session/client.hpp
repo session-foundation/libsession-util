@@ -1076,11 +1076,8 @@ class Client {
     // Throws, before starting anything, if the url is not a download url, if no network is
     // attached, or if the key or digest is the wrong length for the scheme that resolves to.
     void _download_decrypted(
-            const std::string& url,
+            RemoteFile remote,
             DownloadKind kind,
-            std::vector<std::byte> key,
-            std::vector<std::byte> digest,
-            std::optional<int64_t> claimed_size,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
             std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
             std::function<void(std::optional<Error> error,
