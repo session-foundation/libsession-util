@@ -53,6 +53,7 @@ typedef struct session_protocol_strings {
     const char* url_terms_of_service;
     const char* url_token;
     const char* url_translate;
+    const char* url_website;
 } session_protocol_strings;
 extern const session_protocol_strings SESSION_PROTOCOL_STRINGS;
 
