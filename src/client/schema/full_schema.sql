@@ -292,13 +292,8 @@ CREATE TABLE attachment_cache (
     -- copy of the name -- and so that the name is free to change shape later without the references
     -- to it meaning anything different.
     id INTEGER PRIMARY KEY,
-    -- The file on disk: a keyed hash of the url (`cache::name_for`), deliberately not the url
-    -- itself, so that someone reading the cache directory cannot tell which files this account has
-    -- fetched.
-    --
-    -- The hash does not run backwards, and nothing reads this to *find* an entry -- that is what
-    -- the reference from message_attachments is for -- so it is only ever applied to a file being
-    -- written, and changing it costs nothing already downloaded.
+    -- Keyed (`cache::name_for`) so that someone reading the cache directory cannot tell which
+    -- files this account has fetched.
     name TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
     last_used INTEGER NOT NULL      -- ms since epoch

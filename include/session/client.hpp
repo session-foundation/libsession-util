@@ -780,19 +780,14 @@ class Client {
     //
     // Ordered so that everything under one url sits together: whether *anything* is fetching a
     // file is a question about the url, asked once per attachment on a page.
-    //
-    // By url rather than by the name the file is cached under.  Nothing outside this process sees
-    // these keys, and the hashed name exists to keep a directory listing from naming what was
-    // downloaded -- which is a question about the disk, not about a map in memory.
     std::map<std::string, InFlight> _in_flight;
 
     /// What to tell a reader about an attachment's file: the `Attachment` fields that report it,
     /// given the `cached` reference and `unavailable` verdict already read from its row.
     ///
-    /// The one thing the message builders below need that is not in the database: whether a
-    /// transfer is running, which is ours and in memory.  Which is why this is a member rather
-    /// than the file-local helper it used to be.  It is also where the states are ranked, so that
-    /// a display is handed one answer rather than the pieces of one.
+    /// A member because it needs the one thing the message builders below cannot read from the
+    /// database: whether a transfer is running, which is ours and in memory.  It is also where the
+    /// states are ranked, so that a display is handed one answer rather than the pieces of one.
     struct CacheStatus {
         AttachmentAvailability availability = AttachmentAvailability::absent;
         int64_t done = 0, total = 0;

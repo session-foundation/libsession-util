@@ -4420,8 +4420,7 @@ void Client::_download_decrypted(
         // it comes, so a failure surfaces wherever in the file the bad chunk is and everything
         // after it would be bandwidth spent on a file already known to be unusable.
         //
-        // The guard above still stands, since a chunk already in flight arrives either way; what it
-        // no longer has to do is see the whole rest of the file.
+        // The guard above is still needed: a chunk already in flight arrives either way.
         auto give_up = [&](std::string why) {
             state->failure = std::move(why);
             cancel->store(true);
