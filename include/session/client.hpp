@@ -1468,6 +1468,13 @@ class Client {
     bool _flush_scheduled = false;
     void _touch(const ConversationId& id);
     void _flush_pending();
+
+    // Lists that changed wholesale -- a row joined or left one -- to be reported with the same
+    // flush as the rows, rather than on their own.  Approval arrives with a message, and the
+    // message dirties the row, so reporting the lists at approval and again when the row flushed
+    // sent the conversation list twice for one change.
+    bool _stale_conversations = false, _stale_requests = false;
+    void _touch_lists(bool conversations, bool requests);
     // Reports one list, if a row in it changed and the subscriber asked for it.  The rows are the
     // expensive part, so nothing is read for a handler that is not there.
     // Which list each conversation was last *reported* in.  The subscriber's belief rather than

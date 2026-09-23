@@ -597,6 +597,15 @@ void Client::_touch(const ConversationId& id) {
     }
 }
 
+void Client::_touch_lists(bool conversations, bool requests) {
+    _stale_conversations = _stale_conversations || conversations;
+    _stale_requests = _stale_requests || requests;
+    if (!_flush_scheduled) {
+        _flush_scheduled = true;
+        _jq.call_soon([this] { _flush_pending(); });
+    }
+}
+
 void Client::_flush_pending() {
     _flush_scheduled = false;
     auto dirty = std::move(_dirty);
@@ -610,7 +619,8 @@ void Client::_flush_pending() {
     // makes the list stale for a subscriber holding whole lists, and most of what dirties a
     // conversation does that: a read receipt, a nickname, an expiry.  A row that *moved* is the
     // narrower case, and only that one can change the order.
-    bool convos_changed = false, requests_changed = false;
+    bool convos_changed = std::exchange(_stale_conversations, false);
+    bool requests_changed = std::exchange(_stale_requests, false);
 
     for (const auto& id : dirty) {
         auto convo = _conversation(id);
@@ -4006,8 +4016,9 @@ int64_t Client::_send_message(const ConversationId& id, const OutgoingMessage& m
     if (approved) {
         _sync_contact(id);
         // Both: approving moves the row out of the requests and into the conversations, so one list
-        // lost it and the other gained it.
-        _report_lists_replaced(true, true);
+        // lost it and the other gained it.  Reported with the row's flush below rather than now,
+        // since the message being sent changes the row too.
+        _touch_lists(true, true);
     }
     if (created)
         _emit_conversation_added(id);
@@ -4200,8 +4211,9 @@ int64_t Client::_send_message(
     if (approved) {
         _sync_contact(id);
         // Both: approving moves the row out of the requests and into the conversations, so one list
-        // lost it and the other gained it.
-        _report_lists_replaced(true, true);
+        // lost it and the other gained it.  Reported with the row's flush below rather than now,
+        // since the message being sent changes the row too.
+        _touch_lists(true, true);
     }
     if (created)
         _emit_conversation_added(id);
@@ -5919,9 +5931,10 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         _touch(convo_id);
 
     // Approval moves a conversation between the two lists, so both changed and neither changed in a
-    // way that naming one row would describe.
+    // way that naming one row would describe.  With the row's flush, which the message just stored
+    // has scheduled, so the conversation list goes once.
     if (approved_them)
-        _report_lists_replaced(true, true);
+        _touch_lists(true, true);
 }
 
 void Client::_on_send_status(
