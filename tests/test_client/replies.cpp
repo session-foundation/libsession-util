@@ -235,9 +235,10 @@ TEST_CASE("Client: a reply is re-reported when its target arrives", "[client][re
             quoting(peer.session_id, target_ts, 7777));
     sync(*c);
 
-    REQUIRE(rec.msg_added.size() == 1);
-    auto reply_id = rec.msg_added[0].second.id;
-    REQUIRE_FALSE(rec.msg_added[0].second.reply->message_id.has_value());
+    auto arrivals = Recorder::messages(rec.msg_added);
+    REQUIRE(arrivals.size() == 1);
+    auto reply_id = arrivals[0].id;
+    REQUIRE_FALSE(arrivals[0].reply->message_id.has_value());
     rec.msg_updated.clear();
 
     // The target lands afterwards.  Nothing about the reply's own row changes, but what it resolves
@@ -245,11 +246,12 @@ TEST_CASE("Client: a reply is re-reported when its target arrives", "[client][re
     deliver(*c, peer, "the original", target_ts, "h1", "", std::nullopt, nullptr, 7777);
     sync(*c);
 
-    auto reported = std::ranges::find_if(
-            rec.msg_updated, [&](const auto& p) { return p.second.id == reply_id; });
-    REQUIRE(reported != rec.msg_updated.end());
-    REQUIRE(reported->second.reply);
-    CHECK(reported->second.reply->message_id.has_value());
+    auto changed = Recorder::messages(rec.msg_updated);
+    auto reported =
+            std::ranges::find_if(changed, [&](const Message& m) { return m.id == reply_id; });
+    REQUIRE(reported != changed.end());
+    REQUIRE(reported->reply);
+    CHECK(reported->reply->message_id.has_value());
 }
 
 TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][replies]") {
@@ -281,10 +283,9 @@ TEST_CASE("Client: deleting a target re-reports the replies to it", "[client][re
 
     // The target itself is reported, and so is the reply that points at it: what it should draw
     // has changed even though its own row has not.
-    CHECK(std::ranges::any_of(
-            rec.msg_updated, [&](const auto& p) { return p.second.id == target_id; }));
-    CHECK(std::ranges::any_of(
-            rec.msg_updated, [&](const auto& p) { return p.second.id == reply_id; }));
+    auto changed = Recorder::messages(rec.msg_updated);
+    CHECK(std::ranges::any_of(changed, [&](const Message& m) { return m.id == target_id; }));
+    CHECK(std::ranges::any_of(changed, [&](const Message& m) { return m.id == reply_id; }));
 }
 
 TEST_CASE("Client: a reply carries the message it answers", "[client][replies]") {

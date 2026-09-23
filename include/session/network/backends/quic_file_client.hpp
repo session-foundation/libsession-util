@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <oxen/quic/loop.hpp>
 #include <string>
 #include <variant>
 #include <vector>
@@ -12,13 +13,11 @@
 #include "session/network/session_network_types.hpp"
 
 namespace oxen::quic {
-class Loop;
 class Endpoint;
 class Connection;
 class BTRequestStream;
 class Stream;
 class GNUTLSCreds;
-class Ticker;
 class Address;
 struct RemoteAddress;
 }  // namespace oxen::quic
@@ -82,10 +81,17 @@ class QuicFileClient {
 
     /// Download a file by ID from the file server.  on_data is called as data chunks arrive
     /// with a non-owning view of the data; on_complete signals completion or failure.
+    ///
+    /// `cancelled` is the caller's cancellation flag -- `FileTransferRequest::cancelled` -- checked
+    /// as each chunk arrives, so a transfer the caller has given up on stops rather than running to
+    /// completion into a consumer that is discarding it.  Cancelling completes with
+    /// ERROR_REQUEST_CANCELLED.  A stream with nothing arriving on it notices nothing, since this
+    /// is the passive end of the transfer; the caller's timeouts are what end those.
     void download(
             std::string file_id,
             std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data,
-            std::function<void(std::variant<file_metadata, int16_t> result)> on_complete);
+            std::function<void(std::variant<file_metadata, int16_t> result)> on_complete,
+            std::shared_ptr<std::atomic<bool>> cancelled = nullptr);
 
     /// Close the current connection (if any).
     void close();
@@ -112,13 +118,19 @@ class QuicFileClient {
     // Idle timeout: close the connection after this much inactivity
     static constexpr auto IDLE_TIMEOUT = std::chrono::seconds{30};
     static constexpr auto IDLE_CHECK_INTERVAL = std::chrono::seconds{5};
-    std::shared_ptr<oxen::quic::Ticker> _idle_timer;
+    oxen::quic::TimerID _idle_timer;
     std::chrono::steady_clock::time_point _last_activity;
 
     // Returns the active connection, establishing one if needed.
     std::shared_ptr<oxen::quic::Connection> _ensure_connection();
     void _start_idle_timer();
+    void _stop_idle_timer();
     void _touch();
+
+    // Where everything that reaches this client runs, so that whatever is still queued or armed
+    // when it is destroyed is cancelled rather than run against it.  Declared last so that it is
+    // destroyed first, before the members its jobs reach, and while `_loop` is still alive.
+    oxen::quic::JobQueue _jq{*_loop};
 };
 
 /// Performs a complete streaming file upload from a background thread.  This function blocks

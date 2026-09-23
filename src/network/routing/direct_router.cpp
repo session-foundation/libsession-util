@@ -514,7 +514,8 @@ void DirectRouter::_download_internal(DownloadRequest request) {
                             std::get<int16_t>(result));
 
                 request.on_complete(std::move(result), false);
-            });
+            },
+            request.cancelled);
 }
 
 void DirectRouter::_download_internal_legacy(DownloadRequest request, std::string download_id) {

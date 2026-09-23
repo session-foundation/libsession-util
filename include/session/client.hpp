@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <oxen/quic/loop.hpp>
 #include <session/client/attachment.hpp>
@@ -46,7 +47,7 @@
 ///         std::filesystem::path{"/path/to/session.db"},
 ///         session::client::callbacks{
 ///             .conversation_updated = [&](const auto& convo) { redraw(convo); },
-///             .message_added = [&](const auto& id, const auto& msg) { append(id, msg); },
+///             .messages_added = [&](auto&& msgs) { for (auto& m : msgs) append(m); },
 ///         }};
 ///
 ///     for (const auto& convo : client.conversations())
@@ -282,11 +283,7 @@ class Client {
     /// that has since been deleted is discovered: an attachment that has gone moves the message to
     /// SendState::unsendable, which is terminal.
     void retry_send(
-            int64_t message_id,
-            std::function<
-                    void(size_t index, int64_t sent, int64_t total, std::optional<int> result)>
-                    on_upload,
-            result_function<bool> cb);
+            int64_t message_id, Conversation::upload_progress on_upload, result_function<bool> cb);
     bool retry_send(int64_t message_id, Conversation::upload_progress on_upload, await_t);
     bool retry_send(int64_t message_id, await_t);
 
@@ -366,6 +363,19 @@ class Client {
     ///
     /// Not subject to the auto-download size limit.  That governs what arrives unasked, and this is
     /// asked for.
+    ///
+    /// A failure says why through `cb`'s error, and the progress report that ends the transfer
+    /// carries the same one:
+    ///
+    /// - `err::message_not_found`, `err::attachment_not_found` — there is nothing to fetch.
+    /// - `err::file_not_found` — the file server does not have the file.
+    /// - `err::file_unreadable` — the file cannot be read as its sender described it.
+    /// - `err::network_unavailable` — no network is attached.
+    /// - `err::download_failed` — this attempt failed, for a reason that may not recur.
+    ///
+    /// The two about the file are verdicts on it: every message quoting it shows them as its
+    /// `availability`, and asking for it again answers at once, downloading nothing, until the
+    /// sender sends it again.
     void attachment_data(
             int64_t message_id,
             size_t index,
@@ -433,8 +443,11 @@ class Client {
     ///
     /// `on_progress` reports as `send_message`'s `on_upload` does and is indexed the same way, so
     /// a display built for sending works unchanged in the other direction: `result` unset means
-    /// under way with `done`/`total` in encrypted bytes, `result == 0` means written and verified,
-    /// and anything else is the failure's status code.
+    /// under way with `done`/`total` in encrypted bytes, and is then success once the file is
+    /// written and verified, or the same error `cb` gets.
+    ///
+    /// Fails as `attachment_data` does, and with `err::save_failed` if the file cannot be written
+    /// where it was asked to go.
     ///
     /// `notify_sender` tells the person who sent it that we saved their file, which is what
     /// Session's other clients do and so what a recipient expects.  Passing false keeps this
@@ -449,10 +462,6 @@ class Client {
     /// Which of Session's two attachment encryptions applies is read from the url, so a caller
     /// neither chooses nor needs to know: current clients still send the legacy scheme, and files
     /// we send use the stream one.
-    ///
-    /// The error a failure reports is worth showing rather than a generic one: an attachment that
-    /// the file server no longer holds, one whose sender described it wrongly, and one that failed
-    /// to authenticate are different problems, and only the first is worth retrying.
     ///
     /// @throws std::invalid_argument if `dest` names a directory or its parent does not exist;
     /// thrown on the calling thread, before anything is fetched.
@@ -506,7 +515,7 @@ class Client {
     /// a caller that had to know would end up implementing the caching decision itself.
     ///
     /// `on_progress` reports the download as `save_attachment` does — `done`/`total` in encrypted
-    /// bytes while it runs, `result == 0` when it is in, anything else a failure status.  It is not
+    /// bytes while it runs, then `result` holding success or the same error `cb` gets.  It is not
     /// called at all on a cache hit: there is no progress to draw when the bytes are already here,
     /// and a progress bar that flashes for a cached read is worse than none.
     ///
@@ -519,7 +528,8 @@ class Client {
     /// picture we could not decrypt, since what we would be storing is not the picture.
     void profile_picture(
             const ConversationId& id,
-            std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
+            std::function<void(int64_t done, int64_t total, std::optional<Expected<void>> result)>
+                    on_progress,
             result_function<std::optional<std::vector<std::byte>>> cb);
     void profile_picture(
             const ConversationId& id, result_function<std::optional<std::vector<std::byte>>> cb);
@@ -545,6 +555,23 @@ class Client {
     void set_attachment_cache_limit(std::optional<int64_t> bytes, await_t);
     void attachment_cache_limit(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> attachment_cache_limit(await_t);
+
+    /// How much disk the cached attachments occupy at the moment, in bytes.
+    ///
+    /// The same measure as the limit, and the same total eviction compares against it: bytes on
+    /// disk, which is more than the attachments themselves are, since what is cached is encrypted
+    /// and padded.  Being the same measure is what makes the two worth showing together.
+    ///
+    /// Display pictures are excluded, exactly as they are from the limit: they are not counted
+    /// towards it and are never evicted for it.
+    ///
+    /// Read from the index rather than by walking the directory, so it costs a query -- and is
+    /// exact only for as long as the index is.  A file deleted from under us still counts until the
+    /// sweep that `set_cache_dir` starts finds it gone.
+    ///
+    /// 0 when nothing is cached, which includes having no cache directory at all.
+    void attachment_cache_size(result_function<int64_t> cb);
+    int64_t attachment_cache_size(await_t);
 
     /// The largest attachment that will be fetched *unasked*, or nullopt for no limit.
     ///
@@ -695,6 +722,12 @@ class Client {
     // hold, and deletes it.
     void _on_unsend_request(
             std::span<const std::byte, 33> sender, const SessionProtos::UnsendRequest& req);
+
+    // A transfer's progress before anything identifies which attachment it is: bytes so far and
+    // expected, and on the last report, how it ended.
+    using transfer_progress =
+            std::function<void(int64_t done, int64_t total, std::optional<Expected<void>> result)>;
+
     // A download that is already happening, and everyone waiting on it.
     //
     // Keyed by the cache name -- the hashed base url -- because that is what identifies the *file*,
@@ -721,33 +754,191 @@ class Client {
         // rather than being left with nothing to draw until the next chunk lands.
         int64_t done = 0, total = 0;
         std::shared_ptr<std::vector<std::byte>> plain;
-        std::vector<std::function<void(int64_t, int64_t, std::optional<int>)>> progress;
+        std::vector<transfer_progress> progress;
         std::vector<result_function<std::vector<std::byte>>> waiting;
     };
-    std::unordered_map<std::string, InFlight> _in_flight;
 
-    // What an attachment row says about where its file is and how to open it.
-    struct StoredPointer {
+    // A file on the file server, and what it takes to read it: what an attachment row says about
+    // where its file is and how to open it.
+    //
+    // Everything past the url is the sender's claim: nothing ties the key, digest or size to the
+    // bytes the url names, so two rows can name one file and disagree about how to read it -- a
+    // client with a bug, or someone doing it on purpose.  What a fetch finds out about *reading* is
+    // therefore true of a claim, not of a url, and the transfers below are told apart accordingly.
+    struct RemoteFile {
         std::string url;
         std::vector<std::byte> key, digest;
         std::optional<int64_t> size;
     };
-    // Throws if there is no such attachment, or if its sender gave no url.
-    StoredPointer _attachment_pointer(int64_t message_id, size_t index);
 
-    // Writes `data` into the attachment cache under `url`, and records it.  The row is an index
-    // over the file, so it is written after the file exists.
-    void _cache_attachment(
+    static std::string _transfer_key(const RemoteFile& f);
+
+    // The stored form of a verdict on a file: what `message_attachments.unavailable` holds, shown
+    // to the app as the matching `AttachmentAvailability`.  A verdict is a failure that trying
+    // again will not fix; nothing transient is ever one of these.
+    //
+    // Its own type rather than those public values because these numbers are what is on disk and
+    // must never change, and the public enum's are not meant to be anything in particular.
+    enum class Unavailable : int {
+        not_found = 404,
+        unreadable = -20002,
+    };
+
+    // How a download ended.  `not_found` and `unreadable` are the file's own doing, and become the
+    // matching `Unavailable` for every message quoting it; `failed` is everything that says nothing
+    // about the file -- the network, the server, a cancel, or our own side of the transfer.
+    enum class DownloadResult { ok, failed, not_found, unreadable };
+
+    // Keyed by the whole claim (see `_transfer_key`) rather than the url, because joining a
+    // transfer means taking its answer: a caller whose pointer carries a different key must not be
+    // handed the failure of somebody else's.  Pointers that agree -- which is what every honest
+    // copy of a file is -- share one key, so they still share one download.
+    //
+    // Ordered so that everything under one url sits together: whether *anything* is fetching a
+    // file is a question about the url, asked once per attachment on a page.
+    std::map<std::string, InFlight> _in_flight;
+
+    /// What to tell a reader about an attachment's file: the `Attachment` fields that report it,
+    /// given the `cached` reference and `unavailable` verdict already read from its row.
+    ///
+    /// A member because it needs the one thing the message builders below cannot read from the
+    /// database: whether a transfer is running, which is ours and in memory.  It is also where the
+    /// states are ranked, so that a display is handed one answer rather than the pieces of one.
+    struct CacheStatus {
+        AttachmentAvailability availability = AttachmentAvailability::absent;
+        int64_t done = 0, total = 0;
+    };
+    CacheStatus _attachment_availability(
+            std::string_view url,
+            std::optional<int64_t> cached,
+            std::optional<Unavailable> unavailable);
+
+    /// Reports that what we hold of the file at `url` has changed, as what it is: a change to
+    /// every message showing that file.
+    ///
+    /// More than one message routinely shows the same file -- forwarded, or quoted -- which is
+    /// also why the cache is keyed on the file rather than on the message that wanted it.
+    void _emit_attachment_availability(std::string_view url);
+
+    /// Every message showing the file at `url`, and the one report covering all of them.
+    ///
+    /// Two halves rather than one call because a caller with a condition of its own does the query
+    /// itself; and collected rather than streamed because every caller goes on to write the table
+    /// it is reading, and the emits can call back in.
+    std::vector<int64_t> _messages_showing(sqlite::Connection& c, std::string_view url);
+    void _emit_messages_showing(sqlite::Connection& c, const std::vector<int64_t>& messages);
+
+    /// Records that fetching through `claim` failed in a way retrying will not fix, on every row
+    /// the verdict is actually true of, and returns the messages whose verdict changed.  Reporting
+    /// them is the caller's: a finished transfer changes more rows than its verdict does, and says
+    /// so in one report of its own.
+    ///
+    /// Which rows those are depends on what failed.  `not_found` is the file server's answer about
+    /// the url, and holds for every message showing that file.  `unreadable` is about the claim:
+    /// the same bytes under a different key or size may read perfectly well, so it holds only for
+    /// rows making the same claim -- otherwise one bad pointer, sent by anyone, would mark every
+    /// honest copy of the file as broken.
+    std::vector<int64_t> _mark_unavailable(
+            sqlite::Connection& c, const RemoteFile& claim, Unavailable why);
+
+    /// A new pointer to `url` arrived, which is the resend a `not_found` tells the user to ask
+    /// for: clears the server's verdicts on that url so the file is offered again.  Leaves
+    /// `unreadable` alone, since a resend reproduces the bytes that failed.
+    void _clear_resendable(std::string_view url);
+
+    // How deep a read goes when a message turns out to be a reply.
+    enum class ReplyDepth {
+        // Load the replied-to message, so a caller can draw the reply from one read.
+        with_target,
+        // Resolve the reference but leave `Reply::message` null.  This is what a *nested* message
+        // gets, and is the whole of the depth limit: without it, reading one message could walk a
+        // chain of replies of unbounded length.
+        reference_only,
+    };
+
+    // Turns a bound statement over MESSAGE_COLUMNS into whole Messages: attachments loaded,
+    // gallery decided, and replied-to messages filled in unless this is already a nested read.
+    //
+    // Takes a bare statement rather than a `StatementWrapper` so that it serves both a cached
+    // statement and a one-off; see `_load_reply_targets` for why one of its callers cannot use the
+    // cache.
+    std::vector<Message> _build_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            SQLite::Statement& st);
+    template <typename... Bind>
+    std::vector<Message> _query_messages(
+            sqlite::Connection& c,
+            const ConversationId& convo,
+            ReplyDepth depth,
+            const std::string& query,
+            const Bind&... bind);
+    void _load_attachments(sqlite::Connection& c, std::vector<Message>& msgs);
+    void _load_reply_targets(
+            sqlite::Connection& c, const ConversationId& convo, std::vector<Message>& msgs);
+
+    // The claim to fetch an attachment by.  Throws `session::error` rather than returning one when
+    // there is nothing worth fetching, with the code the requester is owed: no such message or
+    // attachment, no url, or a verdict already recorded against the file.
+    RemoteFile _remote_file(int64_t message_id, size_t index);
+
+    // Writes `data` into the attachment cache under `url`, records it, and tells every message
+    // showing that file that it is now here.  The row is an index over the file, so it is written
+    // after the file exists.
+    //
+    // Returns whether it got that far, which is what says the messages have been told: a caller
+    // that gets false has left them where they were and owes them the news itself.
+    bool _cache_attachment(
             const std::string& url,
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
+
+    /// Keeps a copy of a file we just uploaded, so that a message we sent can be drawn without
+    /// fetching back a file that came off this disk in the first place.
+    ///
+    /// Under the rule that would have applied had the same file arrived, plus anything on a
+    /// gallery-viewable message whatever that rule says -- see the definition.  Best effort: the
+    /// source is re-read, since the upload streamed it rather than holding it, and a file that has
+    /// since moved or changed is simply not cached.
+    ///
+    /// Call once the row carries the url, which is both where the copy belongs and what says the
+    /// upload is done.
+    void _cache_outgoing_attachment(int64_t client_id, size_t index, const std::string& url);
+
+    // The cache entry holding `url`, as (id, file name), found through the attachment rows that
+    // reference it rather than by hashing the url.
+    //
+    // That is the point of the reference: the name is whatever the entry was written under, so one
+    // written under an older naming is still found, and the hash stays something applied to a file
+    // being created rather than to every lookup.
+    std::optional<std::pair<int64_t, std::string>> _cached_entry(
+            sqlite::Connection& c, std::string_view url);
+
     // Marks a cache entry as used now, which is what makes eviction least-recently-used.
-    void _touch_cached(const std::string& name);
+    void _touch_cached(int64_t id);
 
     // Removes least-recently-used entries until the cache fits its limit, never touching `keep` --
     // which is whatever was just written, so that a download cannot complete and immediately
     // vanish.  Does nothing when no limit is set.
-    void _evict_cache(const std::string& keep);
+    void _evict_cache(int64_t keep);
+
+    // Removes one cache entry, file and row, and returns the messages that were drawing it for the
+    // caller to report -- which it does rather than reporting them itself so that a pass dropping
+    // several files is one report and not one each.
+    //
+    // The messages have to be read before the row goes: the foreign key clears their reference as
+    // it is deleted, and nothing afterwards can say which they were.
+    std::vector<int64_t> _drop_cached(sqlite::Connection& c, int64_t id, const std::string& name);
+
+    // Every message whose attachment names cache entry `id`.
+    std::vector<int64_t> _messages_cached_as(sqlite::Connection& c, int64_t id);
+
+    // What the cache index says its files add up to, in bytes on disk.  The overload taking a
+    // connection is for callers that already hold one and are about to write through it -- eviction
+    // reads this to decide whether it has work to do.
+    int64_t _attachment_cache_size();
+    int64_t _attachment_cache_size(sqlite::Connection& c);
 
     // Where a profile reached us from, which is what a field it does not carry means.
     enum class ProfileSource {
@@ -817,9 +1008,22 @@ class Client {
     std::optional<b32> _cache_key;
     // Must be called on the loop: it touches globals.
     const b32& _cache_encryption_key();
+
+    /// What to call a cached file, and where to put it, with the cache key applied.
+    ///
+    /// One place rather than at every call site: the name is keyed (see `cache::name_for`), and a
+    /// caller that forgot the key would silently get the old, guessable naming back.  Taking the
+    /// key out of the caller's hands is what stops that being possible.
+    ///
+    /// For an *attachment* this is only ever used to name a file being written -- finding one that
+    /// already exists goes through `_cached_entry`, which reads the name the entry was stored with.
+    /// That is what lets the naming change without orphaning everything already downloaded.  A
+    /// profile picture has no such entry, so for those it remains the way in as well.
+    std::filesystem::path _cache_path(std::string_view kind, std::string_view url);
+    std::string _cache_name(std::string_view url);
     void _profile_picture(
             const ConversationId& id,
-            std::function<void(int64_t, int64_t, std::optional<int>)> on_progress,
+            transfer_progress on_progress,
             result_function<std::optional<std::vector<std::byte>>> cb);
     std::vector<Message> _messages(
             const ConversationId& id,
@@ -831,14 +1035,12 @@ class Client {
     int64_t _send_message(
             const ConversationId& id,
             const OutgoingMessage& msg,
-            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+            Conversation::upload_progress on_upload);
 
     // Uploads the message's first attachment that has no url yet and, when there are none left,
     // finishes the send.  Each upload's completion calls this again, so the chain runs one file at
     // a time and resumes wherever it was left -- which is also what a retry does.
-    void _upload_next(
-            int64_t client_id,
-            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+    void _upload_next(int64_t client_id, Conversation::upload_progress on_upload);
 
     // Rebuilds the message's content with its now-uploaded attachments named in it, replaces what
     // was stored, and dispatches it.  Rebuilt from the database rather than from what send_message
@@ -850,9 +1052,7 @@ class Client {
     // transfer that merely did not work this time.
     void _fail_attachment_send(int64_t client_id, bool permanent = false);
 
-    bool _retry_send(
-            int64_t client_id,
-            std::function<void(size_t, int64_t, int64_t, std::optional<int>)> on_upload);
+    bool _retry_send(int64_t client_id, Conversation::upload_progress on_upload);
 
     // Wraps a progress callback so each report reaches the application through the dispatcher, and
     // returns an empty function when given one — so a download can skip reporting entirely rather
@@ -861,8 +1061,15 @@ class Client {
     // A caller reporting something narrower than "this download" — one attachment of several, say —
     // binds that in first and hands the result here; what is shared is the hop and the emptiness,
     // not what the numbers are about.
-    std::function<void(int64_t, int64_t, std::optional<int>)> _dispatch_progress(
-            std::function<void(int64_t, int64_t, std::optional<int>)> cb);
+    transfer_progress _dispatch_progress(transfer_progress cb);
+
+    // The same for a caller following one attachment, with its identity filled in before the hop:
+    // the download reports only numbers, and which attachment they are about is this layer's to
+    // say.
+    transfer_progress _attachment_progress(
+            int64_t message_id,
+            size_t index,
+            std::function<void(const AttachmentProgress&)> on_progress);
 
     // What is being downloaded.  Only ever consulted to pick between the two *legacy* formats,
     // which are different for no reason anyone chose — see `attachment::legacy_display_pic_decrypt`
@@ -899,25 +1106,32 @@ class Client {
     // first or may be most of the way in, but is not "once the whole file is here".
     //
     // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment
-    // adds its own index.  `on_done` fires exactly once, with the failure if there was one.
+    // adds its own index.  `on_done` fires exactly once, with how it ended and, unless that is
+    // `ok`, why.  An exception from `on_plain` ends the transfer as `failed`: it is our side that
+    // could not take the bytes, which says nothing about them.
     //
-    // Throws, before starting anything, if the url is not a download url, if no network is
-    // attached, or if the key or digest is the wrong length for the scheme that resolves to.
+    // A claim no download could satisfy -- a url that is not a download url, or a key or digest of
+    // the wrong length for the scheme it resolves to -- ends `unreadable` without anything being
+    // sent, through `on_done` like any other failure and so before this returns.
+    //
+    // Throws `session::error` with `err::network_unavailable`, before starting anything, if no
+    // network is attached.
     void _download_decrypted(
-            const std::string& url,
+            RemoteFile remote,
             DownloadKind kind,
-            std::vector<std::byte> key,
-            std::vector<std::byte> digest,
-            std::optional<int64_t> claimed_size,
             std::function<void(std::span<const std::byte> plaintext)> on_plain,
-            std::function<void(int64_t done, int64_t total, std::optional<int> result)> on_progress,
-            std::function<void(std::optional<Error> error)> on_done);
+            transfer_progress on_progress,
+            std::function<void(DownloadResult result, std::string why)> on_done);
+
+    // The public error for a download that did not end `ok`.
+    static Error _to_error(DownloadResult result, std::string why);
+
+    // The verdict a download's end records against the file, if any.
+    static std::optional<Unavailable> _to_unavailable(DownloadResult result);
 
     // What a fetch needs to know about the file it is after, independent of who wants it.
     struct FetchTarget {
-        std::string url;
-        std::vector<std::byte> key, digest;
-        std::optional<int64_t> claimed_size;
+        RemoteFile remote;
         DownloadKind kind;
         std::string_view dir;  // cache::ATTACHMENT_DIR or cache::PROFILE_DIR
     };
@@ -929,18 +1143,25 @@ class Client {
     // second request attaches to the first, picking up its progress from wherever it has reached,
     // rather than fetching the same bytes twice and caching them twice.
     //
-    // `on_hit` runs when the cache answered and `store` after a fetch completes, both on the loop.
-    // They are the whole of the difference between a cached attachment, which is indexed and
-    // evictable, and a cached picture, which is neither.
+    // `store` runs on the loop after a fetch completes, and is the whole of the difference between
+    // a cached attachment, which is indexed and evictable, and a cached picture, which is neither:
+    // `target.dir` is what says which of the two this is, so finding an existing copy and
+    // recording its use follow from that rather than from anything the caller supplies.
+    //
+    // It returns whether it kept the file *and told the messages showing it*, which is what decides
+    // whether this has to report the transfer ending: a fetch with nothing to show for it leaves
+    // them where they were, and every way of having nothing to show -- a failure, a file that could
+    // not be written, no cache at all -- looks the same to them.
     void _fetch_cached(
             FetchTarget target,
-            std::function<void(int64_t done, int64_t total, std::optional<int> result)> progress,
+            transfer_progress progress,
             result_function<std::vector<std::byte>> cb,
-            std::function<void(const std::string& name)> on_hit,
-            std::function<void(std::span<const std::byte>)> store);
+            std::function<bool(std::span<const std::byte>)> store);
 
-    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.
-    std::function<void(std::span<const std::byte>)> _store_picture(std::string url);
+    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.  Always
+    // answers false: a picture belongs to a conversation rather than to a message, so there is
+    // never a message to have told.
+    std::function<bool(std::span<const std::byte>)> _store_picture(std::string url);
 
     // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
     // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a
@@ -1212,16 +1433,28 @@ class Client {
     // the replies pointing at it: one arriving makes them resolve, one being deleted changes what
     // they show.  Cascading here rather than at the ten call sites means none of them can forget
     // it, which would show up only as a display that quietly stops matching the database.
-    void _emit_message(bool added, const ConversationId& id, int64_t message_id);
+    //
+    // An added message and its replies are two reports, since they are two callbacks; the replies
+    // of a *changed* message join it in one.
+    void _emit_message(bool added, int64_t message_id);
 
-    // The above without the cascade, which is what the cascade itself uses.
+    // Every message that replies to `message_id`, which is what the cascade above reports.
     //
     // One level is enough, and is why this terminates: reporting B refreshes what A shows for the
     // message it replied to, but reporting A cannot change what anything shows for *A*, because a
     // message reached through a reply carries the reference to what it answered and never the
     // answer itself.  So there is no visited set, and two messages claiming to reply to each other
     // cannot loop.
-    void _emit_message_alone(bool added, const ConversationId& id, int64_t message_id);
+    std::vector<int64_t> _repliers(sqlite::Connection& c, int64_t message_id);
+
+    // Reports `ids` as one call, deduplicated and ordered oldest first -- the order the callback
+    // promises, and the reverse of the one `messages()` pages in.
+    //
+    // Built here rather than by the caller: whatever prompted this may have reached a message more
+    // than once, and building at the end means one build per message in its settled state.  Ids
+    // that no longer resolve are dropped, so a report for something deleted along the way is simply
+    // not made.
+    void _emit_messages(bool added, std::vector<int64_t> ids);
 
     // Conversations whose settled state still has to be reported.  A conversation is marked here
     // rather than reported immediately so that a poll delivering fifty messages to one conversation

@@ -104,10 +104,10 @@ quic::Loop& Core::loop() {
 Core::~Core() {
     // Tearing a Network down fails every request its transport is still holding, and failing them
     // fires the hooks installed in set_network -- which marshal onto our loop and reach members
-    // that are already gone.  Members are destroyed in reverse declaration order and every ticker
-    // is declared after `_network`, so by the time ~Network runs they have been released while
-    // `_loop`, declared first, is still alive to run the job: `stop()` on a freed Ticker, at every
-    // exit that had a subscription.
+    // that are already gone.  Members are destroyed in reverse declaration order and `_jq` is
+    // declared after `_network`, so by the time ~Network runs it has been destroyed while `_loop`,
+    // declared first, is still alive to run the job: a dropped subscription removing its timers
+    // from a queue that no longer exists, at every exit that had a subscription.
     //
     // So detach before anything is torn down.  ~Network pays its own router and transport the
     // same courtesy for the same reason, and doing it here rather than by shuffling the member
@@ -118,11 +118,13 @@ Core::~Core() {
         _network->on_connection_lost = nullptr;
     }
 
-    // Stopped while they are certainly still alive.  Releasing them is left to the members
-    // themselves, which happens before `_loop` goes and so can still reach it.
-    for (auto* ticker : {&_poll_ticker, &_sub_ticker, &_probe_ticker})
-        if (*ticker)
-            (*ticker)->stop();
+    // Before the Network goes, because a poll or a renew that fires while it is being torn down
+    // would reach it; stopping `_jq` below cancels them too, but only once the Network is already
+    // gone.  On the loop because the ids are only ever touched there.
+    call_get([this] {
+        for (auto* timer : {&_poll_timer, &_sub_timer, &_probe_timer})
+            _remove_timer(*timer);
+    });
 
     // Blocking, and it must not run on the Network's own loop -- it does not, because a Core is
     // destroyed by whoever owns it.  Before the queue is stopped rather than after: tearing the
@@ -215,29 +217,28 @@ void Core::set_network(std::unique_ptr<network::Network> network) {
     _update_polling();
 }
 
+void Core::_remove_timer(quic::TimerID& timer) {
+    if (auto t = std::exchange(timer, {}))
+        _jq.remove(t);
+}
+
 void Core::_update_polling() {
-    if (_network && !_poll_ticker) {
-        _poll_ticker = _loop.call_every(_poll_interval, [this] { _poll(); });
-    } else if (!_network && _poll_ticker) {
-        _poll_ticker->stop();
-        _poll_ticker.reset();
-    }
+    if (_network && !_poll_timer)
+        _poll_timer = _jq.add_timer(_poll_interval, [this] { _poll(); });
+    else if (!_network)
+        _remove_timer(_poll_timer);
 }
 
 void Core::set_poll_interval(std::chrono::milliseconds interval) {
-    // Marshalled onto the loop rather than done here: this replaces the ticker, and creating or
-    // stopping a libevent event from a thread that is not the loop's races the loop itself.  (Both
-    // `_poll_interval` and `_poll_ticker` are otherwise only touched there.)  `call` runs it
-    // inline when we are already on the loop thread, so this costs nothing in that case.
+    // Marshalled onto the loop rather than done here: this replaces the timer, and both
+    // `_poll_interval` and `_poll_timer` are otherwise only touched there.  `call` runs it inline
+    // when we are already on the loop thread, so this costs nothing in that case.
     //
     // On our own queue rather than the loop's, so that a interval change still in flight when Core
     // goes away is dropped rather than run against a half-destroyed one.
     _jq.call([this, interval] {
         _poll_interval = interval;
-        if (_poll_ticker) {
-            _poll_ticker->stop();
-            _poll_ticker.reset();
-        }
+        _remove_timer(_poll_timer);
         _update_polling();
     });
 }
@@ -1015,7 +1016,7 @@ std::optional<network::PathInfo> Core::current_swarm_path() const {
 }
 
 void Core::_maybe_subscribe(const network::service_node& node) {
-    // On our queue because everything below -- the tickers especially -- is Core's loop state.
+    // On our queue because everything below -- the timer ids especially -- is Core's loop state.
     // Inline once the caller is already there, which the poll response now is, so this costs a
     // check rather than a turn of the loop.
     call([this, node] {
@@ -1114,13 +1115,10 @@ void Core::_send_subscribe(network::Network* net, network::service_node node) {
 
                         // Stop polling: from here the node pushes what arrives, and the only
                         // requests we make are the renew tick's.
-                        if (_poll_ticker) {
-                            _poll_ticker->stop();
-                            _poll_ticker.reset();
-                        }
-                        _sub_ticker = _loop.call_every(
+                        _remove_timer(_poll_timer);
+                        _sub_timer = _jq.add_timer(
                                 SUBSCRIPTION_RENEW_INTERVAL, [this] { _subscription_renew(); });
-                        _probe_ticker = _loop.call_every(
+                        _probe_timer = _jq.add_timer(
                                 SUBSCRIPTION_PROBE_INTERVAL, [this] { _subscription_probe(); });
 
                         log::info(
@@ -1237,17 +1235,8 @@ void Core::_drop_subscription(std::string_view why) {
     _sub_node.reset();
     _subscribed = false;
 
-    // Stopped now, but released on a later turn of the loop.  This is reachable from inside one of
-    // these tickers' own callbacks, and a Ticker's deleter runs inline once we are already on the
-    // loop (Loop::call_every hands out a shared_ptr whose deleter is a `call_get` of the delete,
-    // and call_get runs inline when inside) -- so dropping the last reference here would free the
-    // std::function we are currently executing.  Stopping is safe from within; freeing is not.
-    for (auto* ticker : {&_sub_ticker, &_probe_ticker}) {
-        if (*ticker) {
-            (*ticker)->stop();
-            _loop.reset_soon(std::move(*ticker));
-        }
-    }
+    for (auto* timer : {&_sub_timer, &_probe_timer})
+        _remove_timer(*timer);
 
     // Back to polling, which is also what picks the next node: the swarm member a fresh
     // `get_swarm` happens to hand back first.

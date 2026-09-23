@@ -299,7 +299,7 @@ PROTOBUF_CONSTEXPR AttachmentPointer::AttachmentPointer(
   , /*decltype(_impl_.thumbnail_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.digest_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.filename_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.caption_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.thumbhash_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.url_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.id_)*/uint64_t{0u}
   , /*decltype(_impl_.size_)*/0u
@@ -7263,7 +7263,7 @@ class AttachmentPointer::_Internal {
   static void set_has_height(HasBits* has_bits) {
     (*has_bits)[0] |= 2048u;
   }
-  static void set_has_caption(HasBits* has_bits) {
+  static void set_has_thumbhash(HasBits* has_bits) {
     (*has_bits)[0] |= 32u;
   }
   static void set_has_url(HasBits* has_bits) {
@@ -7291,7 +7291,7 @@ AttachmentPointer::AttachmentPointer(const AttachmentPointer& from)
     , decltype(_impl_.thumbnail_){}
     , decltype(_impl_.digest_){}
     , decltype(_impl_.filename_){}
-    , decltype(_impl_.caption_){}
+    , decltype(_impl_.thumbhash_){}
     , decltype(_impl_.url_){}
     , decltype(_impl_.id_){}
     , decltype(_impl_.size_){}
@@ -7340,12 +7340,12 @@ AttachmentPointer::AttachmentPointer(const AttachmentPointer& from)
     _this->_impl_.filename_.Set(from._internal_filename(), 
       _this->GetArenaForAllocation());
   }
-  _impl_.caption_.InitDefault();
+  _impl_.thumbhash_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.caption_.Set("", GetArenaForAllocation());
+    _impl_.thumbhash_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_caption()) {
-    _this->_impl_.caption_.Set(from._internal_caption(), 
+  if (from._internal_has_thumbhash()) {
+    _this->_impl_.thumbhash_.Set(from._internal_thumbhash(), 
       _this->GetArenaForAllocation());
   }
   _impl_.url_.InitDefault();
@@ -7374,7 +7374,7 @@ inline void AttachmentPointer::SharedCtor(
     , decltype(_impl_.thumbnail_){}
     , decltype(_impl_.digest_){}
     , decltype(_impl_.filename_){}
-    , decltype(_impl_.caption_){}
+    , decltype(_impl_.thumbhash_){}
     , decltype(_impl_.url_){}
     , decltype(_impl_.id_){uint64_t{0u}}
     , decltype(_impl_.size_){0u}
@@ -7402,9 +7402,9 @@ inline void AttachmentPointer::SharedCtor(
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.filename_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.caption_.InitDefault();
+  _impl_.thumbhash_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.caption_.Set("", GetArenaForAllocation());
+    _impl_.thumbhash_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   _impl_.url_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -7428,7 +7428,7 @@ inline void AttachmentPointer::SharedDtor() {
   _impl_.thumbnail_.Destroy();
   _impl_.digest_.Destroy();
   _impl_.filename_.Destroy();
-  _impl_.caption_.Destroy();
+  _impl_.thumbhash_.Destroy();
   _impl_.url_.Destroy();
 }
 
@@ -7460,7 +7460,7 @@ void AttachmentPointer::Clear() {
       _impl_.filename_.ClearNonDefaultToEmpty();
     }
     if (cached_has_bits & 0x00000020u) {
-      _impl_.caption_.ClearNonDefaultToEmpty();
+      _impl_.thumbhash_.ClearNonDefaultToEmpty();
     }
     if (cached_has_bits & 0x00000040u) {
       _impl_.url_.ClearNonDefaultToEmpty();
@@ -7573,10 +7573,10 @@ const char* AttachmentPointer::_InternalParse(const char* ptr, ::_pbi::ParseCont
         } else
           goto handle_unusual;
         continue;
-      // optional string caption = 11;
-      case 11:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
-          auto str = _internal_mutable_caption();
+      // optional bytes thumbhash = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          auto str = _internal_mutable_thumbhash();
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
         } else
@@ -7682,10 +7682,10 @@ uint8_t* AttachmentPointer::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(10, this->_internal_height(), target);
   }
 
-  // optional string caption = 11;
+  // optional bytes thumbhash = 12;
   if (cached_has_bits & 0x00000020u) {
-    target = stream->WriteStringMaybeAliased(
-        11, this->_internal_caption(), target);
+    target = stream->WriteBytesMaybeAliased(
+        12, this->_internal_thumbhash(), target);
   }
 
   // optional string url = 101;
@@ -7751,11 +7751,11 @@ size_t AttachmentPointer::ByteSizeLong() const {
           this->_internal_filename());
     }
 
-    // optional string caption = 11;
+    // optional bytes thumbhash = 12;
     if (cached_has_bits & 0x00000020u) {
       total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_caption());
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_thumbhash());
     }
 
     // optional string url = 101;
@@ -7827,7 +7827,7 @@ void AttachmentPointer::MergeFrom(const AttachmentPointer& from) {
       _this->_internal_set_filename(from._internal_filename());
     }
     if (cached_has_bits & 0x00000020u) {
-      _this->_internal_set_caption(from._internal_caption());
+      _this->_internal_set_thumbhash(from._internal_thumbhash());
     }
     if (cached_has_bits & 0x00000040u) {
       _this->_internal_set_url(from._internal_url());
@@ -7894,8 +7894,8 @@ void AttachmentPointer::InternalSwap(AttachmentPointer* other) {
       &other->_impl_.filename_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.caption_, lhs_arena,
-      &other->_impl_.caption_, rhs_arena
+      &_impl_.thumbhash_, lhs_arena,
+      &other->_impl_.thumbhash_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.url_, lhs_arena,

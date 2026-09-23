@@ -71,11 +71,31 @@ struct callbacks {
     /// belongs to — and `Conversation::request` is what says which one a given handler is about.
     std::function<void(std::vector<AnyConversation>&&)> request_list_replaced;
 
-    /// A message was added, whether received or sent from here.
-    std::function<void(ConversationId&&, Message&&)> message_added;
+    /// Messages were added, whether received or sent from here.
+    ///
+    /// See `messages_updated` for what the batch is, how it is ordered, and why it is not confined
+    /// to one conversation; all of that applies here too.
+    std::function<void(std::vector<Message>&&)> messages_added;
 
-    /// An existing message changed — currently only its send state.
-    std::function<void(ConversationId&&, Message&&)> message_updated;
+    /// Existing messages changed: a send state, whether one is shown as a gallery, when its
+    /// recipient saved an attachment, or an attachment's `AttachmentAvailability`.
+    ///
+    /// **Ordered oldest first**, by the timestamp history is ordered on and then by id — the
+    /// reverse of `Conversation::messages`, which pages backwards from the newest. A handler
+    /// applying these in order ends up in the same state as one that reloaded.
+    ///
+    /// **A batch may span conversations**, so each `Message` carries its own `conversation` rather
+    /// than the call naming one. One cause routinely reaches several: a file is one file, and
+    /// evicting it, fetching it, or finding it unfetchable changes every message showing it,
+    /// wherever those are.
+    ///
+    /// Reported for **every** message in **every** conversation, not only whichever one is on
+    /// screen: there is no notion here of what an application is showing, so deciding what to
+    /// redraw is the application's.
+    ///
+    /// A message can also be reported because something it *quotes* changed, since a reply draws a
+    /// preview of its target — so a handler sees messages it never asked about.
+    std::function<void(std::vector<Message>&&)> messages_updated;
 
     /// Messages were deleted from a conversation, and anything displaying its history should read
     /// it again.
@@ -108,7 +128,10 @@ struct callbacks {
     /// Display pictures are always fetched, with no setting to turn that off, so this fires for
     /// every one that is not already cached.
     std::function<void(
-            const ConversationId&, int64_t done, int64_t total, std::optional<int> result)>
+            const ConversationId&,
+            int64_t done,
+            int64_t total,
+            std::optional<Expected<void>> result)>
             display_picture_progress;
 };
 

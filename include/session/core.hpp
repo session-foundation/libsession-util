@@ -136,10 +136,6 @@
 ///
 /// ```
 
-namespace oxen::quic {
-struct Ticker;
-}  // namespace oxen::quic
-
 namespace session::pro_backend {
 struct ProRevocationItem;
 };  // namespace session::pro_backend
@@ -304,7 +300,7 @@ class Core {
     friend class session::TestHelper;  // for unit tests
 
     // Declared first, so it is constructed first and destroyed last: it must outlive every
-    // component that uses it, and the poll ticker below.
+    // component that uses it, and `_jq` below.
     quic::Loop _loop;
 
     // Singly owned: a Network must not be kept alive by anything else, least of all by a callback
@@ -340,9 +336,10 @@ class Core {
     // migrations, and then calls init() on each sub-component.
     void init();
 
-    // Polling-related members and methods.  The ticker itself is declared at the bottom of the
-    // class, with the rest of what has to be torn down before the components it reaches.
+    // Polling-related members and methods.
     std::chrono::milliseconds _poll_interval = 20s;
+    quic::TimerID _poll_timer;
+    void _remove_timer(quic::TimerID& timer);
     void _update_polling();
     void _poll();
 
@@ -455,7 +452,7 @@ class Core {
     // Swarm push subscription.  All of this is touched only on the loop.
     //
     // Having subscribed with a swarm member, that member pushes each new message to us instead of
-    // our asking for them, and the poll ticker stops.  The subscription belongs to the connection,
+    // our asking for them, and the poll timer stops.  The subscription belongs to the connection,
     // so it does not survive one being rebuilt and there is no notice from the far end when it
     // lapses -- it simply stops pushing.  Hence: renew on a timer well inside the server's expiry,
     // and treat losing the connection as having lost the subscription.
@@ -471,8 +468,8 @@ class Core {
 
     std::optional<network::service_node> _sub_node;
     bool _subscribed = false;
-    std::shared_ptr<oxen::quic::Ticker> _sub_ticker;
-    std::shared_ptr<oxen::quic::Ticker> _probe_ticker;
+    quic::TimerID _sub_timer;
+    quic::TimerID _probe_timer;
 
     // Subscribes to `node` if a subscription is possible and we do not already have one.  Called
     // when a poll of `node` drains, which is what makes it the node we subscribe with: it has an
@@ -626,8 +623,9 @@ class Core {
     /// needs it, and so does anything that has to re-establish swarm state across the swap.  Two
     /// things block it today:
     ///
-    /// - This calls `_update_polling()` on the caller's thread, which creates and stops the
-    ///   libevent poll ticker.  `set_poll_interval` marshals onto the loop for exactly that reason.
+    /// - This calls `_update_polling()` on the caller's thread, which adds and removes the poll
+    ///   timer and writes its id, which is otherwise only touched on the loop.  `set_poll_interval`
+    ///   marshals onto the loop for exactly that reason.
     /// - Tearing down a Network *invokes* the callbacks it is holding: failing the requests queued
     ///   in its router and transport is part of `~Network`.  Those callbacks are Core's, they hold
     ///   a raw `Network*` (see `_poll`), and a poll continuation among them will call back into a
@@ -684,8 +682,8 @@ class Core {
 
     /// Sets the polling interval used when a network object is attached.  The default is 20s.
     ///
-    /// Takes effect by replacing the active ticker, if there is one, and so restarts the interval:
-    /// the next poll is a full `interval` away rather than at the point the old ticker would have
+    /// Takes effect by replacing the active timer, if there is one, and so restarts the interval:
+    /// the next poll is a full `interval` away rather than at the point the old timer would have
     /// fired.  Attaching a network polls immediately and then every `interval`, so setting this
     /// before `set_network()` costs no initial delay.
     ///
@@ -915,15 +913,6 @@ class Core {
     // has to be destroyed while `_loop` is still alive, which it is: `_loop` is declared first and
     // so is destroyed last.
     quic::JobQueue _jq{_loop};
-
-    // Last of all, so it is the *first* thing destroyed: a ticker still running is a poll still
-    // arriving, and a poll reaches every component.  Stopping it before `_jq` rather than after
-    // also means no poll can try to queue its response onto a queue that has already stopped,
-    // which throws.
-    //
-    // (It lives here rather than beside `_poll_interval` for that reason alone; everything that
-    // uses it is up there with the rest of the polling machinery.)
-    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
 };
 
 }  // namespace session::core

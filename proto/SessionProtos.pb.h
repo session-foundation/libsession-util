@@ -4141,7 +4141,7 @@ class AttachmentPointer final :
     kThumbnailFieldNumber = 5,
     kDigestFieldNumber = 6,
     kFileNameFieldNumber = 7,
-    kCaptionFieldNumber = 11,
+    kThumbhashFieldNumber = 12,
     kUrlFieldNumber = 101,
     kIdFieldNumber = 1,
     kSizeFieldNumber = 4,
@@ -4239,22 +4239,22 @@ class AttachmentPointer final :
   std::string* _internal_mutable_filename();
   public:
 
-  // optional string caption = 11;
-  bool has_caption() const;
+  // optional bytes thumbhash = 12;
+  bool has_thumbhash() const;
   private:
-  bool _internal_has_caption() const;
+  bool _internal_has_thumbhash() const;
   public:
-  void clear_caption();
-  const std::string& caption() const;
+  void clear_thumbhash();
+  const std::string& thumbhash() const;
   template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_caption(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_caption();
-  PROTOBUF_NODISCARD std::string* release_caption();
-  void set_allocated_caption(std::string* caption);
+  void set_thumbhash(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_thumbhash();
+  PROTOBUF_NODISCARD std::string* release_thumbhash();
+  void set_allocated_thumbhash(std::string* thumbhash);
   private:
-  const std::string& _internal_caption() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_caption(const std::string& value);
-  std::string* _internal_mutable_caption();
+  const std::string& _internal_thumbhash() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_thumbhash(const std::string& value);
+  std::string* _internal_mutable_thumbhash();
   public:
 
   // optional string url = 101;
@@ -4355,7 +4355,7 @@ class AttachmentPointer final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr thumbnail_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr digest_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr filename_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr caption_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr thumbhash_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr url_;
     uint64_t id_;
     uint32_t size_;
@@ -11508,72 +11508,72 @@ inline void AttachmentPointer::set_height(uint32_t value) {
   // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.height)
 }
 
-// optional string caption = 11;
-inline bool AttachmentPointer::_internal_has_caption() const {
+// optional bytes thumbhash = 12;
+inline bool AttachmentPointer::_internal_has_thumbhash() const {
   bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
   return value;
 }
-inline bool AttachmentPointer::has_caption() const {
-  return _internal_has_caption();
+inline bool AttachmentPointer::has_thumbhash() const {
+  return _internal_has_thumbhash();
 }
-inline void AttachmentPointer::clear_caption() {
-  _impl_.caption_.ClearToEmpty();
+inline void AttachmentPointer::clear_thumbhash() {
+  _impl_.thumbhash_.ClearToEmpty();
   _impl_._has_bits_[0] &= ~0x00000020u;
 }
-inline const std::string& AttachmentPointer::caption() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.AttachmentPointer.caption)
-  return _internal_caption();
+inline const std::string& AttachmentPointer::thumbhash() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.AttachmentPointer.thumbhash)
+  return _internal_thumbhash();
 }
 template <typename ArgT0, typename... ArgT>
 inline PROTOBUF_ALWAYS_INLINE
-void AttachmentPointer::set_caption(ArgT0&& arg0, ArgT... args) {
+void AttachmentPointer::set_thumbhash(ArgT0&& arg0, ArgT... args) {
  _impl_._has_bits_[0] |= 0x00000020u;
- _impl_.caption_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.caption)
+ _impl_.thumbhash_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.AttachmentPointer.thumbhash)
 }
-inline std::string* AttachmentPointer::mutable_caption() {
-  std::string* _s = _internal_mutable_caption();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.AttachmentPointer.caption)
+inline std::string* AttachmentPointer::mutable_thumbhash() {
+  std::string* _s = _internal_mutable_thumbhash();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.AttachmentPointer.thumbhash)
   return _s;
 }
-inline const std::string& AttachmentPointer::_internal_caption() const {
-  return _impl_.caption_.Get();
+inline const std::string& AttachmentPointer::_internal_thumbhash() const {
+  return _impl_.thumbhash_.Get();
 }
-inline void AttachmentPointer::_internal_set_caption(const std::string& value) {
+inline void AttachmentPointer::_internal_set_thumbhash(const std::string& value) {
   _impl_._has_bits_[0] |= 0x00000020u;
-  _impl_.caption_.Set(value, GetArenaForAllocation());
+  _impl_.thumbhash_.Set(value, GetArenaForAllocation());
 }
-inline std::string* AttachmentPointer::_internal_mutable_caption() {
+inline std::string* AttachmentPointer::_internal_mutable_thumbhash() {
   _impl_._has_bits_[0] |= 0x00000020u;
-  return _impl_.caption_.Mutable(GetArenaForAllocation());
+  return _impl_.thumbhash_.Mutable(GetArenaForAllocation());
 }
-inline std::string* AttachmentPointer::release_caption() {
-  // @@protoc_insertion_point(field_release:SessionProtos.AttachmentPointer.caption)
-  if (!_internal_has_caption()) {
+inline std::string* AttachmentPointer::release_thumbhash() {
+  // @@protoc_insertion_point(field_release:SessionProtos.AttachmentPointer.thumbhash)
+  if (!_internal_has_thumbhash()) {
     return nullptr;
   }
   _impl_._has_bits_[0] &= ~0x00000020u;
-  auto* p = _impl_.caption_.Release();
+  auto* p = _impl_.thumbhash_.Release();
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.caption_.IsDefault()) {
-    _impl_.caption_.Set("", GetArenaForAllocation());
+  if (_impl_.thumbhash_.IsDefault()) {
+    _impl_.thumbhash_.Set("", GetArenaForAllocation());
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   return p;
 }
-inline void AttachmentPointer::set_allocated_caption(std::string* caption) {
-  if (caption != nullptr) {
+inline void AttachmentPointer::set_allocated_thumbhash(std::string* thumbhash) {
+  if (thumbhash != nullptr) {
     _impl_._has_bits_[0] |= 0x00000020u;
   } else {
     _impl_._has_bits_[0] &= ~0x00000020u;
   }
-  _impl_.caption_.SetAllocated(caption, GetArenaForAllocation());
+  _impl_.thumbhash_.SetAllocated(thumbhash, GetArenaForAllocation());
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.caption_.IsDefault()) {
-    _impl_.caption_.Set("", GetArenaForAllocation());
+  if (_impl_.thumbhash_.IsDefault()) {
+    _impl_.thumbhash_.Set("", GetArenaForAllocation());
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.AttachmentPointer.caption)
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.AttachmentPointer.thumbhash)
 }
 
 // optional string url = 101;

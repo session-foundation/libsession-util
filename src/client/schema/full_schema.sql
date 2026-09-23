@@ -269,24 +269,15 @@ BEGIN
     UPDATE conversations SET count = count + 1 WHERE id = NEW.conversation;
 END;
 
--- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
--- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
--- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
--- from 002_attachment_cache.sql
---
 -- An index over the files in the attachment cache directory, so that "how much disk is this using"
 -- and "what has gone longest without being wanted" are queries rather than a directory walk on
 -- every download.
 --
 -- Deliberately only an index: the disk is what is actually true.  A crash between writing a file
 -- and recording it, or between unlinking one and forgetting it, leaves this describing a directory
--- that no longer matches -- so eviction checks what it is about to remove rather than trusting a
--- row, and the sweep reconciles in both directions: rows without files are dropped, files without
--- rows are adopted at their size on disk.
---
--- `name` is the file's name, which is the hashed base url -- the same value `cache::path_for`
--- produces -- so a row can be matched to a file, and to a `message_attachments.url`, without
--- storing either the path or the url.
+-- that no longer matches, and the sweep reconciles in both directions: a row whose file is gone is
+-- dropped, and the messages drawing it are told; a file with no row is deleted, since nothing can
+-- look it up.
 --
 -- `size` is bytes on disk, encrypted and padded, because that is what the cache limit is a limit
 -- on.  `last_used` is touched on a cache hit as well as on write, which is what makes eviction
@@ -297,14 +288,22 @@ END;
 -- to in years should not lose the last picture you had of them -- and are freed only when superseded,
 -- which is a question about what still references them rather than about size or age.
 CREATE TABLE attachment_cache (
-    name TEXT PRIMARY KEY NOT NULL,
+    -- Surrogate, so that an attachment row referencing this stores an integer rather than a second
+    -- copy of the name -- and so that the name is free to change shape later without the references
+    -- to it meaning anything different.
+    id INTEGER PRIMARY KEY,
+    -- Keyed (`cache::name_for`) so that someone reading the cache directory cannot tell which
+    -- files this account has fetched.
+    name TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
     last_used INTEGER NOT NULL      -- ms since epoch
 ) STRICT;
 
 CREATE INDEX attachment_cache_lru ON attachment_cache(last_used);
 
-
+-- The full decrypted Content protobuf, kept out of the messages table so that the history scan --
+-- the hot query -- does not drag it through overflow pages.  Retained so fields this schema does
+-- not yet model (attachments, quotes, reactions) can be recovered without re-fetching the swarm.
 CREATE TABLE message_raw_content (
     message INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     content BLOB NOT NULL
@@ -368,7 +367,6 @@ CREATE TABLE message_attachments (
     -- null.  On an incoming attachment these are the sender's claims and nothing more.
     content_type TEXT,
     filename TEXT,
-    caption TEXT,
     flags INTEGER NOT NULL DEFAULT 0,
     width INTEGER,
     height INTEGER,
@@ -407,5 +405,74 @@ CREATE TABLE message_attachments (
     -- the other end volunteering a DataExtractionNotification, which many clients do not.
     saved_at INTEGER,
 
+    -- What the last attempt to fetch this file found, when what it found was that it could not be
+    -- fetched: the file server does not hold it -- which is also how an expired upload answers --
+    -- or the bytes arrived and failed to authenticate.
+    --
+    -- A cached answer rather than a fact about the url, which is what decides its lifetime.  An
+    -- attachment url is a hash of the encrypted body and the encryption is deterministic, so the
+    -- same file sent again by the same account lands at the *same* url.  That is the repair path:
+    -- the recipient is told it could not be fetched, asks for it again, and the sender's re-upload
+    -- puts those bytes back where they were.  A flag that never cleared would block precisely the
+    -- action that fixes the problem.
+    --
+    -- Which rows a failure marks depends on what failed.  A file server status is its answer about
+    -- the url, so it is set on every row naming that url, and cleared on all of them when a new row
+    -- quoting it arrives -- the resend -- since showing one message's copy as gone and another's
+    -- as fine would be showing the same file two ways.  Unreadable is about how this row says to
+    -- read the bytes: key, digest and size are the sender's claims, and nothing ties them to the
+    -- url, so it marks only rows making the same claim and a resend does not clear it.
+    --
+    -- Either is cleared on every row when the file is cached, by whatever route: all of them are
+    -- then served it from disk, so none can say it cannot be had.
+    --
+    -- The value is *why*: 404, the file server's answer for an upload it does not hold, or -20002
+    -- for bytes that arrived and could not be turned back into the file they claimed to be.  Only
+    -- the first is worth telling the user to ask for a resend about.  These numbers are
+    -- `Client::Unavailable`'s, and on disk they cannot change.
+    --
+    -- NULL means only that nothing has proved otherwise.
+    unavailable INTEGER,
+
+    -- The local copy of this file, or NULL for no local copy -- which is also what eviction leaves
+    -- behind, since ON DELETE SET NULL clears this as the cache row goes.  That is what makes "this
+    -- row says cached" and "that file has an entry" impossible to disagree in the direction that
+    -- matters: the only way to be marked is to reference a living row.
+    --
+    -- Stored rather than derived from `url`.  The cached file is *named* by a keyed hash of the
+    -- url, so deriving it would make that hash load-bearing for everything already downloaded
+    -- rather than only for what is being written -- which is why changing the naming in 005 could
+    -- only be done by discarding the cache.
+    --
+    -- The other direction of disagreement -- a row naming a file something outside us deleted -- is
+    -- still possible, and is what the reconcile sweep is for.
+    cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL,
+
+    -- A ThumbHash of the image: 25 bytes at most, which a recipient draws in the attachment's
+    -- place until the file itself arrives.  Carried opaquely, like the descriptive fields near the
+    -- top -- and declared down here rather than beside them because ADD COLUMN can only append,
+    -- and this file has to describe the same column order a migrated database ends up with.
+    thumbhash BLOB,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
+
+-- Which messages show a given file.  Every question the attachment cache asks of this table is
+-- that one -- marking a file unfetchable, clearing it again on a resend, reporting a transfer
+-- starting, finishing or being evicted -- and more than one message routinely quotes the same
+-- file, because an attachment url is a hash of the encrypted body: the same file sent twice by the
+-- same account lands at the same url.  Without this, each of those answers scans the whole table
+-- to touch a handful of rows.
+--
+-- Partial because a row with no url has nothing to fetch and is never the subject of any of them:
+-- an outgoing attachment before its upload finishes, which on a sending-heavy account is a large
+-- share of the table.
+CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;
+
+-- Which messages show a file that is being evicted, which is the question a keyed hash cannot
+-- answer: it does not run backwards, so without this the only route from a cached file to the
+-- messages drawing it is to hash every url in the table.
+--
+-- Partial for the same reason as above: most rows are not cached at any given moment, and those
+-- are never the subject of this question.
+CREATE INDEX message_attachments_cached ON message_attachments(cached) WHERE cached IS NOT NULL;

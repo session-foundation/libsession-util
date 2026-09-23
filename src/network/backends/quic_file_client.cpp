@@ -25,7 +25,20 @@ namespace session::network {
 
 namespace {
     auto cat = log::Cat("quic-file-client");
-}
+
+    // Removes a timer when it goes out of scope, for one whose callback borrows the scope's locals:
+    // a TimerID alone leaves the timer running, which is fine only for a callback that owns what it
+    // touches.
+    struct scoped_timer {
+        quic::JobQueue& jq;
+        quic::TimerID id;
+
+        scoped_timer(quic::JobQueue& jq, quic::TimerID id) : jq{jq}, id{id} {}
+        scoped_timer(const scoped_timer&) = delete;
+        scoped_timer& operator=(const scoped_timer&) = delete;
+        ~scoped_timer() { jq.remove(id); }
+    };
+}  // namespace
 
 // -- QuicFileClient --
 
@@ -91,7 +104,7 @@ void QuicFileClient::set_target(ed25519_pubkey ed_pubkey, std::string address, u
 }
 
 void QuicFileClient::close() {
-    _idle_timer.reset();
+    _stop_idle_timer();
     _bt_stream.reset();
     if (_conn) {
         _conn->close_connection();
@@ -107,7 +120,7 @@ void QuicFileClient::_start_idle_timer() {
     if (_idle_timer)
         return;
 
-    _idle_timer = _loop->call_every(IDLE_CHECK_INTERVAL, [this] {
+    _idle_timer = _jq.add_timer(IDLE_CHECK_INTERVAL, [this] {
         if (!_conn)
             return;
         auto idle_duration = std::chrono::steady_clock::now() - _last_activity;
@@ -116,6 +129,11 @@ void QuicFileClient::_start_idle_timer() {
             close();
         }
     });
+}
+
+void QuicFileClient::_stop_idle_timer() {
+    if (auto t = std::exchange(_idle_timer, {}))
+        _jq.remove(t);
 }
 
 std::shared_ptr<quic::Connection> QuicFileClient::_ensure_connection() {
@@ -157,10 +175,10 @@ void QuicFileClient::upload(
         std::vector<std::byte> data,
         std::optional<std::chrono::seconds> ttl,
         std::function<void(std::variant<file_metadata, int16_t> result)> on_complete) {
-    _loop->call([this,
-                 data = std::make_shared<std::vector<std::byte>>(std::move(data)),
-                 ttl,
-                 on_complete = std::move(on_complete)]() mutable {
+    _jq.call([this,
+              data = std::make_shared<std::vector<std::byte>>(std::move(data)),
+              ttl,
+              on_complete = std::move(on_complete)]() mutable {
         try {
             auto conn = _ensure_connection();
             if (!conn) {
@@ -256,11 +274,13 @@ void QuicFileClient::upload(
 void QuicFileClient::download(
         std::string file_id,
         std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data,
-        std::function<void(std::variant<file_metadata, int16_t> result)> on_complete) {
-    _loop->call([this,
-                 file_id = std::move(file_id),
-                 on_data = std::move(on_data),
-                 on_complete = std::move(on_complete)]() mutable {
+        std::function<void(std::variant<file_metadata, int16_t> result)> on_complete,
+        std::shared_ptr<std::atomic<bool>> cancelled) {
+    _jq.call([this,
+              file_id = std::move(file_id),
+              on_data = std::move(on_data),
+              on_complete = std::move(on_complete),
+              cancelled = std::move(cancelled)]() mutable {
         try {
             auto conn = _ensure_connection();
             if (!conn) {
@@ -279,14 +299,32 @@ void QuicFileClient::download(
                 int64_t received = 0;
                 std::function<void(const file_metadata&, std::span<const std::byte>)> on_data;
                 std::function<void(std::variant<file_metadata, int16_t>)> on_complete;
+                std::shared_ptr<std::atomic<bool>> cancelled;
+                // The stream close this asked for is what gets reported, and the close carries only
+                // a QUIC error code; without this it would surface as an abort like any other.
+                bool gave_up = false;
             };
             auto state = std::make_shared<download_state>();
             state->file_id = file_id;
             state->on_data = std::move(on_data);
             state->on_complete = std::move(on_complete);
+            state->cancelled = std::move(cancelled);
 
             auto data_cb = [this, state](quic::Stream& s, std::span<const std::byte> data) {
                 _touch();
+
+                // Checked per chunk, which is the only moment this end of a transfer is given: a
+                // download is driven by the server, so there is nowhere else to notice.  It is also
+                // the moment that matters, since what asks for a download to stop is almost always
+                // something a chunk itself revealed -- a chunk that failed to authenticate, or one
+                // that took the file past the length its sender claimed -- and everything after it
+                // is bandwidth spent on a file already known to be unusable.
+                if (state->cancelled && state->cancelled->load()) {
+                    log::debug(cat, "Download of {} cancelled", state->file_id);
+                    state->gave_up = true;
+                    s.close(QUIC_FILES_CLIENT_ABORT);
+                    return;
+                }
 
                 // Phase 1: parse the size prefix of the metadata block
                 if (state->meta_size < 0) {
@@ -361,6 +399,11 @@ void QuicFileClient::download(
 
             auto close_cb = [this, state](quic::Stream&, uint64_t error_code) {
                 _touch();
+
+                if (state->gave_up) {
+                    state->on_complete(ERROR_REQUEST_CANCELLED);
+                    return;
+                }
 
                 if (error_code != 0) {
                     log::warning(
@@ -468,7 +511,7 @@ void streaming_file_upload(
             return fail(ERROR_FILE_SERVER_UNAVAILABLE);
     }
 
-    loop->call_get([&] {
+    state->client->_jq.call_get([&] {
         auto conn = state->client->_ensure_connection();
         if (!conn) {
             std::lock_guard lock{state->mutex};
@@ -537,7 +580,7 @@ void streaming_file_upload(
         state->stream = std::move(str);
 
         // Disable the idle timer during the upload; stall detection replaces it.
-        state->client->_idle_timer.reset();
+        state->client->_stop_idle_timer();
     });
 
     {
@@ -548,15 +591,19 @@ void streaming_file_upload(
 
     // Periodic timer for progress reporting and stall/overall timeout detection.
     // Runs on the loop thread where get_stats() is a direct member access (no queuing).
-    std::shared_ptr<quic::Ticker> progress_timer;
+    //
+    // Scoped rather than left to the queue: the callback borrows `request`, so it has to be gone by
+    // the time this returns, by whichever route -- a cancel, or a throw from the encryptor's reads.
+    std::optional<scoped_timer> progress_timer;
     if (request.progress_interval > 0ms) {
-        progress_timer =
-                loop->call_every(request.progress_interval, [state, &request, upload_size] {
+        auto& jq = state->client->_jq;
+        progress_timer.emplace(
+                jq, jq.add_timer(request.progress_interval, [state, &request, upload_size] {
                     if (state->done || !state->stream)
                         return;
 
                     auto now = std::chrono::steady_clock::now();
-                    auto [acked, unacked, unsent] = state->stream->get_stats();
+                    auto [acked, unacked, unsent, retained] = state->stream->get_stats();
                     auto file_acked = std::max<int64_t>(
                             0, static_cast<int64_t>(acked) - state->preamble_size);
 
@@ -598,7 +645,7 @@ void streaming_file_upload(
                         state->cv.notify_one();
                         return;
                     }
-                });
+                }));
     }
 
     auto check_cancelled = [&]() -> bool {
@@ -649,7 +696,7 @@ void streaming_file_upload(
     // Stop the progress timer and restart the idle timer for connection reuse
     progress_timer.reset();
     if (state->client)
-        loop->call([state] { state->client->_start_idle_timer(); });
+        state->client->_jq.call([state] { state->client->_start_idle_timer(); });
 
     if (request.on_complete && state->result) {
         loop->call([state, request, result = std::move(*state->result), key, upload_size] {

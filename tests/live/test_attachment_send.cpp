@@ -70,14 +70,14 @@ TEST_CASE(
     b33 me;
     std::ranges::copy(c->core.globals.session_id(), me.begin());
 
-    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
+    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<Expected<void>>>> reports;
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "with an attachment",
              .attachments = {OutgoingAttachment{
                      .path = file, .content_type = "application/octet-stream"}}},
-            [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
-                reports.emplace_back(idx, sent, total, result);
+            [&](size_t idx, int64_t sent, int64_t total, std::optional<Expected<void>> result) {
+                reports.emplace_back(idx, sent, total, std::move(result));
             },
             await);
 
@@ -86,10 +86,10 @@ TEST_CASE(
     // The upload reported itself finished, and did so as a result rather than by reaching the
     // total: the file server's acceptance is what counts.
     REQUIRE(!reports.empty());
-    auto [idx, sent, total, result] = reports.back();
+    auto& [idx, sent, total, result] = reports.back();
     CHECK(idx == 0);
     REQUIRE(result.has_value());
-    CHECK(*result == 0);
+    CHECK(result->has_value());
     CHECK(total > 0);
 
     // What was stored has to name the upload, or the recipient has no way to fetch it.

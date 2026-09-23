@@ -174,7 +174,18 @@ struct Recorder {
     std::vector<AnyConversation> added, updated;
     std::vector<ConversationId> removed;
     std::vector<std::vector<AnyConversation>> replaced, requests_replaced;
-    std::vector<std::pair<ConversationId, Message>> msg_added, msg_updated;
+
+    /// One entry per *call*, so a test can tell one report of three messages from three reports of
+    /// one.  `messages()` below flattens them when only the content matters.
+    std::vector<std::vector<Message>> msg_added, msg_updated;
+
+    /// Every message in `batches`, in the order it was reported.
+    static std::vector<Message> messages(const std::vector<std::vector<Message>>& batches) {
+        std::vector<Message> all;
+        for (const auto& batch : batches)
+            all.insert(all.end(), batch.begin(), batch.end());
+        return all;
+    }
 
     callbacks handlers() {
         return {
@@ -203,15 +214,15 @@ struct Recorder {
                             order.push_back("requests");
                             requests_replaced.push_back(std::move(l));
                         },
-                .message_added =
-                        [this](const ConversationId& id, Message&& m) {
+                .messages_added =
+                        [this](std::vector<Message>&& m) {
                             order.push_back("message");
-                            msg_added.emplace_back(id, std::move(m));
+                            msg_added.push_back(std::move(m));
                         },
-                .message_updated =
-                        [this](const ConversationId& id, Message&& m) {
-                            order.push_back("message_updated");
-                            msg_updated.emplace_back(id, std::move(m));
+                .messages_updated =
+                        [this](std::vector<Message>&& m) {
+                            order.push_back("messages_updated");
+                            msg_updated.push_back(std::move(m));
                         },
         };
     }
@@ -253,6 +264,19 @@ inline std::string preview_body(const AnyConversation& c) {
 template <typename F>
 auto in_configs(Client& c, F&& f) {
     return TestHelper::on_loop(c.core, [&] { return f(c.core.configs); });
+}
+
+/// Whether a transfer's progress `result` says it ended well.
+inline bool succeeded(const std::optional<Expected<void>>& result) {
+    return result && result->has_value();
+}
+
+/// The code a transfer's progress `result` failed with, or nullopt if it has not ended or did not
+/// fail.
+inline std::optional<std::string_view> failure_code(const std::optional<Expected<void>>& result) {
+    if (!result || result->has_value())
+        return std::nullopt;
+    return result->error().code;
 }
 
 }  // namespace client_test
