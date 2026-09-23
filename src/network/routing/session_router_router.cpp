@@ -249,14 +249,14 @@ std::optional<PathInfo> SessionRouter::get_path_to(const service_node& node) {
     // Deliberately the single-session lookup rather than get_all_session_paths(): we hold a
     // session to every swarm member we have spoken to, to the file server, and to every group's
     // swarm, and reporting all of them answers a question nobody asked.
-    auto hops = srouter->get_path_for_session(srouter_address(node.remote_pubkey));
-    if (!hops)
+    auto path = srouter->get_path_for_session(srouter_address(node.remote_pubkey));
+    if (!path)
         return std::nullopt;
 
     PathInfo info;
-    info.hops.reserve(hops->size());
+    info.hops.reserve(path->hops.size());
 
-    for (const auto& [address, ip] : *hops) {
+    for (const auto& [address, ip] : path->hops) {
         auto pubkey = pubkey_from_srouter_address(address);
         if (!pubkey) {
             log::warning(cat, "Omitting path hop with an unparseable address: {}", address);

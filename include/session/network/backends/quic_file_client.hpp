@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <oxen/quic/loop.hpp>
 #include <string>
 #include <variant>
 #include <vector>
@@ -12,13 +13,11 @@
 #include "session/network/session_network_types.hpp"
 
 namespace oxen::quic {
-class Loop;
 class Endpoint;
 class Connection;
 class BTRequestStream;
 class Stream;
 class GNUTLSCreds;
-class Ticker;
 class Address;
 struct RemoteAddress;
 }  // namespace oxen::quic
@@ -119,13 +118,19 @@ class QuicFileClient {
     // Idle timeout: close the connection after this much inactivity
     static constexpr auto IDLE_TIMEOUT = std::chrono::seconds{30};
     static constexpr auto IDLE_CHECK_INTERVAL = std::chrono::seconds{5};
-    std::shared_ptr<oxen::quic::Ticker> _idle_timer;
+    oxen::quic::TimerID _idle_timer;
     std::chrono::steady_clock::time_point _last_activity;
 
     // Returns the active connection, establishing one if needed.
     std::shared_ptr<oxen::quic::Connection> _ensure_connection();
     void _start_idle_timer();
+    void _stop_idle_timer();
     void _touch();
+
+    // Where everything that reaches this client runs, so that whatever is still queued or armed
+    // when it is destroyed is cancelled rather than run against it.  Declared last so that it is
+    // destroyed first, before the members its jobs reach, and while `_loop` is still alive.
+    oxen::quic::JobQueue _jq{*_loop};
 };
 
 /// Performs a complete streaming file upload from a background thread.  This function blocks
