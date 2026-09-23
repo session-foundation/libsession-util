@@ -142,6 +142,12 @@ endif()
 set(SESSIONDEPS_LTO ${USE_LTO} CACHE BOOL "Use LTO for static dependency builds, where supported" FORCE)
 set(WITH_LTO ${USE_LTO} CACHE BOOL "enable lto on compile time" FORCE)
 
+# The same for plain subdirectories: one whose cmake_minimum_required predates 3.9 (protobuf's is
+# 3.5) has CMP0069 OLD, which makes CMake ignore CMAKE_INTERPROCEDURAL_OPTIMIZATION and build it
+# without LTO.  A link that pulls such an archive's members in late then fails on the inline std::
+# functions they reference.
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 if(STATIC_LIBSTD)
     add_link_options(-static-libstdc++)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES Clang)
