@@ -581,8 +581,8 @@ class Core {
     /// protection against something that already repairs itself, and costs a round trip in front of
     /// somebody watching a progress indicator.
     ///
-    /// `done` is called exactly once, on Core's loop, with whether a config was merged.  Safe to
-    /// call without waiting on it: what it finds is merged into `configs` like anything a poll
+    /// `done` is called exactly once, on Core's job queue, with whether a config was merged.  Safe
+    /// to call without waiting on it: what it finds is merged into `configs` like anything a poll
     /// brings in, and the retrieve cursor it records means the next poll carries on from there.
     void fetch_user_profile(std::function<void(bool found)> done);
 

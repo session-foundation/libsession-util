@@ -249,8 +249,8 @@ struct Core::ProfileAnswer {
 
 /// How much of a fan-out is still outstanding.
 ///
-/// Shared between every in-flight request and touched only on Core's loop, which is what makes a
-/// plain count safe here: the responses arrive on the network's threads and are marshalled across
+/// Shared between every in-flight request and touched only on Core's job queue, which is what makes
+/// a plain count safe here: the responses arrive on the network's threads and are marshalled across
 /// before any of this is read.
 struct Core::ProfileFanOut {
     std::function<void(bool)> done;
@@ -293,7 +293,10 @@ void Core::fetch_user_profile(std::function<void(bool found)> done) {
     state->done = std::move(done);
 
     net->get_swarm(globals.pubkey_x25519(), false, [this, net, state](auto, auto swarm) {
-        _loop.call([this, net, state, swarm = std::move(swarm)] {
+        // Onto our own queue rather than the loop's: work queued here is cancelled when Core goes
+        // away, so a swarm lookup or an answer landing during teardown is dropped instead of run
+        // against components that are already being destroyed.
+        _jq.call([this, net, state, swarm = std::move(swarm)] {
             if (state->settled)
                 return;
             if (swarm.empty()) {
@@ -319,13 +322,13 @@ void Core::fetch_user_profile(std::function<void(bool found)> done) {
                                 std::optional<std::string> body) {
                             // Marshalled rather than handled here: these arrive on the network's
                             // threads, several at once by design, and everything they touch --
-                            // the tally, the config merge, the cursor -- belongs to Core's loop.
-                            _loop.call([this,
-                                        state,
-                                        node,
-                                        success,
-                                        timeout,
-                                        body = std::move(body)]() mutable {
+                            // the tally, the config merge, the cursor -- belongs to Core's queue.
+                            _jq.call([this,
+                                      state,
+                                      node,
+                                      success,
+                                      timeout,
+                                      body = std::move(body)]() mutable {
                                 _handle_profile_response(
                                         *state,
                                         node,
