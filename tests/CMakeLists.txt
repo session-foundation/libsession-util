@@ -43,6 +43,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_group_info.cpp
     test_group_members.cpp
     test_hash.cpp
+    test_image_thumbhash.cpp
     #test_logging.cpp  # Handled separately, see below
     test_multi_encrypt.cpp
     test_mnemonics.cpp
