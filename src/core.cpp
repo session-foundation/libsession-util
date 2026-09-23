@@ -8,6 +8,7 @@
 #include <oxenc/hex.h>
 #include <sodium/core.h>
 
+#include <cassert>
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -359,13 +360,14 @@ std::vector<std::byte> Core::_profile_retrieve_body() {
             {"namespace", ns_val},
     };
 
-    if (retrieve_requires_auth(ns_val)) {
-        auto seed = globals.account_seed();
-        auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
-        params["pubkey_ed25519"] = globals.pubkey_ed25519().hex();
-        params["timestamp"] = now_ms;
-        params["signature"] = "{:b}"_format(ed25519::sign(seed.ed25519_secret(), to_span(to_sign)));
-    }
+    // The profile is owner-writable, so retrieving it always needs a signature -- and signing is
+    // allowed on any namespace, so there is no case in which leaving it out would be right.
+    assert(retrieve_requires_auth(ns_val));
+    auto seed = globals.account_seed();
+    auto to_sign = ns_signature_value("retrieve", ns_val, now_ms);
+    params["pubkey_ed25519"] = globals.pubkey_ed25519().hex();
+    params["timestamp"] = now_ms;
+    params["signature"] = "{:b}"_format(ed25519::sign(seed.ed25519_secret(), to_span(to_sign)));
 
     nlohmann::json requests = nlohmann::json::array();
     requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});

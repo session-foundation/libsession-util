@@ -212,3 +212,27 @@ TEST_CASE("Profile fetch: every member empty concludes with nothing found", "[co
     CHECK(calls == 1);
     CHECK_FALSE(found);
 }
+
+TEST_CASE("Profile fetch: every member is asked with a signed retrieve", "[core][profile]") {
+    TempCore c;
+    auto* net = attach_mock_network(*c);
+    net->current_swarm = swarm_of(2);
+
+    c->fetch_user_profile([](bool) {});
+    TestHelper::drain(*c);
+    auto sent = sent_to_each(*net);
+    REQUIRE(sent.size() == 2);
+
+    for (auto& request : sent) {
+        auto batch = parse_json(*request.request.body);
+        REQUIRE(batch["requests"].size() == 1);
+        auto params = batch["requests"][0]["params"];
+        CHECK(params["namespace"] == USER_PROFILE);
+        CHECK(params.contains("signature"));
+        CHECK(params.contains("pubkey_ed25519"));
+        CHECK(params.contains("timestamp"));
+        // No cursor: this asks members that may never have been asked before, so resuming from
+        // any one member's position would ask the wrong question.
+        CHECK_FALSE(params.contains("last_hash"));
+    }
+}
