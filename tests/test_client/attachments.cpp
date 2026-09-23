@@ -159,6 +159,130 @@ TEST_CASE("Client: a message reports the attachments it carries", "[client][send
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("Client: an attachment carries a thumbhash in both directions", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+
+    // Opaque to libsession in both directions: stored and handed back as written, never decoded
+    // and never checked against the file.  Bytes rather than text, and these are not valid
+    // ThumbHashes -- which is the point, since nothing here looks.
+    const std::vector<std::byte> incoming_hash(20, std::byte{0x7f});
+    const std::vector<std::byte> outgoing_hash(25, std::byte{0x2a});
+
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(111);
+                a->set_url("http://fs.example/file/111#d");
+                a->set_key(std::string(32, 'k'));
+                a->set_contenttype("image/png");
+                a->set_thumbhash(incoming_hash.data(), incoming_hash.size());
+            });
+    sync(*c);
+
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await);
+    REQUIRE(msgs.size() == 1);
+    REQUIRE(msgs[0].attachments.size() == 1);
+    CHECK(msgs[0].attachments[0].thumbhash == incoming_hash);
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_thumbhash", 7);
+    std::filesystem::create_directories(dir);
+    auto photo = dir / "beach.png";
+    std::ofstream{photo, std::ios::binary} << "not really a file";
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    // Supplied by the sender, like width/height: encoding one needs the pixels, so an unset
+    // thumbhash stays unset.
+    auto id = c->send_message(
+            ConversationId::dm(me),
+            {.attachments =
+                     {OutgoingAttachment{.path = photo, .thumbhash = outgoing_hash},
+                      OutgoingAttachment{.path = photo}}},
+            await);
+
+    auto msg = c->message(id, await);
+    REQUIRE(msg.has_value());
+    REQUIRE(msg->attachments.size() == 2);
+    CHECK(msg->attachments[0].thumbhash == outgoing_hash);
+    CHECK_FALSE(msg->attachments[1].thumbhash.has_value());
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Client: an over-long thumbhash is refused", "[client][attachments]") {
+    TempClient c;
+    SenderKeys peer;
+    attach_mock_network(c->core);
+
+    // One byte past MAX_THUMBHASH_SIZE, which is the largest the format can produce.
+    const std::vector<std::byte> too_long(MAX_THUMBHASH_SIZE + 1, std::byte{0x01});
+
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& data) {
+                auto* a = data.add_attachments();
+                a->set_id(222);
+                a->set_url("http://fs.example/file/222#d");
+                a->set_key(std::string(32, 'k'));
+                a->set_contenttype("image/png");
+                a->set_filename("wide.png");
+                a->set_thumbhash(too_long.data(), too_long.size());
+            });
+    sync(*c);
+
+    // Dropped, not rejected: the placeholder is decoration a remote peer supplied, and losing it
+    // must not cost the attachment it describes.
+    auto msgs = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await);
+    REQUIRE(msgs.size() == 1);
+    REQUIRE(msgs[0].attachments.size() == 1);
+    CHECK_FALSE(msgs[0].attachments[0].thumbhash.has_value());
+    CHECK(msgs[0].attachments[0].filename == "wide.png");
+    CHECK(msgs[0].attachments[0].content_type == "image/png");
+
+    auto dir = std::filesystem::temp_directory_path() / random::unique_id("test_thumbhash_cap", 7);
+    std::filesystem::create_directories(dir);
+    auto photo = dir / "beach.png";
+    std::ofstream{photo, std::ios::binary} << "not really a file";
+
+    auto me = own_sid(*c);
+    TestHelper::seed_pfs_nak(c->core, me);
+
+    // Thrown on the way out, where the value is our own caller's and the mistake is theirs to see.
+    CHECK_THROWS_AS(
+            c->send_message(
+                    ConversationId::dm(me),
+                    {.attachments = {OutgoingAttachment{.path = photo, .thumbhash = too_long}}},
+                    await),
+            std::invalid_argument);
+
+    // The longest one that is allowed still goes through.
+    const std::vector<std::byte> longest(MAX_THUMBHASH_SIZE, std::byte{0x01});
+    auto id = c->send_message(
+            ConversationId::dm(me),
+            {.attachments = {OutgoingAttachment{.path = photo, .thumbhash = longest}}},
+            await);
+    auto msg = c->message(id, await);
+    REQUIRE(msg.has_value());
+    REQUIRE(msg->attachments.size() == 1);
+    CHECK(msg->attachments[0].thumbhash == longest);
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE(
         "Client: saving an attachment fetches, decrypts and reports it", "[client][attachments]") {
     TempClient c;

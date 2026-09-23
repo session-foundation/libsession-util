@@ -425,6 +425,8 @@ namespace {
             line(out, depth, "width", 9, fmt::format("{}", m.width()));
         if (m.has_height())
             line(out, depth, "height", 10, fmt::format("{}", m.height()));
+        if (m.has_thumbhash())
+            line(out, depth, "thumbhash", 12, hex(m.thumbhash()));
         if (m.has_url())
             line(out, depth, "url", 101, quote(m.url()));
         unknown(out, depth, m.unknown_fields());

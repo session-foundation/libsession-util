@@ -448,6 +448,12 @@ CREATE TABLE message_attachments (
     -- still possible, and is what the reconcile sweep is for.
     cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL,
 
+    -- A ThumbHash of the image: 25 bytes at most, which a recipient draws in the attachment's
+    -- place until the file itself arrives.  Carried opaquely, like the descriptive fields near the
+    -- top -- and declared down here rather than beside them because ADD COLUMN can only append,
+    -- and this file has to describe the same column order a migrated database ends up with.
+    thumbhash BLOB,
+
     PRIMARY KEY (message, idx)
 ) STRICT;
 

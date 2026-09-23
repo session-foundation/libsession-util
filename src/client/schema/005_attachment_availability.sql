@@ -19,6 +19,8 @@ ALTER TABLE message_attachments DROP COLUMN caption;
 ALTER TABLE message_attachments
     ADD COLUMN cached INTEGER REFERENCES attachment_cache(id) ON DELETE SET NULL;
 
+ALTER TABLE message_attachments ADD COLUMN thumbhash BLOB;
+
 CREATE INDEX message_attachments_url ON message_attachments(url) WHERE url IS NOT NULL;
 
 CREATE INDEX message_attachments_cached ON message_attachments(cached) WHERE cached IS NOT NULL;

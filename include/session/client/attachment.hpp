@@ -4,6 +4,7 @@
 #include <optional>
 #include <session/clock.hpp>
 #include <string>
+#include <vector>
 
 namespace session::client {
 
@@ -19,6 +20,13 @@ constexpr int ATTACHMENT_FILE_MISSING = -20001;
 /// wrongly, or it could not be written.  Distinct from a transfer failure, and unlike one it is not
 /// worth retrying -- the bytes on the file server will be the same bytes next time.
 constexpr int ATTACHMENT_UNREADABLE = -20002;
+
+/// Longest ThumbHash we will store.
+///
+/// The format's own ceiling: a 7x7 luminance DCT, 3x3 for each of P and Q, and 5x5 alpha, which
+/// comes to 25 bytes.  A bound on what a remote peer can put in the database rather than a parse
+/// -- the bytes stay opaque here, and nothing checks that they decode.
+constexpr size_t MAX_THUMBHASH_SIZE = 25;
 
 /// A file to attach to an outgoing message.  Attaching costs nothing: the file is read, encrypted
 /// and uploaded when the message is sent, not when it is attached, so a caller can hold these
@@ -48,6 +56,15 @@ struct OutgoingAttachment {
     /// at which point every client stops needing its own.
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
+
+    /// ThumbHash of the image, for a recipient to draw in the attachment's place until the file
+    /// itself arrives.  Advisory and unvalidated: libsession carries the bytes and never looks
+    /// inside them.
+    ///
+    /// The caller's to supply for the same reason as `width`/`height` above: encoding one needs
+    /// the pixels, which means decoding and scaling the image, and that is the dependency the
+    /// comment beside those two declines to take on.
+    std::optional<std::vector<std::byte>> thumbhash;
 };
 
 /// An attachment on a stored message, in either direction, as reported on `Message::attachments`.
@@ -159,6 +176,7 @@ struct Attachment {
 
     std::optional<uint32_t> width;
     std::optional<uint32_t> height;
+    std::optional<std::vector<std::byte>> thumbhash;
 
     /// The file's size in bytes, before encryption -- what the file server holds is larger, since
     /// it carries the stream's per-chunk overhead and the padding that hides the true length.
