@@ -185,7 +185,7 @@ void Globals::init() {
     tx.commit();
 }
 
-void Globals::create_account(failable_function<void()> cb) {
+void Globals::create_account(result_function<> cb) {
     async([this] { _create_account(); }, std::move(cb));
 }
 
@@ -218,7 +218,7 @@ void Globals::_mark_new_account() {
     core.devices._mark_group_owed();
 }
 
-void Globals::restore_account(predefined_seed seed, failable_function<void()> cb) {
+void Globals::restore_account(predefined_seed seed, result_function<> cb) {
     async([this, seed = std::move(seed)] { _restore_account(seed); }, std::move(cb));
 }
 

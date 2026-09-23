@@ -56,6 +56,37 @@ TEST_CASE("Client: a conversation reports the settings it carries", "[client][co
     CHECK(convo().exp_timer() == 0s);
 }
 
+TEST_CASE("Client: a nickname too long to sync is refused rather than stored", "[client][convos]") {
+    TempClient c;
+    auto them = "05" + std::string(64, 'a');
+    auto id = dm_from_hex(them);
+    c->open_dm(id, await);
+
+    c->dm(id, await)->set_nickname("Bilbo", await);
+
+    // One byte over is enough.  What must not happen is the row being written and the config then
+    // refusing it: a sync rebuilds the whole entry from that row, so it would never carry again --
+    // taking every later change to this contact with it.
+    std::string too_long(config::contact_info::MAX_NAME_LENGTH + 1, 'x');
+    REQUIRE(config::validate_contact_name(too_long).has_value());
+    CHECK_THROWS_AS(c->dm(id, await)->set_nickname(too_long, await), std::invalid_argument);
+
+    // Nothing moved: not the database, and not the config it is reconciled into.
+    CHECK(c->conversation(id, await)->dm()->nickname == "Bilbo");
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname == "Bilbo");
+
+    // And the contact still syncs, which is the part that would have been lost quietly.
+    c->set_blocked(id, true, await);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->blocked);
+
+    // Exactly at the limit is fine: the check is the config's own, not a stricter one.
+    std::string at_limit(config::contact_info::MAX_NAME_LENGTH, 'y');
+    CHECK_FALSE(config::validate_contact_name(at_limit).has_value());
+    c->dm(id, await)->set_nickname(at_limit, await);
+    CHECK(in_configs(*c, [&](auto& cfg) { return cfg.contacts().get(them); })->nickname ==
+          at_limit);
+}
+
 TEST_CASE("Client: settings from another device reach the conversation", "[client][configs]") {
     TempClient c;
     auto them = "05" + std::string(64, 'b');
@@ -103,7 +134,7 @@ TEST_CASE("Client: a page size has to be a page", "[client][convos]") {
 
     // The handler form refuses on the calling thread too, rather than reporting it: the caller is
     // still there to catch, and a bad page size is its bug rather than a runtime condition.
-    auto ignore = [](std::optional<std::string>, std::vector<Message>) {};
+    auto ignore = [](Expected<std::vector<Message>>) {};
     CHECK_THROWS_AS(c->conversation(id, await)->messages(0, ignore), std::invalid_argument);
 
     CHECK(c->conversation(id, await)->messages(1, await).size() == 1);
@@ -144,11 +175,16 @@ TEST_CASE(
     // work runs: a temporary, a handler's parameter, or a list element whose list got replaced.  So
     // the operation must not reach back into the object -- and only the handler form can get this
     // wrong, since the waiting form runs before it returns.
-    std::optional<std::string> error = "not called";
+    std::optional<Error> error = Error{"test.not_called", "not called"};
     {
         auto convo = c->conversation(id, await);
         REQUIRE(convo);
-        convo->mark_read([&](auto err) { error = std::move(err); });
+        convo->mark_read([&](auto r) {
+            if (r)
+                error.reset();
+            else
+                error = std::move(r).error();
+        });
     }  // convo destroyed here, before the loop has run the work
     sync(*c);
 
@@ -156,11 +192,14 @@ TEST_CASE(
     CHECK(c->conversation(id, await)->unread() == 0);
 
     // And on an outright temporary, which is how it reads at a call site.
-    std::optional<std::string> paged = "not called";
+    std::optional<Error> paged = Error{"test.not_called", "not called"};
     size_t got = 0;
-    c->conversation(id, await)->messages(50, [&](auto err, auto msgs) {
-        paged = std::move(err);
-        got = msgs.size();
+    c->conversation(id, await)->messages(50, [&](auto r) {
+        if (r) {
+            paged.reset();
+            got = r->size();
+        } else
+            paged = std::move(r).error();
     });
     sync(*c);
     CHECK_FALSE(paged.has_value());

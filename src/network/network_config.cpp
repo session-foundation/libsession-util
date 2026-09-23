@@ -141,11 +141,6 @@ void Config::handle_config_opt(opt::disable_subnet_diversity) {
     log::debug(cat, "Network config disabled subnet diversity");
 }
 
-void Config::handle_config_opt(opt::redirect_retry_count rrc) {
-    redirect_retry_count = rrc.count;
-    log::debug(cat, "Network config redirect retry count set to {}", rrc.count);
-}
-
 void Config::handle_config_opt(opt::retry_delay rd) {
     retry_delay = std::move(rd);
     log::debug(
@@ -247,6 +242,14 @@ void Config::handle_config_opt(opt::cache_node_strike_threshold nst) {
 void Config::handle_config_opt(opt::quic_handshake_timeout qht) {
     quic_handshake_timeout = qht.duration;
     log::debug(cat, "Network config quic handshake timeout set to {}ms", qht.duration.count());
+}
+
+void Config::handle_config_opt(opt::quic_tunnel_handshake_timeout qtht) {
+    quic_tunnel_handshake_timeout = qtht.duration;
+    log::debug(
+            cat,
+            "Network config quic tunnelled handshake timeout set to {}ms",
+            qtht.duration.count());
 }
 
 void Config::handle_config_opt(opt::quic_keep_alive qka) {

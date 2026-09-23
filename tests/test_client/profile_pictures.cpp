@@ -71,13 +71,15 @@ TEST_CASE(
 
     std::vector<std::optional<int>> progress;
     std::optional<std::vector<std::byte>> got;
-    std::optional<std::string> err;
+    std::optional<Error> err;
     c->profile_picture(
             id,
             [&](int64_t, int64_t, std::optional<int> r) { progress.push_back(r); },
-            [&](std::optional<std::string> e, auto pic) {
-                err = std::move(e);
-                got = std::move(pic);
+            [&](auto r) {
+                if (r)
+                    got = *std::move(r);
+                else
+                    err = std::move(r).error();
             });
 
     // The fetch is posted to the loop, so let it get as far as asking before answering it.
@@ -106,9 +108,11 @@ TEST_CASE(
     c->profile_picture(
             id,
             [&](int64_t, int64_t, std::optional<int> r) { progress.push_back(r); },
-            [&](std::optional<std::string> e, auto pic) {
-                err = std::move(e);
-                got = std::move(pic);
+            [&](auto r) {
+                if (r)
+                    got = *std::move(r);
+                else
+                    err = std::move(r).error();
             });
     sync(*c);
 
@@ -138,10 +142,12 @@ TEST_CASE("Client: a picture from before the stream scheme still opens", "[clien
     set_picture(c, them, url, key);
 
     std::optional<std::vector<std::byte>> got;
-    std::optional<std::string> err;
-    c->profile_picture(dm_from_hex(them), [&](std::optional<std::string> e, auto pic) {
-        err = std::move(e);
-        got = std::move(pic);
+    std::optional<Error> err;
+    c->profile_picture(dm_from_hex(them), [&](auto r) {
+        if (r)
+            got = *std::move(r);
+        else
+            err = std::move(r).error();
     });
 
     // The fetch is posted to the loop, so let it get as far as asking before answering it.
@@ -175,11 +181,13 @@ TEST_CASE(
     set_picture(c, them, url, wrong);
 
     std::optional<std::vector<std::byte>> got;
-    std::optional<std::string> err;
+    std::optional<Error> err;
     bool called = false;
-    c->profile_picture(dm_from_hex(them), [&](std::optional<std::string> e, auto pic) {
-        err = std::move(e);
-        got = std::move(pic);
+    c->profile_picture(dm_from_hex(them), [&](auto r) {
+        if (r)
+            got = *std::move(r);
+        else
+            err = std::move(r).error();
         called = true;
     });
 
@@ -232,7 +240,7 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
     auto first = publish("old_pic", std::chrono::sys_seconds{1000s});
 
     // Fetched, so there is something on disk to reclaim.
-    c->profile_picture(id, [](auto, auto) {});
+    c->profile_picture(id, [](auto) {});
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
@@ -246,7 +254,10 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
 
     // ...and the new one still fetches, so what went was the stale file and not the directory.
     std::optional<std::vector<std::byte>> got;
-    c->profile_picture(id, [&](std::optional<std::string>, auto pic) { got = std::move(pic); });
+    c->profile_picture(id, [&](auto r) {
+        if (r)
+            got = *std::move(r);
+    });
     sync(*c);
     REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
@@ -296,7 +307,10 @@ TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictu
     // And the display, arriving afterwards, is served from the cache rather than fetching the same
     // picture a second time.
     std::optional<std::vector<std::byte>> got;
-    c->profile_picture(id, [&](std::optional<std::string>, auto pic) { got = std::move(pic); });
+    c->profile_picture(id, [&](auto r) {
+        if (r)
+            got = *std::move(r);
+    });
     sync(*c);
 
     CHECK(net->downloads.empty());

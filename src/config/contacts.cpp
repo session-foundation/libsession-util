@@ -40,11 +40,21 @@ contact_info::contact_info(std::string sid) : session_id{std::move(sid)} {
     check_session_id(session_id);
 }
 
+std::optional<std::string> session::config::validate_contact_name(std::string_view name) {
+    if (name.size() > contact_info::MAX_NAME_LENGTH)
+        return "name is too long: {} bytes, and the maximum is {}"_format(
+                name.size(), contact_info::MAX_NAME_LENGTH);
+    return std::nullopt;
+}
+
+void session::config::fixup_contact_name(std::string& name) {
+    if (name.size() > contact_info::MAX_NAME_LENGTH)
+        name = session::utf8_truncate(std::move(name), contact_info::MAX_NAME_LENGTH);
+}
+
 void contact_info::set_name(std::string n) {
-    if (n.size() > MAX_NAME_LENGTH)
-        name = utf8_truncate(std::move(n), MAX_NAME_LENGTH);
-    else
-        name = std::move(n);
+    fixup_contact_name(n);
+    name = std::move(n);
 }
 
 void contact_info::set_nickname(std::string n) {
@@ -413,10 +423,8 @@ const std::string blinded_contact_info::session_id() const {
 }
 
 void blinded_contact_info::set_name(std::string n) {
-    if (n.size() > contact_info::MAX_NAME_LENGTH)
-        name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
-    else
-        name = std::move(n);
+    fixup_contact_name(n);
+    name = std::move(n);
 }
 
 void blinded_contact_info::set_base_url(std::string_view base_url) {

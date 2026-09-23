@@ -65,6 +65,14 @@ class TestSnodePool : public SnodePool {
     // loop thread
     void update_cache(std::vector<service_node> nodes) { _update_cache("test", std::move(nodes)); }
 
+    // Puts a swarm straight into the cache so get_swarm answers from it rather than resolving one.
+    void seed_swarm(const x25519_pubkey& pubkey, std::vector<service_node> nodes) {
+        _jq.call_get([&] {
+            _swarm_cache[pubkey] = {swarm::swarm_id_t{0}, std::move(nodes)};
+            return 0;
+        });
+    }
+
     void debug_on_refresh_complete(std::vector<std::vector<std::byte>> raw_results) {
         auto total_requests = static_cast<uint8_t>(raw_results.size());
         _jq.call_get([&] {
@@ -331,4 +339,104 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
     std::vector<service_node> enough(snode_cache.begin(), snode_cache.begin() + 12);
     snode_pool->debug_on_refresh_complete({to_snode_cache_bin(enough)});
     CHECK(snode_pool->size() == 12);
+}
+
+TEST_CASE("Network", "[network][swarm_version_preference]") {
+    constexpr std::array<uint16_t, 3> old_ss{2, 11, 0};
+    constexpr std::array<uint16_t, 3> new_ss{2, 11, 1};
+
+    auto make_config = [](std::optional<std::array<uint16_t, 3>> prefer) {
+        session::network::config::SnodePool config = {
+                std::nullopt,
+                std::nullopt,
+                std::chrono::minutes{5},
+                std::chrono::minutes{5},
+                false,
+                network::opt::retry_delay{50ms, 200ms},
+                opt::netid::Target::testnet,
+                {},
+                0,
+                0,
+                3,
+                0,
+                3};
+        config.prefer_min_version = prefer;
+        return config;
+    };
+
+    // Alternating, so that grouping by version can only come from the preference rather than from
+    // the order they were put in.
+    auto member = [](uint8_t n, std::array<uint16_t, 3> version) {
+        return service_node{
+                ed25519_pubkey::from_hex("{:02x}{}"_format(n, std::string(62, '0'))),
+                oxen::quic::ipv4{"192.168.0.{}"_format(n)},
+                static_cast<uint16_t>(20000 + n),
+                static_cast<uint16_t>(30000 + n),
+                version,
+                0};
+    };
+    std::vector<service_node> swarm;
+    for (uint8_t i = 0; i < 6; i++)
+        swarm.push_back(member(i, i % 2 ? new_ss : old_ss));
+
+    auto pubkey = x25519_pubkey::from_hex(std::string(64, 'a'));
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+
+    auto ordered = [&](TestSnodePool& pool) {
+        std::vector<service_node> got;
+        pool.get_swarm(pubkey, false, [&got](auto, std::vector<service_node> nodes) {
+            got = std::move(nodes);
+        });
+        // get_swarm answers from the cache on the pool's own queue; this waits for that to drain.
+        pool.pending_post_refresh_callbacks();
+        return got;
+    };
+
+    SECTION("preferred versions come first") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+
+        auto got = ordered(*pool);
+        REQUIRE(got.size() == swarm.size());
+
+        // Asserted as a boundary rather than a fixed order: each subset keeps its shuffled order,
+        // so which preferred node comes first is deliberately not fixed.
+        for (size_t i = 0; i < got.size(); i++)
+            CHECK((got[i].storage_server_version >= new_ss) == (i < 3));
+    }
+
+    SECTION("a swarm with nothing preferred is still usable") {
+        std::vector<service_node> all_old;
+        for (uint8_t i = 0; i < 4; i++)
+            all_old.push_back(member(i, old_ss));
+
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, all_old);
+
+        // Ordering, not filtering: preferring what none of them are must not empty the swarm.
+        CHECK(ordered(*pool).size() == all_old.size());
+    }
+
+    SECTION("without a preference nothing is lost") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(std::nullopt), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+        CHECK(ordered(*pool).size() == swarm.size());
+    }
+
+    SECTION("strikes still outrank the version") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+
+        // A node that has actually failed us is worse than one merely predicted to be unreachable,
+        // so striking out every preferred member puts them behind the rest.
+        for (const auto& n : swarm)
+            if (n.storage_server_version >= new_ss)
+                pool->record_node_failure(n, /*permanent=*/true);
+
+        auto got = ordered(*pool);
+        REQUIRE(!got.empty());
+        CHECK(got.front().storage_server_version == old_ss);
+    }
 }

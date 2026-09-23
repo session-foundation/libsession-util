@@ -41,7 +41,14 @@ else()
 endif()
 
 
-set(CMAKE_CXX_STANDARD 20)
+# 20 is what this is written against, but it has to go in the cache rather than be a plain `set`:
+# a normal variable shadows the cache, so `-DCMAKE_CXX_STANDARD=23` would be accepted and then
+# silently ignored.  Building at 23 is how `session::Expected` is checked against the real
+# `std::expected` (see include/session/expected.hpp), so that has to actually take effect.
+#
+# Claiming the entry here also settles it before `external/date` does: it sets the same cache
+# variable to 17, and whichever of the two runs first wins, since neither uses FORCE.
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard to build with")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)

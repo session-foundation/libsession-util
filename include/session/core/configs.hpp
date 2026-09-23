@@ -96,6 +96,11 @@ class Configs : public detail::CoreComponent {
         size_t count;
     };
 
+    // Queues a flush for the next turn of the loop, once however many times it is called before
+    // then.  Every accessor that hands out a config calls this; see the note above them.
+    void _schedule_settle();
+    bool _settle_scheduled = false;
+
     void _schedule_push();
     void _arm_push_timer(std::chrono::milliseconds delay);
     void _push_if_due();

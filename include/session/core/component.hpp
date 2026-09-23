@@ -46,7 +46,7 @@ namespace detail {
     /// is the arrangement it exists for.  Those methods say so individually.
     ///
     /// `async()` is how a component offers work to a caller on another thread, and mirrors what
-    /// `session::client::Client` does with the same `failable_function` convention.  Note that
+    /// `session::client::Client` does with the same `result_function` convention.  Note that
     /// Core has no application dispatcher -- that is Client's -- so a handler passed here runs on
     /// the loop, exactly as `core::callbacks` do.
     class CoreComponent {
@@ -117,20 +117,16 @@ namespace detail {
                 if constexpr (std::is_void_v<Result>) {
                     produce();
                     if (cb)
-                        cb(std::nullopt);
+                        cb(Expected<void>{});
                 } else {
                     auto result = produce();
                     if (cb)
-                        cb(std::nullopt, std::move(result));
+                        cb(Expected<Result>{std::move(result)});
                 }
             } catch (const std::exception& e) {
                 log_component_failure(e);
-                if (!cb)
-                    return;
-                if constexpr (std::is_void_v<Result>)
-                    cb(std::string{e.what()});
-                else
-                    cb(std::string{e.what()}, Result{});
+                if (cb)
+                    cb(Expected<Result>{unexpected{error_from(e)}});
             }
         });
     }

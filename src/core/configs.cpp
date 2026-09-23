@@ -89,28 +89,43 @@ std::vector<config::ConfigBase*> Configs::all() {
             _local.get()};
 }
 
+// Each of these schedules a settle, because handing out the reference is the last thing that
+// happens before a caller may change what it points at, and it is the only thing this layer sees.
+// A config is mutated through that reference; nothing tells us afterwards, and asking the config to
+// tell us does not work either -- its own "needs dump" flag is set *before* the assignment that
+// follows, so anything acting on it would serialise a change that has not happened yet.
+//
+// Reads schedule one too, since a reader and a writer ask the same question.  That costs a job that
+// finds every config clean and does nothing: `store_dumps` skips what has not changed and
+// `needs_push` is five state reads.
+
 config::UserProfile& Configs::user_profile() {
     _load();
+    _schedule_settle();
     return *_user_profile;
 }
 
 config::Contacts& Configs::contacts() {
     _load();
+    _schedule_settle();
     return *_contacts;
 }
 
 config::ConvoInfoVolatile& Configs::convo_info_volatile() {
     _load();
+    _schedule_settle();
     return *_convo_info_volatile;
 }
 
 config::UserGroups& Configs::user_groups() {
     _load();
+    _schedule_settle();
     return *_user_groups;
 }
 
 config::Local& Configs::local() {
     _load();
+    _schedule_settle();
     return *_local;
 }
 
@@ -149,8 +164,17 @@ Configs::Batch::Batch(Configs& configs) : _configs{configs} {
 }
 
 Configs::Batch::~Batch() {
-    if (--_configs._batch_depth == 0)
+    if (--_configs._batch_depth != 0)
+        return;
+
+    // `_flush` writes to the database, so it can throw -- and this runs during unwinding whenever
+    // the work inside the batch threw, where a second exception is a call to std::terminate.  The
+    // changes stay dirty, so the next thing to settle writes them.
+    try {
         _configs._flush();
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not flush configs at the end of a batch: {}", e.what());
+    }
 }
 
 void Configs::_flush() {
@@ -159,8 +183,9 @@ void Configs::_flush() {
 
     store_dumps();
 
-    // Unconditional rather than only after a merge, so that the batch a poll holds doubles as a
-    // sweep: a config changed locally without one gets noticed here rather than sitting unpushed.
+    // Unconditional rather than only after a merge, so that this is the one place that decides a
+    // push is owed: a settle scheduled by an accessor lands here knowing only that someone held a
+    // config, and whether that left anything to publish is this check's to answer.
     if (needs_push())
         _schedule_push();
 
@@ -256,6 +281,34 @@ bool Configs::needs_push() {
 // rather than a chosen figure: a config is what a device that has been away comes back to, so there
 // is nothing to be gained by expiring it sooner.
 static constexpr auto CONFIG_TTL = 30 * 24h;
+
+void Configs::_schedule_settle() {
+    // Not while Core is still being built.  The loop thread is already running by then, but the
+    // constructing thread is legitimately off it -- that is what `on_loop()` allows for -- so a job
+    // posted here would serialise a config on the loop while construction is still writing to it.
+    // Nothing is owed: construction flushes what it changes itself.
+    if (!core._constructed)
+        return;
+
+    // Once per turn of the loop, however many configs were handed out and however many fields were
+    // touched in each.
+    if (_settle_scheduled)
+        return;
+    _settle_scheduled = true;
+
+    // `call_soon` rather than running it here, and that is the whole of why this works: the caller
+    // is holding a reference it has not written through yet -- `dirty()` bumps the seqno and marks
+    // the config before the assignment that follows it -- so there is no moment during the accessor
+    // at which the config is whole.  Once the job that took the reference has returned, there is.
+    jq().call_soon([this] {
+        _settle_scheduled = false;
+        try {
+            _flush();
+        } catch (const std::exception& e) {
+            log::warning(cat, "Could not settle config changes: {}", e.what());
+        }
+    });
+}
 
 void Configs::_schedule_push() {
     auto now = std::chrono::steady_clock::now();
@@ -393,55 +446,79 @@ void Configs::_send_push() {
 
     _push_in_flight = true;
 
-    net->get_swarm(
+    core._swarm_request(
             core.globals.pubkey_x25519(),
-            false,
-            [this,
-             net,
-             alive = std::weak_ptr<int>{_alive},
-             pending = std::move(pending),
-             body = std::move(body)](auto, auto swarm) mutable {
+            "sequence",
+            [body = std::move(body)](const network::service_node&) { return body; },
+            [this, alive = std::weak_ptr<int>{_alive}, pending = std::move(pending)](
+                    Core::SwarmResponse res) {
                 if (alive.expired())
                     return;
-                if (swarm.empty()) {
-                    log::warning(cat, "Cannot push configs: no swarm nodes available");
-                    // Onto Core's queue like everything else here: this handler runs on the
-                    // Network's own loop, which is a different thread, and the flag is ours.
-                    jq().call([this] { _push_in_flight = false; });
+                _push_in_flight = false;
+
+                if (!res.ok() || !res.body) {
+                    log::warning(
+                            cat,
+                            "Config push failed ({}): {}",
+                            res.timeout ? "timed out" : "status {}"_format(res.status_code),
+                            res.body.value_or("no response body"));
                     return;
                 }
 
-                net->send_request(
-                        swarm_request(
-                                swarm.front(),
-                                core.globals.pubkey_x25519(),
-                                "sequence",
-                                std::move(body)),
-                        [this, alive, pending = std::move(pending)](
-                                bool success,
-                                bool timeout,
-                                int16_t status,
-                                auto,
-                                std::optional<std::string> resp) mutable {
-                            // The canary first, because reaching `jq()` at all means touching
-                            // this: the Network owns this callback, so it can outlive Core, and
-                            // cancelling the queue cannot reach something that was never on it.
-                            if (alive.expired())
-                                return;
-                            jq().call([this,
-                                       pending = std::move(pending),
-                                       success,
-                                       timeout,
-                                       status,
-                                       resp = std::move(resp)]() mutable {
-                                _handle_push_response(
-                                        std::move(pending),
-                                        success,
-                                        timeout,
-                                        status,
-                                        std::move(resp));
-                            });
-                        });
+                // A config is confirmed only if *every* message it split into was stored.
+                // Confirming a partial push would drop the parts that did land from the obsolete
+                // list while leaving the config believing it is clean, so the missing part would
+                // never be sent again.
+                try {
+                    auto json = nlohmann::json::parse(*res.body);
+                    auto results = json.find("results");
+                    if (results == json.end() || !results->is_array()) {
+                        log::warning(cat, "Config push response carried no results");
+                        return;
+                    }
+
+                    for (const auto& p : pending) {
+                        std::unordered_set<std::string> hashes;
+                        bool stored = true;
+                        for (size_t i = p.first; stored && i < p.first + p.count; i++) {
+                            if (i >= results->size()) {
+                                stored = false;
+                                break;
+                            }
+                            const auto& r = (*results)[i];
+                            auto code = r.find("code");
+                            auto b = r.find("body");
+                            if (code == r.end() || code->get<int>() != 200 || b == r.end()) {
+                                stored = false;
+                                break;
+                            }
+                            auto h = b->find("hash");
+                            if (h == b->end() || !h->is_string()) {
+                                stored = false;
+                                break;
+                            }
+                            hashes.insert(h->get<std::string>());
+                        }
+
+                        if (!stored) {
+                            log::warning(
+                                    cat,
+                                    "Config push: {} was not stored, leaving it dirty",
+                                    p.conf->encryption_domain());
+                            continue;
+                        }
+                        p.conf->confirm_pushed(p.seqno, std::move(hashes));
+                    }
+                } catch (const std::exception& e) {
+                    log::warning(cat, "Could not read config push response: {}", e.what());
+                    return;
+                }
+
+                // Confirming changes the configs' state, and a change that arrived while this was
+                // in flight has re-dirtied them.
+                store_dumps();
+                if (needs_push())
+                    _schedule_push();
             });
 }
 
