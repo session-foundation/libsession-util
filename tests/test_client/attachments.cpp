@@ -2564,6 +2564,145 @@ TEST_CASE(
     CHECK(*got == plaintext);
 }
 
+namespace {
+// The temporary names in `dir`'s attachment cache, and how much each holds.
+std::vector<uintmax_t> partial_cache_files(const std::filesystem::path& dir) {
+    std::vector<uintmax_t> sizes;
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator{dir / cache::ATTACHMENT_DIR, ec})
+        if (e.path().string().ends_with(cache::PARTIAL_SUFFIX))
+            sizes.push_back(e.file_size());
+    return sizes;
+}
+}  // namespace
+
+TEST_CASE("Client: a download fills the cache as it arrives", "[client][attachments][cache]") {
+    // Written as it comes, encrypted under our own key, rather than held until the end: nothing
+    // keeps the whole file in memory while it downloads, and the display that asked is served by
+    // reading it back.
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    auto size = GENERATE(0, 3000, 200'000);
+    std::vector<std::byte> plaintext(size);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("streamed", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    std::optional<std::vector<std::byte>> got;
+    c->attachment_data(id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        got = *std::move(r);
+    });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+    auto request = std::move(net->downloads[0]);
+    net->downloads.clear();
+
+    network::file_metadata meta{"streamed", static_cast<int64_t>(ciphertext.size()), {}, {}};
+    std::span all{ciphertext};
+    auto half = all.size() / 2;
+    request.on_data(meta, all.first(half));
+
+    // Halfway through a file of several chunks, some of it is already on disk.  Under a temporary
+    // name, though: nothing can be found in the cache until it is whole and verified.
+    if (size == 200'000) {
+        auto parts = partial_cache_files(dir.path);
+        REQUIRE(parts.size() == 1);
+        CHECK(parts[0] > 0);
+    }
+    CHECK_FALSE(got);
+
+    request.on_data(meta, all.subspan(half));
+    request.on_complete(meta, false);
+    sync(*c);
+
+    REQUIRE(got);
+    CHECK(*got == plaintext);
+    CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::cached);
+    CHECK(partial_cache_files(dir.path).empty());
+}
+
+TEST_CASE(
+        "Client: a cache that cannot be written still gets the file to whoever asked",
+        "[client][attachments][cache]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    net->served["unkept"] = ciphertext;
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("unkept", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    // Something in the way of the attachment cache, so nothing can be written into it.
+    auto attachments = dir.path / cache::ATTACHMENT_DIR;
+    std::filesystem::remove_all(attachments);
+    std::ofstream{attachments} << "in the way";
+
+    std::optional<std::vector<std::byte>> got;
+    c->attachment_data(id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        got = *std::move(r);
+    });
+    sync(*c);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    // The download worked, but there is no copy to read back, so the one way left to have the
+    // bytes is to fetch them again without a cache in the way.
+    CHECK_FALSE(got);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(got);
+    CHECK(*got == plaintext);
+    CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::absent);
+}
+
 TEST_CASE(
         "Client: an attachment that cannot be auto-downloaded does not lose its message",
         "[client][attachments][auto]") {

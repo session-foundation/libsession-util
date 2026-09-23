@@ -728,35 +728,15 @@ class Client {
     using transfer_progress =
             std::function<void(int64_t done, int64_t total, std::optional<Expected<void>> result)>;
 
-    // A download that is already happening, and everyone waiting on it.
-    //
-    // Keyed by the cache name -- the hashed base url -- because that is what identifies the *file*,
-    // so two messages quoting the same attachment share one transfer rather than racing to write
-    // one cache entry twice.
+    // A download that is already happening, and everyone waiting on it.  Defined beside the code
+    // that runs it: what it holds -- the cache writer the bytes stream into, and the lock the
+    // network thread takes to deliver them -- is nothing a reader of this header needs.
     //
     // Without this, a conversation opening while its attachments are auto-downloading would fetch
     // every one of them a second time: the cache is still empty, so a display asking for bytes sees
     // a miss and starts its own.  Joining instead means a display never has to know whether
     // something is already under way -- it asks for the bytes and gets them, whoever started it.
-    //
-    // Only transfers that *accumulate* are in here, which means everything except a save.  A save
-    // streams decrypted bytes to the destination as they arrive and keeps none of them -- which is
-    // what stops a large file sitting in memory -- so by the time a second caller could join, the
-    // first half of the file has already gone to disk and is not ours to hand over.  A save may
-    // therefore join something already accumulating, and costs nothing extra when it does, but is
-    // never itself joinable: a display asking during a save fetches the file again.
-    //
-    // **Only ever touched on the loop.**  Download callbacks arrive on the network thread, so
-    // everything that reads or writes this hops first; the application's own callbacks then hop
-    // again, out through the dispatcher.
-    struct InFlight {
-        // The last figures reported, so somebody joining midway can be told where it has got to
-        // rather than being left with nothing to draw until the next chunk lands.
-        int64_t done = 0, total = 0;
-        std::shared_ptr<std::vector<std::byte>> plain;
-        std::vector<transfer_progress> progress;
-        std::vector<result_function<std::vector<std::byte>>> waiting;
-    };
+    struct Transfer;
 
     // A file on the file server, and what it takes to read it: what an attachment row says about
     // where its file is and how to open it.
@@ -796,7 +776,11 @@ class Client {
     //
     // Ordered so that everything under one url sits together: whether *anything* is fetching a
     // file is a question about the url, asked once per attachment on a page.
-    std::map<std::string, InFlight> _in_flight;
+    //
+    // **Only ever touched on the loop.**  Download callbacks arrive on the network thread, so
+    // everything that reads or writes this hops first; the application's own callbacks then hop
+    // again, out through the dispatcher.
+    std::map<std::string, std::shared_ptr<Transfer>> _in_flight;
 
     /// What to tell a reader about an attachment's file: the `Attachment` fields that report it,
     /// given the `cached` reference and `unavailable` verdict already read from its row.
@@ -883,16 +867,19 @@ class Client {
     // attachment, no url, or a verdict already recorded against the file.
     RemoteFile _remote_file(int64_t message_id, size_t index);
 
-    // Writes `data` into the attachment cache under `url`, records it, and tells every message
-    // showing that file that it is now here.  The row is an index over the file, so it is written
-    // after the file exists.
-    //
-    // Returns whether it got that far, which is what says the messages have been told: a caller
-    // that gets false has left them where they were and owes them the news itself.
+    // Writes `data` into the attachment cache under `url`, and then `_record_cached`.
     bool _cache_attachment(
             const std::string& url,
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
+
+    // Records `file`, already in the attachment cache, as `url`'s, and tells every message showing
+    // that file that it is now here.  The row is an index over the file, so this comes after the
+    // file exists.
+    //
+    // Returns whether it got that far, which is what says the messages have been told: a caller
+    // that gets false has left them where they were and owes them the news itself.
+    bool _record_cached(const std::string& url, const std::filesystem::path& file);
 
     /// Keeps a copy of a file we just uploaded, so that a message we sent can be drawn without
     /// fetching back a file that came off this disk in the first place.
@@ -1105,9 +1092,14 @@ class Client {
     // each chunk as it arrives, so a failure surfaces when the bad chunk does -- which may be the
     // first or may be most of the way in, but is not "once the whole file is here".
     //
+    // `on_data` is handed each piece of the file with the padding a re-encrypted copy of it should
+    // carry: the padding the stream scheme's file came with, which is known before the first byte
+    // of data, or for the schemes that deliver the whole file at once the padding its length
+    // would get.  Either way it is what `cache::Writer` needs, and no length is.
+    //
     // `on_progress` reports in encrypted bytes, unindexed; a caller that reports per-attachment
     // adds its own index.  `on_done` fires exactly once, with how it ended and, unless that is
-    // `ok`, why.  An exception from `on_plain` ends the transfer as `failed`: it is our side that
+    // `ok`, why.  An exception from `on_data` ends the transfer as `failed`: it is our side that
     // could not take the bytes, which says nothing about them.
     //
     // A claim no download could satisfy -- a url that is not a download url, or a key or digest of
@@ -1119,7 +1111,7 @@ class Client {
     void _download_decrypted(
             RemoteFile remote,
             DownloadKind kind,
-            std::function<void(std::span<const std::byte> plaintext)> on_plain,
+            std::function<void(std::span<const std::byte> plaintext, size_t padding)> on_data,
             transfer_progress on_progress,
             std::function<void(DownloadResult result, std::string why)> on_done);
 
@@ -1143,25 +1135,25 @@ class Client {
     // second request attaches to the first, picking up its progress from wherever it has reached,
     // rather than fetching the same bytes twice and caching them twice.
     //
-    // `store` runs on the loop after a fetch completes, and is the whole of the difference between
-    // a cached attachment, which is indexed and evictable, and a cached picture, which is neither:
-    // `target.dir` is what says which of the two this is, so finding an existing copy and
-    // recording its use follow from that rather than from anything the caller supplies.
-    //
-    // It returns whether it kept the file *and told the messages showing it*, which is what decides
-    // whether this has to report the transfer ending: a fetch with nothing to show for it leaves
-    // them where they were, and every way of having nothing to show -- a failure, a file that could
-    // not be written, no cache at all -- looks the same to them.
+    // A `caching` fetch streams the file into the cache as it arrives, and its waiters are served
+    // by reading it back once it is whole: nothing holds the file in memory until somebody asks
+    // for it there.  One that is not caching -- there is no cache -- holds what it downloads
+    // instead, since there is then nowhere to read it back from.  `target.dir` says whether the
+    // cached copy is an attachment, which is indexed and evictable, or a picture, which is
+    // neither.
     void _fetch_cached(
             FetchTarget target,
+            bool caching,
             transfer_progress progress,
-            result_function<std::vector<std::byte>> cb,
-            std::function<bool(std::span<const std::byte>)> store);
+            result_function<std::vector<std::byte>> cb);
 
-    // The `store` a picture fetch wants, or nothing when there is nowhere to keep it.  Always
-    // answers false: a picture belongs to a conversation rather than to a message, so there is
-    // never a message to have told.
-    std::function<bool(std::span<const std::byte>)> _store_picture(std::string url);
+    // Registers `t` under `name` and starts its download.  Its waiters are told of a download that
+    // cannot even start.
+    void _start_transfer(std::string name, std::shared_ptr<Transfer> t);
+
+    // Settles a transfer that has ended and been taken out of `_in_flight`: keeps or discards its
+    // cached copy, records what the ending says about the file, and serves its waiters.
+    void _finish_transfer(std::shared_ptr<Transfer> t, DownloadResult result, std::string why);
 
     // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
     // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a
