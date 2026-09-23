@@ -486,7 +486,10 @@ TEST_CASE("Client: a priority change replaces the whole list", "[client][signals
     deliver(*c, a, "first", from_epoch_ms(1000), "h1");
     deliver(*c, b, "second", from_epoch_ms(2000), "h2");
     sync(*c);
+    // Each delivery changed a row in the list, which reports the list, so what the setup sent is
+    // cleared along with the order.
     r.order.clear();
+    r.replaced.clear();
 
     c->conversation(ConversationId::dm(a.session_id), await)->set_priority(3, await);
 
