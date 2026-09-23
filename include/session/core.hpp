@@ -348,6 +348,29 @@ class Core {
             std::string body,
             int round);
 
+    // Records where `node`'s next retrieve of `ns` resumes from.  The node is a parameter rather
+    // than something read from the surroundings because the cursor is kept per (namespace, node):
+    // writing one member's cursor from another's answer is individually plausible and shows up
+    // much later as a namespace that re-fetches for ever or one that skips messages.
+    void _record_swarm_cursor(
+            const network::ed25519_pubkey& node_pubkey,
+            config::Namespace ns,
+            std::span<const SwarmMessage> messages);
+
+    // The fan-out behind fetch_user_profile().  Defined in core.cpp: nothing outside it needs the
+    // shape.
+    struct ProfileFanOut;
+
+    std::vector<std::byte> _profile_retrieve_body();
+    void _handle_profile_response(
+            const std::shared_ptr<ProfileFanOut>& state,
+            const network::service_node& node,
+            std::optional<std::string> body,
+            bool timed_out);
+    void _absorb_profile_answer(
+            const network::ed25519_pubkey& node, std::span<const SwarmMessage> messages);
+    void _conclude_profile_fetch(ProfileFanOut& state);
+
     // Decrypts and dispatches one-to-one messages from Namespace::Default.
     void _handle_direct_messages(std::span<const SwarmMessage> messages);
 
@@ -533,6 +556,41 @@ class Core {
     /// (the swarm cursor only advances once a batch has been handled, and message handlers are
     /// already required to tolerate seeing a message twice).
     void set_poll_interval(std::chrono::milliseconds interval);
+
+    /// Fetches the account's own UserProfile config from the whole swarm at once, rather than
+    /// waiting for the next poll to ask one member.
+    ///
+    /// **For the moment an account arrives on a device that has never had it** -- a restore, where
+    /// nothing local can answer "what is this account called" and the app has a person waiting in
+    /// front of a progress indicator.  An ordinary poll asks a single member, once every
+    /// `set_poll_interval`, and the storage server does not promise a config has reached every
+    /// member of a swarm: measured against mainnet, an account created minutes earlier took over a
+    /// minute of polling to come back, which is several members sampled one at a time before one of
+    /// them had it.  Both mobile clients work around exactly this, and say so in their own
+    /// comments.
+    ///
+    /// Asks every member concurrently, and is deliberately asymmetric about what it will conclude
+    /// from what they say.  **Having the config is not a majority property**: one member holding it
+    /// is the whole answer, and the others not having it yet is the condition being routed around
+    /// rather than evidence against it.  So an empty answer never ends the fetch however many
+    /// members give it -- only every member having answered concludes that there is nothing to
+    /// find.
+    ///
+    /// **The first config opens a short window rather than ending the fetch.**  A member can be
+    /// behind its swarm, so the first config to arrive may not be the newest; whatever else arrives
+    /// over the next half second is merged before `done` is called, and since configs merge rather
+    /// than replace, each extra answer can only bring the result forward.  No agreement is sought
+    /// -- nothing waits for a second member to say the same thing -- and the window is short
+    /// because somebody is watching a progress indicator.  It closes early once every member has
+    /// answered.
+    ///
+    /// **Answers keep being merged after `done`.**  One arriving late still came from our own
+    /// swarm, and dropping it would only leave the next ordinary poll to fetch it again.
+    ///
+    /// `done` is called exactly once, on Core's job queue, with whether a config was merged.  Safe
+    /// to call without waiting on it: what it finds is merged into `configs` like anything a poll
+    /// brings in, and the retrieve cursor it records means the next poll carries on from there.
+    void fetch_user_profile(std::function<void(bool found)> done);
 
     /// Encrypt and send a direct message to the given recipient.
     ///
