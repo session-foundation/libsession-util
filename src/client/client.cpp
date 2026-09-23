@@ -4720,6 +4720,10 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
     // refused past this size and an upload is not, so without it the cost of sending a large file
     // would be unbounded.  The price is that such a file cannot be drawn from the sender's own
     // transcript, which is where it already stands for every recipient: none of them can fetch it.
+    //
+    // TODO: copy it in chunks across turns of the loop, through a cache writer that encrypts as it
+    // goes, and bound it by a setting for what a requested file may cost the cache rather than by
+    // this fixed limit.  The same whole-file read happens wherever the cache is filled or read.
     if (size > static_cast<int64_t>(attachment::MAX_REGULAR_SIZE))
         return;
 
@@ -5017,6 +5021,12 @@ void Client::_save_attachment(
     // The reverse does not hold, which is why nothing is registered below: this streams to the
     // destination as bytes arrive and keeps none of them, so there would be nothing to give a
     // joiner that turned up midway.
+    //
+    // TODO: which also means a save is invisible while it runs.  Every message showing the file
+    // reads `absent` rather than `fetching`, and a display asking meanwhile starts a second
+    // transfer of the same bytes.  The fix is a transfer that fans each decrypted chunk out to all
+    // of its consumers -- a cache sink, save destinations, waiters -- and aborts only when the last
+    // one detaches, so that a save is registered like anything else.
     if (auto found = _in_flight.find(_transfer_key(remote)); found != _in_flight.end()) {
         if (report) {
             report(found->second.done, found->second.total, std::nullopt);
