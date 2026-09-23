@@ -238,24 +238,27 @@ namespace {
 
 }  // namespace
 
-/// The answer a fetch settled on, and the member that gave it.
+/// How long the first member's config is left open for others to add to.
 ///
-/// The member is kept with it because the retrieve cursor is written against the node that
-/// produced the messages and no other.
-struct Core::ProfileAnswer {
-    network::ed25519_pubkey node;
-    retrieved_namespace answer;
-};
+/// A member can be behind its swarm, so the first config to arrive is not necessarily the newest.
+/// Merging whatever else comes in over a short window lets a stale first answer be overtaken before
+/// the fetch reports -- and configs merge rather than replace, so each extra answer can only bring
+/// the result forward.  Short because somebody is watching a progress indicator: long enough to let
+/// in a few more members, not to wait for all of them.
+constexpr std::chrono::milliseconds PROFILE_FETCH_GRACE{500};
 
-/// How much of a fan-out is still outstanding.
+/// How far a fan-out has got.
 ///
-/// Shared between every in-flight request and touched only on Core's job queue, which is what makes
-/// a plain count safe here: the responses arrive on the network's threads and are marshalled across
-/// before any of this is read.
+/// Shared between every in-flight request and the grace timer, and touched only on Core's job
+/// queue, which is what makes plain fields safe here: the responses arrive on the network's threads
+/// and are marshalled across before any of this is read.
 struct Core::ProfileFanOut {
     std::function<void(bool)> done;
     size_t outstanding = 0;
-    bool settled = false;
+    /// Whether any member has answered with a config, which is what `done` reports.
+    bool found = false;
+    bool grace_started = false;
+    bool concluded = false;
 };
 
 void Core::_poll() {
@@ -297,14 +300,14 @@ void Core::fetch_user_profile(std::function<void(bool found)> done) {
         // away, so a swarm lookup or an answer landing during teardown is dropped instead of run
         // against components that are already being destroyed.
         _jq.call([this, net, state, swarm = std::move(swarm)] {
-            if (state->settled)
+            if (state->concluded)
                 return;
             if (swarm.empty()) {
                 // Not an error worth failing loudly over: the ordinary poll still runs, and this
                 // was only ever an attempt to get there sooner.  A swarm of one is still worth
                 // asking -- one member holding the config is the whole answer.
                 log::warning(cat, "Cannot fan out a profile fetch: no swarm members available");
-                _settle_profile_fetch(*state, nullptr);
+                _conclude_profile_fetch(*state);
                 return;
             }
 
@@ -330,7 +333,7 @@ void Core::fetch_user_profile(std::function<void(bool found)> done) {
                                       timeout,
                                       body = std::move(body)]() mutable {
                                 _handle_profile_response(
-                                        *state,
+                                        state,
                                         node,
                                         (success && body) ? std::move(body) : std::nullopt,
                                         timeout);
@@ -369,31 +372,28 @@ std::vector<std::byte> Core::_profile_retrieve_body() {
     return to_vector(nlohmann::json{{"requests", std::move(requests)}}.dump());
 }
 
-/// One member's answer.  The first that carries a config ends the fetch.
+/// One member's answer, whenever it arrives -- including after the fetch has reported.
+///
+/// **Every config that arrives is merged**, even one landing after `done` has been called: it came
+/// from a member of our own swarm, and dropping it would only leave the next ordinary poll to fetch
+/// it again.  What the end of the fetch decides is when `done` is called, not which answers count.
 void Core::_handle_profile_response(
-        ProfileFanOut& state,
+        const std::shared_ptr<ProfileFanOut>& state,
         const network::service_node& node,
         std::optional<std::string> body,
         bool timed_out) {
-    if (state.settled)
-        return;
+    --state->outstanding;
 
-    state.outstanding -= 1;
-
+    // Decoded here and merged below, outside the `try`: a failure while merging is not a failure to
+    // parse, and reporting it as one would send somebody looking at the wrong thing.
+    std::optional<retrieved_namespace> got;
     if (body) {
         try {
             auto json = nlohmann::json::parse(*body);
             auto it = json.find("results");
-            if (it != json.end() && it->is_array() && !it->empty()) {
-                if (auto got = decode_retrieved(
-                            (*it)[0], static_cast<int16_t>(config::Namespace::UserProfile))) {
-                    if (!got->messages.empty()) {
-                        ProfileAnswer taken{node.remote_pubkey, std::move(*got)};
-                        _settle_profile_fetch(state, &taken);
-                        return;
-                    }
-                }
-            }
+            if (it != json.end() && it->is_array() && !it->empty())
+                got = decode_retrieved(
+                        (*it)[0], static_cast<int16_t>(config::Namespace::UserProfile));
         } catch (const std::exception& e) {
             log::warning(cat, "Failed to parse profile fetch response: {}", e.what());
         }
@@ -405,40 +405,47 @@ void Core::_handle_profile_response(
                 timed_out ? "timed out" : "request failed");
     }
 
-    // Nothing from this one.  An empty answer never ends the fetch, however many members give it:
-    // the case this exists for is a config that has reached one member and not the others, so a
-    // member saying it has nothing is the condition being routed around rather than evidence
-    // against the member that has it.  Only when every member has answered is there nothing left
-    // to wait for.
-    if (state.outstanding == 0)
-        _settle_profile_fetch(state, nullptr);
+    if (got && !got->messages.empty()) {
+        _absorb_profile_answer(node.remote_pubkey, got->messages);
+        state->found = true;
+        // The first config opens the window rather than ending the fetch; see PROFILE_FETCH_GRACE.
+        // Only a config opens it: an answer with nothing in it is the condition this routes around.
+        if (!state->concluded && !state->grace_started) {
+            state->grace_started = true;
+            _jq.call_later(PROFILE_FETCH_GRACE, [this, state] { _conclude_profile_fetch(*state); });
+        }
+    }
+
+    // An empty answer never ends the fetch on its own; the last one to arrive does.
+    if (state->outstanding == 0)
+        _conclude_profile_fetch(*state);
 }
 
-/// Ends the fan-out, merging `taken` if there is one.  Called exactly once per fetch.
-void Core::_settle_profile_fetch(ProfileFanOut& state, ProfileAnswer* taken) {
-    if (state.settled)
+/// Merges one member's config and records where that member's next retrieve resumes.
+void Core::_absorb_profile_answer(
+        const network::ed25519_pubkey& node, std::span<const SwarmMessage> messages) {
+    auto configs_held = configs.batch();
+    // Final, even where the member said it was holding more.  This is a one-shot fetch rather than
+    // a poll that continues: the cursor recorded below is what lets the ordinary poll pick up
+    // anything left, and a handler told to wait for a final that never comes would wait for ever.
+    receive_messages(messages, config::Namespace::UserProfile, true);
+    _record_swarm_cursor(node, config::Namespace::UserProfile, messages);
+}
+
+/// Reports the fan-out's result, once.  Whichever of the grace timer and the last answer comes
+/// first reports it; the other finds it already done.
+void Core::_conclude_profile_fetch(ProfileFanOut& state) {
+    if (state.concluded)
         return;
-    state.settled = true;
-
-    bool found = taken && !taken->answer.messages.empty();
-
-    if (taken && !taken->answer.messages.empty()) {
-        auto configs_held = configs.batch();
-        // Final, even where the member said it was holding more.  This is a one-shot fetch rather
-        // than a poll that continues: the cursor recorded below is what lets the ordinary poll pick
-        // up anything left, and a handler told to wait for a final that never comes would wait for
-        // ever.
-        receive_messages(taken->answer.messages, config::Namespace::UserProfile, true);
-        _record_swarm_cursor(taken->node, config::Namespace::UserProfile, taken->answer.messages);
-    }
+    state.concluded = true;
 
     log::info(
             cat,
-            "Profile fetch settled: {}",
-            found ? "config merged" : "nothing held by the swarm");
+            "Profile fetch concluded: {}",
+            state.found ? "config merged" : "nothing held by the swarm");
 
     if (state.done)
-        state.done(found);
+        state.done(state.found);
 }
 
 void Core::_send_poll(

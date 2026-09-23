@@ -69,6 +69,7 @@ list(APPEND LIB_SESSION_UTESTS_SOURCES
     test_snode_pool.cpp
     test_core_network.cpp
     test_poll.cpp
+    test_profile_fetch.cpp
     test_pfs_key_cache.cpp
     test_sqlite_bind.cpp)
 

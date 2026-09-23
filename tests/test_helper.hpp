@@ -46,6 +46,10 @@ class MockNetwork : public network::Network {
     // The node returned by get_swarm; tests can change this to simulate swarm-member switches.
     network::service_node current_node;
 
+    // The whole swarm, for code that asks every member rather than one.  Returned instead of
+    // `current_node` when set.
+    std::vector<network::service_node> current_swarm;
+
     void send_request(
             network::Request request, network::network_response_callback_t callback) override {
         sent_requests.push_back({std::move(request), std::move(callback)});
@@ -57,7 +61,10 @@ class MockNetwork : public network::Network {
             std::function<
                     void(network::swarm_id_t swarm_id, std::vector<network::service_node> swarm)>
                     callback) override {
-        callback(0, {current_node});
+        if (current_swarm.empty())
+            callback(0, {current_node});
+        else
+            callback(0, current_swarm);
     }
 
     std::vector<network::DownloadRequest> downloads;
