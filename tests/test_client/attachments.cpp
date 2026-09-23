@@ -1,3 +1,5 @@
+#include <session/client/error_codes.hpp>
+
 #include "../../src/client/download_cache.hpp"
 #include "../utils.hpp"
 #include "common.hpp"
@@ -366,7 +368,7 @@ TEST_CASE(
     CHECK_FALSE(reports.front().result.has_value());
     CHECK(reports.front().done == 0);
     CHECK(reports.front().total == 0);
-    CHECK(reports.back().result == 0);
+    CHECK(succeeded(reports.back().result));
     for (const auto& r : reports) {
         CHECK(r.message_id == msg_id);
         CHECK(r.index == 0);
@@ -932,7 +934,7 @@ TEST_CASE(
     auto me = own_sid(*c);
     TestHelper::seed_pfs_nak(c->core, me);
 
-    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<int>>> reports;
+    std::vector<std::tuple<size_t, int64_t, int64_t, std::optional<Expected<void>>>> reports;
 
     // No network is attached, so the upload cannot even be attempted.  The message must still end
     // up somewhere final: the failure is what a caller waits on, and a message left in `uploading`
@@ -940,8 +942,8 @@ TEST_CASE(
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
-            [&](size_t idx, int64_t sent, int64_t total, std::optional<int> result) {
-                reports.emplace_back(idx, sent, total, result);
+            [&](size_t idx, int64_t sent, int64_t total, std::optional<Expected<void>> result) {
+                reports.emplace_back(idx, sent, total, std::move(result));
             },
             await);
     sync(*c);
@@ -952,10 +954,9 @@ TEST_CASE(
     CHECK(msg->send_state == SendState::failed);
 
     REQUIRE(reports.size() == 1);
-    auto [idx, sent, total, result] = reports.front();
+    auto& [idx, sent, total, result] = reports.front();
     CHECK(idx == 0);
-    REQUIRE(result.has_value());
-    CHECK(*result != 0);
+    CHECK(failure_code(result) == err::network_unavailable);
 
     std::filesystem::remove(file);
 }
@@ -977,11 +978,14 @@ TEST_CASE(
     // exactly what is exempt from it.
     c->set_high_freq_dispatch_interval(1h);
 
-    std::vector<std::optional<int>> results;
+    std::vector<std::optional<Expected<void>>> results;
+    auto record = [&](size_t, int64_t, int64_t, std::optional<Expected<void>> result) {
+        results.push_back(std::move(result));
+    };
     auto id = c->send_message(
             ConversationId::dm(me),
             {.body = "here you go", .attachments = {OutgoingAttachment{.path = file}}},
-            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
+            record,
             await);
     sync(*c);
 
@@ -989,8 +993,7 @@ TEST_CASE(
     // point: an outcome is never a thing the throttle may drop.
     CHECK(c->message(id, await)->send_state == SendState::failed);
     REQUIRE(results.size() == 1);
-    REQUIRE(results.front().has_value());
-    CHECK(*results.front() != 0);
+    CHECK(failure_code(results.front()) == err::network_unavailable);
 
     std::filesystem::remove(file);
 }
@@ -1016,13 +1019,14 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
 
     // Retrying is allowed while the failure is one that might not recur, and reports itself as
     // started rather than as succeeded -- the outcome arrives through the message's state.
-    std::vector<std::optional<int>> results;
-    CHECK(c->retry_send(
-            id,
-            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
-            await));
+    std::vector<std::optional<Expected<void>>> results;
+    auto record = [&](size_t, int64_t, int64_t, std::optional<Expected<void>> result) {
+        results.push_back(std::move(result));
+    };
+    CHECK(c->retry_send(id, record, await));
     sync(*c);
     REQUIRE(results.size() == 1);
+    CHECK(failure_code(results.front()) == err::network_unavailable);
     CHECK(c->message(id, await)->send_state == SendState::failed);
 
     // With the file gone the retry can only ever fail the same way, so the message becomes
@@ -1030,13 +1034,10 @@ TEST_CASE("Client: retrying a send that cannot work", "[client][send][attachment
     std::filesystem::remove(file);
 
     results.clear();
-    CHECK(c->retry_send(
-            id,
-            [&](size_t, int64_t, int64_t, std::optional<int> result) { results.push_back(result); },
-            await));
+    CHECK(c->retry_send(id, record, await));
     sync(*c);
     REQUIRE(results.size() == 1);
-    CHECK(results.front() == ATTACHMENT_FILE_MISSING);
+    CHECK(failure_code(results.front()) == err::attachment_file_missing);
     CHECK(c->message(id, await)->send_state == SendState::unsendable);
 
     // ... and being terminal, it is refused rather than attempted again.
@@ -1174,7 +1175,7 @@ TEST_CASE(
         CHECK(*got[i] == plaintext);
         // ...and both were told how it was going, not only the one that started it.
         CHECK_FALSE(seen[i].empty());
-        CHECK(seen[i].back().result == 0);
+        CHECK(succeeded(seen[i].back().result));
         CHECK(seen[i].back().message_id == msg_id);
     }
 
@@ -1283,7 +1284,7 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
 
     // The save was told how the transfer it joined was going, not left silent until it finished.
     CHECK_FALSE(saw.empty());
-    CHECK(saw.back().result == 0);
+    CHECK(succeeded(saw.back().result));
 }
 
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
@@ -1399,7 +1400,7 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         // Broadcast, since nobody asked for it and there is no caller to hand a report to.
         REQUIRE_FALSE(progress.empty());
         CHECK(progress.back().first == convo);
-        CHECK(progress.back().second.result == 0);
+        CHECK(succeeded(progress.back().second.result));
 
         // In the cache, so opening the conversation costs nothing...
         CHECK(std::filesystem::exists(TestHelper::cache_path(
@@ -2433,20 +2434,46 @@ TEST_CASE(
     constexpr auto absent = AttachmentAvailability::absent;
     CHECK(verdicts() == V{absent, absent});
 
-    // Asks for the bytes and answers the download `status`; the error it produces is not the point
-    // of any of these, only what the row is left saying afterwards.
+    // Asks for the bytes and has `answer` answer the download, returning the code of the error the
+    // caller was given: the caller hears the same verdict the rows record, and the progress report
+    // that ends the transfer says the same again.
     auto try_fetch = [&](auto&& answer) {
+        std::optional<Error> error;
+        std::optional<Expected<void>> last;
         c->attachment_data(
-                c->conversation(convo, await)->messages(await).back().id, 0, nullptr, [](auto) {});
+                c->conversation(convo, await)->messages(await).back().id,
+                0,
+                [&](const AttachmentProgress& p) { last = p.result; },
+                [&](auto r) {
+                    if (!r)
+                        error = std::move(r).error();
+                });
         sync(*c);
         REQUIRE(net->downloads.size() == 1);
         answer();
         sync(*c);
+        REQUIRE(error);
+        CHECK(failure_code(last) == error->code);
+        return error->code;
+    };
+
+    // Asks again once there is a verdict, which answers from it: nothing is downloaded.
+    auto ask_again = [&] {
+        std::optional<Error> error;
+        c->attachment_data(
+                c->conversation(convo, await)->messages(await).back().id, 0, nullptr, [&](auto r) {
+                    if (!r)
+                        error = std::move(r).error();
+                });
+        sync(*c);
+        CHECK(net->downloads.empty());
+        REQUIRE(error);
+        return error->code;
     };
 
     // A server error says nothing about the file -- the next attempt may well work -- so nothing is
     // recorded and the fetch stays on offer.
-    try_fetch([&] { REQUIRE(fail_downloads(*net, 500) == 1); });
+    CHECK(try_fetch([&] { REQUIRE(fail_downloads(*net, 500) == 1); }) == err::download_failed);
     CHECK(verdicts() == V{absent, absent});
 
     r.msg_updated.clear();
@@ -2454,12 +2481,13 @@ TEST_CASE(
     // 404 is how the file server answers for an upload it no longer holds, which is what an expired
     // one looks like: worth recording, and recorded for both messages rather than the one that
     // asked.
-    try_fetch([&] { REQUIRE(fail_downloads(*net, 404) == 1); });
+    CHECK(try_fetch([&] { REQUIRE(fail_downloads(*net, 404) == 1); }) == err::file_not_found);
     CHECK(verdicts() == V{AttachmentAvailability::not_found, AttachmentAvailability::not_found});
     // One report carrying both, rather than one report each: it is one file, and what happened
     // happened to both of them at once.
     REQUIRE_FALSE(r.msg_updated.empty());
     CHECK(r.msg_updated.back().size() == 2);
+    CHECK(ask_again() == err::file_not_found);
 
     // The repair: the sender sends the same file again, which -- the url being a hash of the
     // encrypted body -- lands at the same url.  That clears the verdict for the messages that
@@ -2471,10 +2499,11 @@ TEST_CASE(
     // thing to tell a user: a resend would reproduce them, so asking for one is no use.
     auto corrupt = ciphertext;
     corrupt[corrupt.size() / 2] ^= std::byte{0xff};
-    try_fetch([&] { REQUIRE(serve_downloads(*net, corrupt) == 1); });
+    CHECK(try_fetch([&] { REQUIRE(serve_downloads(*net, corrupt) == 1); }) == err::file_unreadable);
     CHECK(verdicts() == V{AttachmentAvailability::unreadable,
                           AttachmentAvailability::unreadable,
                           AttachmentAvailability::unreadable});
+    CHECK(ask_again() == err::file_unreadable);
 }
 
 TEST_CASE(
@@ -2512,11 +2541,12 @@ TEST_CASE(
     sync(*c);
     auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
 
-    std::optional<bool> succeeded;
-    c->attachment_data(id, 0, nullptr, [&](auto r) { succeeded = r.has_value(); });
+    std::optional<Expected<std::vector<std::byte>>> answer;
+    c->attachment_data(id, 0, nullptr, [&](auto r) { answer = std::move(r); });
     sync(*c);
-    REQUIRE(succeeded.has_value());
-    CHECK_FALSE(*succeeded);
+    REQUIRE(answer);
+    REQUIRE_FALSE(answer->has_value());
+    CHECK(answer->error().code == err::network_unavailable);
     CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::absent);
 
     // Once there is a network the same request works, rather than joining the one that never was.
@@ -2571,6 +2601,79 @@ TEST_CASE(
     auto added = Recorder::messages(r.msg_added);
     REQUIRE(added.size() == 1);
     CHECK(added[0].body == "no url");
+
+    // It is shown as what it is -- a file its sender gave no way to fetch -- and asking for it says
+    // the same, rather than offering a download that can never work.
+    REQUIRE(added[0].attachments.size() == 1);
+    CHECK(added[0].attachments[0].availability == AttachmentAvailability::unreadable);
+    std::optional<Error> error;
+    c->attachment_data(added[0].id, 0, nullptr, [&](auto r) {
+        if (!r)
+            error = std::move(r).error();
+    });
+    sync(*c);
+    REQUIRE(error);
+    CHECK(error->code == err::file_unreadable);
+}
+
+TEST_CASE(
+        "Client: asking for something that cannot be fetched says why",
+        "[client][attachments][unavailable]") {
+    TempCacheDir dir;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    // A stream url with a key the stream scheme cannot use: nothing the file server sends could
+    // be decrypted with it.
+    deliver(*c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("short", {}, true));
+                a->set_key(std::string(16, 'k'));
+                a->set_contenttype("image/png");
+            });
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    auto code_of = [&](int64_t message_id, size_t index) {
+        std::optional<Error> error;
+        c->attachment_data(message_id, index, nullptr, [&](auto r) {
+            if (!r)
+                error = std::move(r).error();
+        });
+        sync(*c);
+        REQUIRE(error);
+        return error->code;
+    };
+
+    CHECK(code_of(id + 1000, 0) == err::message_not_found);
+    CHECK(code_of(id, 1) == err::attachment_not_found);
+
+    // Refused without anything being sent, and recorded, since no attempt could ever do better.
+    CHECK(code_of(id, 0) == err::file_unreadable);
+    CHECK(net->downloads.empty());
+    CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::unreadable);
+
+    // A save is refused the same way.
+    std::optional<Error> saved;
+    c->save_attachment(id, 0, dir.path / "out.png", nullptr, [&](auto r) {
+        if (!r)
+            saved = std::move(r).error();
+    });
+    sync(*c);
+    REQUIRE(saved);
+    CHECK(saved->code == err::file_unreadable);
+    CHECK(net->downloads.empty());
+    CHECK_FALSE(std::filesystem::exists(dir.path / "out.png"));
 }
 
 TEST_CASE(
@@ -2632,23 +2735,38 @@ TEST_CASE(
         sync(*c);
     };
 
-    // Mallory's alone: its failure is a verdict on Mallory's pointer, and Alice's is untouched.
-    std::optional<Error> mallory_error;
-    fetch(mallorys, mallory_error);
-    REQUIRE(serve_downloads(*net) == 1);
-    sync(*c);
-    CHECK(mallory_error.has_value());
-    CHECK(availability(mallorys) == AttachmentAvailability::unreadable);
-    CHECK(availability(alices) == AttachmentAvailability::absent);
-
-    // Mallory's again, and Alice's asked for while it runs.  Joining would mean taking its answer,
-    // which Mallory's key decides; so Alice's is a transfer of its own.
-    std::optional<Error> alice_error;
+    // Both asked for at once.  Joining would mean Alice's taking the answer to Mallory's, which
+    // Mallory's key decides; so each is a transfer of its own.  Answered with a failure that says
+    // nothing about either, so that no verdict is left behind by it.
+    std::optional<Error> mallory_error, alice_error;
     std::optional<std::vector<std::byte>> alice_got;
     fetch(mallorys, mallory_error);
     fetch(alices, alice_error, alice_got);
-    REQUIRE(net->downloads.size() == 2);
-    REQUIRE(serve_downloads(*net) == 2);
+    REQUIRE(fail_downloads(*net, 500) == 2);
+    sync(*c);
+    REQUIRE(mallory_error);
+    CHECK(mallory_error->code == err::download_failed);
+    REQUIRE(alice_error);
+    CHECK(alice_error->code == err::download_failed);
+
+    // Mallory's alone: its failure is a verdict on Mallory's pointer, and Alice's is untouched.
+    fetch(mallorys, mallory_error);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(mallory_error);
+    CHECK(mallory_error->code == err::file_unreadable);
+    CHECK(availability(mallorys) == AttachmentAvailability::unreadable);
+    CHECK(availability(alices) == AttachmentAvailability::absent);
+
+    // Asked again, Mallory's answers from its verdict, and Alice's is fetched as though nothing
+    // had happened.
+    fetch(mallorys, mallory_error);
+    CHECK(net->downloads.empty());
+    REQUIRE(mallory_error);
+    CHECK(mallory_error->code == err::file_unreadable);
+
+    fetch(alices, alice_error, alice_got);
+    REQUIRE(serve_downloads(*net) == 1);
     sync(*c);
 
     CHECK_FALSE(alice_error.has_value());
@@ -2731,5 +2849,6 @@ TEST_CASE(
     // the strength of it -- which is also what decides that trying again is pointless.
     REQUIRE(answered);
     REQUIRE(reported);
+    CHECK(reported->code == err::file_unreadable);
     CHECK(reported->message.find("decryption failed") != std::string::npos);
 }

@@ -69,18 +69,19 @@ TEST_CASE(
     set_picture(c, them, url, key);
     auto id = dm_from_hex(them);
 
-    std::vector<std::optional<int>> progress;
+    std::vector<std::optional<Expected<void>>> progress;
+    auto record = [&](int64_t, int64_t, std::optional<Expected<void>> r) {
+        progress.push_back(std::move(r));
+    };
     std::optional<std::vector<std::byte>> got;
     std::optional<Error> err;
-    c->profile_picture(
-            id,
-            [&](int64_t, int64_t, std::optional<int> r) { progress.push_back(r); },
-            [&](auto r) {
-                if (r)
-                    got = *std::move(r);
-                else
-                    err = std::move(r).error();
-            });
+    auto answer = [&](auto r) {
+        if (r)
+            got = *std::move(r);
+        else
+            err = std::move(r).error();
+    };
+    c->profile_picture(id, record, answer);
 
     // The fetch is posted to the loop, so let it get as far as asking before answering it.
     sync(*c);
@@ -91,11 +92,11 @@ TEST_CASE(
     REQUIRE(got);
     CHECK(*got == image);
 
-    // Watched from start to finish: the 0/0 that says it began, and the terminal 0 that says it
+    // Watched from start to finish: the 0/0 that says it began, and the success that says it
     // arrived.
     REQUIRE(progress.size() >= 2);
     CHECK_FALSE(progress.front().has_value());
-    CHECK(progress.back() == 0);
+    CHECK(succeeded(progress.back()));
 
     // It landed in the cache under the url, not under the url plus its fragment.
     auto file = TestHelper::cache_path(*c, cache::PROFILE_DIR, url);
@@ -105,15 +106,7 @@ TEST_CASE(
     // there is nothing to watch.
     progress.clear();
     got.reset();
-    c->profile_picture(
-            id,
-            [&](int64_t, int64_t, std::optional<int> r) { progress.push_back(r); },
-            [&](auto r) {
-                if (r)
-                    got = *std::move(r);
-                else
-                    err = std::move(r).error();
-            });
+    c->profile_picture(id, record, answer);
     sync(*c);
 
     CHECK(net->downloads.empty());
@@ -268,11 +261,11 @@ TEST_CASE("Client: a replaced profile picture stops taking up room", "[client][p
 TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictures]") {
     TempCacheDir dir;
 
-    std::vector<std::pair<ConversationId, std::optional<int>>> reported;
+    std::vector<std::pair<ConversationId, std::optional<Expected<void>>>> reported;
     callbacks cbs;
     cbs.display_picture_progress =
-            [&](const ConversationId& id, int64_t, int64_t, std::optional<int> r) {
-                reported.emplace_back(id, r);
+            [&](const ConversationId& id, int64_t, int64_t, std::optional<Expected<void>> r) {
+                reported.emplace_back(id, std::move(r));
             };
 
     TempClient c{std::move(cbs)};
@@ -302,7 +295,7 @@ TEST_CASE("Client: learning a picture's url fetches it unasked", "[client][pictu
     REQUIRE(reported.size() >= 2);
     CHECK(reported.front().first == id);
     CHECK_FALSE(reported.front().second.has_value());
-    CHECK(reported.back().second == 0);
+    CHECK(succeeded(reported.back().second));
 
     // And the display, arriving afterwards, is served from the cache rather than fetching the same
     // picture a second time.

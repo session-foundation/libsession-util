@@ -322,12 +322,14 @@ class Conversation {
     ///   nothing: it comes before the transfer is established, which is what tells an attachment
     ///   being worked on from one still waiting its turn.  The size is not known until then, so a
     ///   progress bar is sized from the first report carrying a non-zero total.
-    /// - `result == 0` — done, and the file server gave us an id for it.  Note this is the only
-    ///   thing that means done: `sent == total` merely means the last byte was acknowledged, and
-    ///   the server's decision to accept the file arrives after that.
-    /// - anything else — that attachment failed, with the file server's status code or one of the
-    ///   network layer's own negative codes.  The message fails as a whole, but this is reported
-    ///   per attachment, so a list of them can mark the one that broke rather than all of them.
+    /// - `result` holding success — done, and the file server gave us an id for it.  Note this is
+    ///   the only thing that means done: `sent == total` merely means the last byte was
+    ///   acknowledged, and the server's decision to accept the file arrives after that.
+    /// - `result` holding an error — that attachment failed: `err::attachment_file_missing` if its
+    ///   file has gone (the message is then `SendState::unsendable`), `err::network_unavailable`
+    ///   with no network attached, and otherwise `err::upload_failed` with the status in the
+    ///   message.  The message fails as a whole, but this is reported per attachment, so a list of
+    ///   them can mark the one that broke rather than all of them.
     ///
     /// Reports for one attachment arrive in order — progress, then exactly one result — but
     /// reports for different attachments may interleave, and a failure does not stop the others
@@ -353,7 +355,7 @@ class Conversation {
     /// server's limit, or if `reply_to` names a message that does not exist or belongs to another
     /// conversation; thrown on the calling thread, before anything is stored or dispatched.
     using upload_progress = std::function<void(
-            size_t index, int64_t sent, int64_t total, std::optional<int> result)>;
+            size_t index, int64_t sent, int64_t total, std::optional<Expected<void>> result)>;
     void send_message(OutgoingMessage msg, upload_progress on_upload, result_function<int64_t> cb);
     void send_message(OutgoingMessage msg, result_function<int64_t> cb);
     int64_t send_message(OutgoingMessage msg, upload_progress on_upload, await_t);

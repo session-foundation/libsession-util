@@ -3,23 +3,11 @@
 #include <filesystem>
 #include <optional>
 #include <session/clock.hpp>
+#include <session/expected.hpp>
 #include <string>
 #include <vector>
 
 namespace session::client {
-
-/// Reported through send_message's upload handler when an attachment's file is no longer at the
-/// path it was attached from, which can happen between attaching and sending, or to a message
-/// being resumed in a later run.  Deliberately outside the network layer's code space: nothing
-/// about this came from the network, and the message becomes SendState::unsendable rather than
-/// merely failed.
-constexpr int ATTACHMENT_FILE_MISSING = -20001;
-
-/// Reported through save_attachment's progress handler when the file arrived but could not be
-/// turned back into the file it claims to be: it failed to authenticate, its sender described it
-/// wrongly, or it could not be written.  Distinct from a transfer failure, and unlike one it is not
-/// worth retrying -- the bytes on the file server will be the same bytes next time.
-constexpr int ATTACHMENT_UNREADABLE = -20002;
 
 /// Longest ThumbHash we will store.
 ///
@@ -87,8 +75,9 @@ enum class AutoDownload : int {
 /// How an attachment transfer is going.
 ///
 /// Reported two ways, for the two kinds of transfer: handed directly to whoever called
-/// `save_attachment`, and — for a download nobody asked for — broadcast through
-/// `callbacks::attachment_progress`, since a background fetch has no caller to hand anything to.
+/// `attachment_data` or `save_attachment`, and — for a download nobody asked for — broadcast
+/// through `callbacks::attachment_progress`, since a background fetch has no caller to hand
+/// anything to.
 struct AttachmentProgress {
     int64_t message_id;
     size_t index;
@@ -102,9 +91,10 @@ struct AttachmentProgress {
     int64_t done = 0;
     int64_t total = 0;
 
-    /// Unset while it is running, 0 once the file is here and verified, and otherwise the status of
-    /// whatever went wrong.  Exactly one report per transfer carries a value.
-    std::optional<int> result;
+    /// Unset while it is running; set on exactly one report per transfer, the last, to success or
+    /// to why it failed.  The error is the one the transfer's requester gets, with the same codes
+    /// (see `err`), so a display showing progress needs no second vocabulary for how it ended.
+    std::optional<Expected<void>> result;
 };
 
 /// What can be done about an attachment's bytes right now: read them, wait for them, fetch them, or

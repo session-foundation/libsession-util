@@ -266,6 +266,19 @@ auto in_configs(Client& c, F&& f) {
     return TestHelper::on_loop(c.core, [&] { return f(c.core.configs); });
 }
 
+/// Whether a transfer's progress `result` says it ended well.
+inline bool succeeded(const std::optional<Expected<void>>& result) {
+    return result && result->has_value();
+}
+
+/// The code a transfer's progress `result` failed with, or nullopt if it has not ended or did not
+/// fail.
+inline std::optional<std::string_view> failure_code(const std::optional<Expected<void>>& result) {
+    if (!result || result->has_value())
+        return std::nullopt;
+    return result->error().code;
+}
+
 }  // namespace client_test
 
 using namespace client_test;

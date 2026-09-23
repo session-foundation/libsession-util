@@ -128,7 +128,10 @@ struct callbacks {
     /// Display pictures are always fetched, with no setting to turn that off, so this fires for
     /// every one that is not already cached.
     std::function<void(
-            const ConversationId&, int64_t done, int64_t total, std::optional<int> result)>
+            const ConversationId&,
+            int64_t done,
+            int64_t total,
+            std::optional<Expected<void>> result)>
             display_picture_progress;
 };
 

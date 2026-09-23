@@ -419,17 +419,17 @@ CREATE TABLE message_attachments (
     -- Which rows a failure marks depends on what failed.  A file server status is its answer about
     -- the url, so it is set on every row naming that url, and cleared on all of them when a new row
     -- quoting it arrives -- the resend -- since showing one message's copy as gone and another's
-    -- as fine would be showing the same file two ways.  `ATTACHMENT_UNREADABLE` is about how this
-    -- row says to read the bytes: key, digest and size are the sender's claims, and nothing ties
-    -- them to the url, so it marks only rows making the same claim and a resend does not clear it.
+    -- as fine would be showing the same file two ways.  Unreadable is about how this row says to
+    -- read the bytes: key, digest and size are the sender's claims, and nothing ties them to the
+    -- url, so it marks only rows making the same claim and a resend does not clear it.
     --
     -- Either is cleared on every row when the file is cached, by whatever route: all of them are
     -- then served it from disk, so none can say it cannot be had.
     --
-    -- The value is *why*: the file server's status for a server answer -- 404 for an upload it
-    -- does not hold -- and `ATTACHMENT_UNREADABLE` for bytes that arrived and could not be turned
-    -- back into the file they claimed to be.  Only the first is worth telling the user to ask for
-    -- a resend about.
+    -- The value is *why*: 404, the file server's answer for an upload it does not hold, or -20002
+    -- for bytes that arrived and could not be turned back into the file they claimed to be.  Only
+    -- the first is worth telling the user to ask for a resend about.  These numbers are
+    -- `Client::Unavailable`'s, and on disk they cannot change.
     --
     -- NULL means only that nothing has proved otherwise.
     unavailable INTEGER,
