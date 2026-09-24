@@ -201,18 +201,12 @@ std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes
 
 TEST_CASE("Network", "[network][get_unused_nodes]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_node_strike_threshold = 3};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
     auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
@@ -297,20 +291,31 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     std::sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == remaining);
 
+    // ... but only once they have passed it: ordinary strikes below the threshold leave a node in
+    // use (strikes are per pubkey, so these apply to every node sharing the struck node's key)
+    snode_pool->reset_state_with_cache(snode_cache);
+    auto struck_key = snode_cache[0].remote_pubkey;
+    auto uses_struck_key = [&struck_key](const service_node& n) {
+        return n.remote_pubkey == struck_key;
+    };
+    auto with_struck_key = std::ranges::count_if(snode_cache, uses_struck_key);
+
+    snode_pool->record_node_failure(snode_cache[0]);
+    snode_pool->record_node_failure(snode_cache[0]);
+    CHECK(std::ranges::count_if(snode_pool->get_unused_nodes(20), uses_struck_key) ==
+          with_struck_key);
+
+    snode_pool->record_node_failure(snode_cache[0]);
+    CHECK(std::ranges::none_of(snode_pool->get_unused_nodes(20), uses_struck_key));
+
     // Should exclude nodes which have the same subnet
     pool_config = {
-            std::nullopt,
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            true,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = true,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_node_strike_threshold = 3};
     snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     unused_nodes = snode_pool->get_unused_nodes(20);
@@ -325,18 +330,12 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
 TEST_CASE("Network", "[network][update_cache]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            5min,
-            5min,
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_expiration = 5min,
+            .cache_min_lifetime = 5min,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_node_strike_threshold = 3};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::vector<service_node> snode_cache;
 
@@ -380,19 +379,13 @@ TEST_CASE("Network", "[network][update_cache]") {
 
 TEST_CASE("Network", "[network][refresh_min_cache_size]") {
     session::network::config::SnodePool pool_config = {
-            std::nullopt,
-            std::nullopt,
-            5min,
-            5min,
-            false,  // enforce_subnet_diversity
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            12,  // cache_min_size
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_expiration = 5min,
+            .cache_min_lifetime = 5min,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_min_size = 12,
+            .cache_node_strike_threshold = 3};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::vector<service_node> snode_cache;
 
