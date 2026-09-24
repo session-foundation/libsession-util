@@ -1241,7 +1241,7 @@ void OnionRequestRouter::_build_path(
                             for (const auto& [req, cb] : to_fail)
                                 cb(false,
                                    false,
-                                   -1,
+                                   ERROR_INSUFFICIENT_NODES,
                                    {content_type_plain_text},
                                    "Cannot build a path: {}."_format(*cannot_build));
                         }

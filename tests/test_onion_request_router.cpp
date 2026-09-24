@@ -1105,6 +1105,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path_too_few_nodes]"
     CHECK(snode_pool->get_call_count("refresh_if_needed") == 1);
     REQUIRE(result);
     CHECK_FALSE(result->success);
+    CHECK(result->status_code == ERROR_INSUFFICIENT_NODES);
     CHECK(result->response.value_or("").find("too few usable nodes") != std::string::npos);
 }
 }  // namespace session::network

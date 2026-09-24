@@ -475,7 +475,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                         return cb(
                                 false,
                                 false,
-                                -1,
+                                ERROR_INSUFFICIENT_NODES,
                                 {content_type_plain_text},
                                 "Failed to refresh the snode pool to find a proxy.");
 
@@ -492,7 +492,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                         return cb(
                                 false,
                                 false,
-                                -1,
+                                ERROR_INSUFFICIENT_NODES,
                                 {content_type_plain_text},
                                 "SnodePool refresh failed.");
 
