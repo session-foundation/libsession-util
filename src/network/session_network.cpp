@@ -293,12 +293,14 @@ void Network::suspend() {
     _loop->call_get([this] {
         _suspended = true;
 
+        // The router before the transport, so that it has let go of its path builds and failure
+        // listeners before the transport closes the connections they're attached to
         if (_snode_pool)
             _snode_pool->suspend();
-        if (_transport)
-            _transport->suspend();
         if (_router)
             _router->suspend();
+        if (_transport)
+            _transport->suspend();
 
         _close_connections();
     });
@@ -651,10 +653,13 @@ void Network::download(DownloadRequest request) {
 // MARK: Internal Logic
 
 void Network::_close_connections() {
-    if (_transport)
-        _transport->close_connections();
+    // The router first, for the same reason as in `suspend`: otherwise each edge connection the
+    // transport closes fires a failure listener into a live router, which retires the path and
+    // starts rebuilding it
     if (_router)
         _router->close_connections();
+    if (_transport)
+        _transport->close_connections();
 
     _recalculate_status();
     log::info(cat, "Closed all connections.");
