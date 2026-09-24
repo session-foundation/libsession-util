@@ -78,6 +78,14 @@ class TestOnionRequestRouter {
         return router->_find_valid_path(request);
     }
 
+    static void send_on_path(
+            std::shared_ptr<OnionRequestRouter> router,
+            OnionPath& path,
+            Request request,
+            network_response_callback_t callback) {
+        router->_send_on_path(path, std::move(request), std::move(callback));
+    }
+
     static void handle_transport_response(
             std::shared_ptr<OnionRequestRouter> router,
             std::string path_id,
@@ -218,8 +226,19 @@ namespace {
             func_called("remove_failure_listeners");
         }
 
-        void send_request(Request /*request*/, network_response_callback_t /*callback*/) override {
+        // Answered the way a node on the path does when it fails a request itself: a status of its
+        // own and a plaintext body, which is nothing the destination encrypted
+        std::optional<std::pair<int16_t, std::string>> plaintext_reply;
+
+        void send_request(Request /*request*/, network_response_callback_t callback) override {
             func_called("send_request");
+            if (plaintext_reply)
+                callback(
+                        false,
+                        false,
+                        plaintext_reply->first,
+                        {content_type_plain_text},
+                        plaintext_reply->second);
         }
     };
 
@@ -923,5 +942,100 @@ TEST_CASE("Network", "[network][onion_request_router][cached_edge_nodes]") {
     auto remaining = TestOnionRequestRouter::cached_edge_nodes(router);
     REQUIRE(remaining.size() == 1);
     CHECK(remaining.front().node == healthy);
+}
+
+TEST_CASE("Network", "[network][onion_request_router][undecrypted_response]") {
+    config::SnodePool pool_config = {
+            .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = 3};
+    config::OnionRequestRouter config = {
+            file_server::DEFAULT_CONFIG,
+            std::nullopt,
+            std::chrono::days{10},
+            opt::netid::Target::testnet,
+            {},
+            network::opt::retry_delay{50ms, 200ms},
+            3,
+            3,
+            10,
+            10min,
+            3,
+            true,
+            true,
+            {{PathCategory::standard, 1}}};
+
+    auto node = [](std::string_view pk_hex, uint16_t port) {
+        return service_node{
+                ed25519_pubkey::from_hex(pk_hex),
+                oxen::quic::ipv4{"127.0.0.1"},
+                port,
+                static_cast<uint16_t>(port + 10000),
+                {2, 11, 0},
+                0};
+    };
+    auto target = node("4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7", 20001);
+    auto path_nodes = std::vector<service_node>{
+            node("5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876", 20002),
+            node("e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5", 20003),
+            node("7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f", 20004)};
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto transport = std::make_shared<TestTransport>();
+    auto router =
+            std::make_shared<OnionRequestRouter>(config, loop, disk_loop, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(
+            router, PathCategory::standard, {OnionPath{"Test", path_nodes}});
+
+    auto send_with_reply = [&](int16_t status) {
+        transport->plaintext_reply.emplace(status, "Forged by a node on the path");
+        auto request = Request{
+                "AAAA", target, "retrieve", to_vector("{}"), RequestCategory::standard, 10s};
+        auto* path = TestOnionRequestRouter::find_valid_path(router, request);
+        REQUIRE(path);
+
+        std::optional<Result> result;
+        TestOnionRequestRouter::send_on_path(
+                router,
+                *path,
+                request,
+                [&result](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> response) {
+                    result = {success, timeout, status_code, headers, response};
+                });
+        REQUIRE(result);
+        return *result;
+    };
+
+    // Each of these is acted on as the destination's verdict (a swarm redirect, a clock resync),
+    // which only the destination can give; a node on the path sending one mustn't pass for it
+    for (int16_t status : {ERROR_MISDIRECTED_REQUEST, ERROR_NOT_ACCEPTABLE, ERROR_TOO_EARLY}) {
+        CAPTURE(status);
+        auto result = send_with_reply(status);
+        CHECK_FALSE(result.success);
+        CHECK(result.status_code == ERROR_UNAUTHENTICATED_RESPONSE);
+        CHECK(result.response.value_or("").find("status {}"_format(status)) != std::string::npos);
+    }
+
+    // Anything else a node on the path says about its own failure is reported as it was
+    auto result = send_with_reply(502);
+    CHECK_FALSE(result.success);
+    CHECK(result.status_code == 502);
 }
 }  // namespace session::network

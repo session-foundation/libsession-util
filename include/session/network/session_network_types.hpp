@@ -30,6 +30,7 @@ constexpr int16_t ERROR_FAILED_TO_QUEUE_REQUEST = -10008;
 constexpr int16_t ERROR_INVALID_DESTINATION = -10009;
 constexpr int16_t ERROR_FAILED_GENERATE_ONION_PAYLOAD = -10010;
 constexpr int16_t ERROR_FAILED_TO_GET_STREAM = -10011;
+constexpr int16_t ERROR_UNAUTHENTICATED_RESPONSE = -10012;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10100;
 constexpr int16_t ERROR_REQUEST_CANCELLED = -10200;
 constexpr int16_t ERROR_UNKNOWN = -11000;
@@ -281,6 +282,13 @@ namespace response {
 
     /// As `find_uniform_batch_error`, for a body that has already been parsed.
     std::optional<int16_t> uniform_batch_error(const nlohmann::json& json);
+
+    /// The status to report for a proxied response that could not be decrypted, whose status
+    /// therefore came from whichever node on the way answered rather than from the destination.
+    /// Statuses that are acted on as the destination's verdict (406, 421, 425) become
+    /// `ERROR_UNAUTHENTICATED_RESPONSE`, since any node on the path could have sent them; anything
+    /// else is returned unchanged.
+    int16_t undecrypted_status(int16_t status);
 
     /// One result of a `batch`/`sequence` response, or the whole of any other response.
     struct subresponse {

@@ -539,32 +539,35 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
             request.time_remaining(),
             request.overall_timeout};
 
-    auto proxy_callback =
-            [parser = std::move(parser), cb = std::move(callback)](
-                    bool success, bool timeout, int16_t status, auto headers, auto response) {
-                try {
-                    if (!success)
-                        throw std::runtime_error{response.value_or("Unknown request failure")};
-                    if (timeout)
-                        throw std::runtime_error{response.value_or("Timed out")};
-                    if (!response)
-                        throw std::runtime_error{"Unexpected empty response"};
+    auto proxy_callback = [parser = std::move(parser), cb = std::move(callback)](
+                                  bool success,
+                                  bool timeout,
+                                  int16_t status,
+                                  auto headers,
+                                  auto response) {
+        try {
+            if (!success)
+                throw std::runtime_error{response.value_or("Unknown request failure")};
+            if (timeout)
+                throw std::runtime_error{response.value_or("Timed out")};
+            if (!response)
+                throw std::runtime_error{"Unexpected empty response"};
 
-                    onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
-                    cb(true,
-                       false,
-                       decrypted.status_code,
-                       std::move(decrypted.headers),
-                       std::move(decrypted.body));
-                } catch (const std::exception& e) {
-                    cb(false,
-                       timeout,
-                       status,
-                       std::move(headers),
-                       "Failed to handle proxied request response due to error: {}"_format(
-                               e.what()));
-                }
-            };
+            onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
+            cb(true,
+               false,
+               decrypted.status_code,
+               std::move(decrypted.headers),
+               std::move(decrypted.body));
+        } catch (const std::exception& e) {
+            cb(false,
+               timeout,
+               response::undecrypted_status(status),
+               std::move(headers),
+               "Failed to handle proxied request response (status {}) due to error: {}"_format(
+                       status, e.what()));
+        }
+    };
 
     // Now that we have a service_node destination we can send a direct request
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));

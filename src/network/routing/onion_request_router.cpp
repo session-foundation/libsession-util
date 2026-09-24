@@ -1634,51 +1634,49 @@ void OnionRequestRouter::_send_on_path(
         return;
     }
 
-    auto decryption_callback = [weak_self = weak_from_this(),
-                                this,
-                                parser = std::move(parser),
-                                path_id = path.id,
-                                original_request = std::move(request),
-                                cb = std::move(callback)](
-                                       bool success,
-                                       bool timeout,
-                                       int16_t status,
-                                       auto headers,
-                                       auto response) {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
+    auto decryption_callback =
+            [weak_self = weak_from_this(),
+             this,
+             parser = std::move(parser),
+             path_id = path.id,
+             original_request = std::move(request),
+             cb = std::move(callback)](
+                    bool success, bool timeout, int16_t status, auto headers, auto response) {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
 
-        try {
-            if (!success)
-                throw std::runtime_error{response.value_or("Unknown request failure")};
-            if (timeout)
-                throw std::runtime_error{response.value_or("Timed out")};
-            if (!response)
-                throw std::runtime_error{"Unexpected empty response"};
+                try {
+                    if (!success)
+                        throw std::runtime_error{response.value_or("Unknown request failure")};
+                    if (timeout)
+                        throw std::runtime_error{response.value_or("Timed out")};
+                    if (!response)
+                        throw std::runtime_error{"Unexpected empty response"};
 
-            onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
-            _handle_transport_response(
-                    path_id,
-                    std::move(original_request),
-                    true,
-                    false,
-                    decrypted.status_code,
-                    std::move(decrypted.headers),
-                    std::move(decrypted.body),
-                    std::move(cb));
-        } catch (const std::exception& e) {
-            _handle_transport_response(
-                    path_id,
-                    std::move(original_request),
-                    false,
-                    timeout,
-                    status,
-                    std::move(headers),
-                    std::move("Failed to handle onion response due to error: {}"_format(e.what())),
-                    std::move(cb));
-        }
-    };
+                    onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
+                    _handle_transport_response(
+                            path_id,
+                            std::move(original_request),
+                            true,
+                            false,
+                            decrypted.status_code,
+                            std::move(decrypted.headers),
+                            std::move(decrypted.body),
+                            std::move(cb));
+                } catch (const std::exception& e) {
+                    _handle_transport_response(
+                            path_id,
+                            std::move(original_request),
+                            false,
+                            timeout,
+                            response::undecrypted_status(status),
+                            std::move(headers),
+                            "Failed to handle onion response (status {}) due to error: {}"_format(
+                                    status, e.what()),
+                            std::move(cb));
+                }
+            };
 
     transport->send_request(std::move(onion_request), std::move(decryption_callback));
 }

@@ -118,6 +118,15 @@ namespace {
     }
 }  // namespace
 
+int16_t response::undecrypted_status(int16_t status) {
+    switch (status) {
+        case ERROR_NOT_ACCEPTABLE:
+        case ERROR_MISDIRECTED_REQUEST:
+        case ERROR_TOO_EARLY: return ERROR_UNAUTHENTICATED_RESPONSE;
+        default: return status;
+    }
+}
+
 std::optional<int16_t> response::find_uniform_batch_error(std::string_view body) {
     try {
         return uniform_batch_error(nlohmann::json::parse(body));
