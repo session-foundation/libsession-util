@@ -378,8 +378,8 @@ TEST_CASE(
         "push on a clean config still consumes the obsolete-hash list",
         "[config][determinism][seqno][obsolete]") {
 
-    // A re-store leaves the seqno and the bytes alone, but it is NOT side-effect free: push()
-    // clears `_old_hashes` unconditionally (src/config/base.cpp:810-813), outside the
+    // A re-store leaves the seqno and the bytes alone, but it is NOT side-effect free:
+    // `ConfigBase::push()` ends by clearing `_old_hashes` unconditionally, outside the
     // `if (is_dirty())` guard above it.  So a recovery push hands back the superseded hashes and
     // forgets them.  A caller that treats a recovery push as a no-op and discards its
     // obsolete-hash return will leak those messages on the swarm: nothing reports them again, and
@@ -422,7 +422,7 @@ TEST_CASE(
         "a read-only member re-stores but is never handed the obsolete hashes",
         "[config][determinism][groups][obsolete]") {
 
-    // The hand-back and the clear are gated differently (src/config/base.cpp:809-813):
+    // The hand-back and the clear are gated differently (at the end of `ConfigBase::push()`):
     //
     //     if (!is_readonly())
     //         for (auto& old : _old_hashes)

@@ -60,6 +60,9 @@ using namespace std::literals;
 /// A -- active config messages list. A list of lists, where each list has:
 ///      - as first argument the generation number
 ///      - the rest are the hashes valid for that generation number
+/// C -- dict of the raw bytes of the messages named in "A", keyed by message hash, so that a
+///      message which has expired from the swarm can be re-stored verbatim.  Absent from dumps
+///      written before it existed.
 /// L -- a list of dict representing all the keys. Each dict has:
 ///      - k -- same as "For supplemental messages"
 ///      - g -- same as "For supplemental messages"
