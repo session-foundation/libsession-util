@@ -4199,18 +4199,43 @@ void Client::_upload_next(int64_t client_id, Conversation::upload_progress on_up
         return _finish_attachment_send(client_id);
 
     auto [idx, path] = *next;
-    auto index = static_cast<size_t>(idx);
 
     // Checked here rather than only at send_message, because that check is on the other side of
     // however long the message sat waiting: a file present when it was attached can be gone by the
     // time its turn comes, and a message resumed in a later run may have been waiting for days.
-    std::error_code ec;
-    auto plaintext_size = static_cast<int64_t>(std::filesystem::file_size(path, ec));
-    if (ec || !std::filesystem::is_regular_file(path, ec) || ec) {
+    // On the disk loop, and carried on with back here.
+    _post_disk([this,
+                client_id,
+                index = static_cast<size_t>(idx),
+                path = std::move(path),
+                on_upload = std::move(on_upload)]() mutable {
+        std::optional<int64_t> size;
+        std::error_code ec;
+        auto found = std::filesystem::file_size(path, ec);
+        if (!ec && std::filesystem::is_regular_file(path, ec) && !ec)
+            size = static_cast<int64_t>(found);
+        call([this,
+              client_id,
+              index,
+              path = std::move(path),
+              size,
+              on_upload = std::move(on_upload)]() mutable {
+            _upload_one(client_id, index, std::move(path), size, std::move(on_upload));
+        });
+    });
+}
+
+void Client::_upload_one(
+        int64_t client_id,
+        size_t index,
+        std::string path,
+        std::optional<int64_t> file_size,
+        Conversation::upload_progress on_upload) {
+    if (!file_size) {
         log::warning(
                 cat,
                 "Attachment {} of message {} is gone ({}); the message cannot be sent",
-                idx,
+                index,
                 client_id,
                 path);
         if (on_upload)
@@ -4221,13 +4246,14 @@ void Client::_upload_next(int64_t client_id, Conversation::upload_progress on_up
                     unexpected{Error{err::attachment_file_missing, "{} is gone"_format(path)}});
         return _fail_attachment_send(client_id, /*permanent=*/true);
     }
+    auto plaintext_size = *file_size;
 
     auto net = core.network();
     if (!net) {
         log::warning(
                 cat,
                 "Cannot upload attachment {} of message {}: no network is attached",
-                idx,
+                index,
                 client_id);
         if (on_upload)
             on_upload(
@@ -4341,7 +4367,7 @@ void Client::_upload_next(int64_t client_id, Conversation::upload_progress on_up
         });
     };
 
-    log::debug(cat, "Uploading attachment {} of message {}: {}", idx, client_id, path);
+    log::debug(cat, "Uploading attachment {} of message {}: {}", index, client_id, path);
     // Bound to a name: the accessor's span is deliberately unavailable on a temporary.
     auto seed_access = core.globals.account_seed();
     net->upload_file(std::move(req), seed_access.seed());
@@ -4905,15 +4931,13 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
     if (auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY); max_size && size > *max_size)
         return;
 
-    // The fixed one bounds the loop, and applies whether or not the other is set.  What follows
-    // reads and encrypts the whole file here, as caching a download does -- but a download is
-    // refused past this size and an upload is not, so without it the cost of sending a large file
-    // would be unbounded.  The price is that such a file cannot be drawn from the sender's own
-    // transcript, which is where it already stands for every recipient: none of them can fetch it.
+    // The fixed one applies whether or not the other is set, so that sending a large file does not
+    // also cost an equally large cache entry.  The price is that such a file cannot be drawn from
+    // the sender's own transcript, which is where it already stands for every recipient: none of
+    // them can fetch it.
     //
-    // TODO: copy it in chunks across turns of the loop, through a cache writer that encrypts as it
-    // goes, and bound it by a setting for what a requested file may cost the cache rather than by
-    // this fixed limit.  The same whole-file read happens wherever the cache is filled or read.
+    // TODO: bound this by the setting for what a requested file may cost the cache, once there is
+    // one, rather than by this fixed limit.
     if (size > static_cast<int64_t>(attachment::MAX_REGULAR_SIZE))
         return;
 
@@ -4925,57 +4949,61 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
             static_cast<int64_t>(index));
     if (!stored)
         return;
-    std::filesystem::path path{*stored};
 
-    // Re-read rather than kept from the upload, which streams the file rather than holding it.
-    // Best effort throughout: a file moved or replaced between the upload finishing and this leaves
-    // nothing cached, which costs a download if the message is ever drawn again and nothing else.
-    //
-    // The length has to still match what was uploaded.  A url names one particular encrypted body,
-    // so storing something else under it would leave the cache answering for that url with bytes
-    // that are not the ones it identifies -- and unlike a missing cache entry, that is wrong rather
-    // than merely slow.
-    std::error_code ec;
-    if (std::filesystem::file_size(path, ec) != static_cast<uintmax_t>(size) || ec) {
-        log::debug(
-                cat,
-                "Not caching attachment of message {}: {} is no longer the file that was uploaded",
+    // Copied on the disk loop, a chunk at a time, and recorded back here.  Re-read rather than kept
+    // from the upload, which streams the file rather than holding it.  Best effort throughout: a
+    // file moved or replaced between the upload finishing and this leaves nothing cached, which
+    // costs a download if the message is ever drawn again and nothing else.
+    _post_disk([this,
                 client_id,
-                path.string());
-        return;
-    }
+                url,
+                size,
+                source = std::filesystem::path{*stored},
+                file = _cache_path(cache::ATTACHMENT_DIR, url),
+                key = _cache_encryption_key()] {
+        // The length has to still match what was uploaded.  A url names one particular encrypted
+        // body, so storing something else under it would leave the cache answering for that url
+        // with bytes that are not the ones it identifies -- and unlike a missing cache entry, that
+        // is wrong rather than merely slow.
+        std::error_code ec;
+        if (std::filesystem::file_size(source, ec) != static_cast<uintmax_t>(size) || ec) {
+            log::debug(
+                    cat,
+                    "Not caching attachment of message {}: {} is no longer the file that was "
+                    "uploaded",
+                    client_id,
+                    source.string());
+            return;
+        }
 
-    std::vector<std::byte> data(static_cast<size_t>(size));
-    std::ifstream in{path, std::ios::binary};
-    in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    if (!in) {
-        log::debug(
-                cat,
-                "Not caching attachment of message {}: {} could not be read back",
-                client_id,
-                path.string());
-        return;
-    }
+        int64_t on_disk;
+        try {
+            std::ifstream in;
+            in.exceptions(std::ios::badbit);
+            in.open(source, std::ios::binary);
+            cache::Writer w{file, key, attachment::encrypted_padding(static_cast<size_t>(size))};
+            std::vector<std::byte> chunk(attachment::ENCRYPT_CHUNK_SIZE);
+            int64_t copied = 0;
+            while (copied < size) {
+                in.read(reinterpret_cast<char*>(chunk.data()),
+                        static_cast<std::streamsize>(chunk.size()));
+                auto got = static_cast<size_t>(in.gcount());
+                if (got == 0)
+                    throw std::runtime_error{"{} ended early"_format(source.string())};
+                w.write(std::span{chunk}.first(got));
+                copied += static_cast<int64_t>(got);
+            }
+            w.commit();
+            on_disk = static_cast<int64_t>(std::filesystem::file_size(file));
+        } catch (const std::exception& e) {
+            // A cache that cannot be written is a cache that misses next time, which is not worth
+            // anything more than a note.
+            log::warning(cat, "Could not cache attachment of message {}: {}", client_id, e.what());
+            return;
+        }
 
-    _cache_attachment(url, _cache_encryption_key(), data);
-}
-
-bool Client::_cache_attachment(
-        const std::string& url,
-        std::span<const std::byte, 32> key,
-        std::span<const std::byte> data) {
-    auto file = _cache_path(cache::ATTACHMENT_DIR, url);
-    int64_t size;
-    try {
-        cache::write(file, key, data);
-        size = static_cast<int64_t>(std::filesystem::file_size(file));
-    } catch (const std::exception& e) {
-        // A cache that cannot be written is a cache that misses next time, which is not worth
-        // failing the caller's fetch over.
-        log::warning(cat, "Could not cache an attachment: {}", e.what());
-        return false;
-    }
-    return _record_cached(url, file, size);
+        call([this, url, file, on_disk] { _record_cached(url, file, on_disk); });
+    });
 }
 
 bool Client::_record_cached(

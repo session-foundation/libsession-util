@@ -867,12 +867,6 @@ class Client {
     // attachment, no url, or a verdict already recorded against the file.
     RemoteFile _remote_file(int64_t message_id, size_t index);
 
-    // Writes `data` into the attachment cache under `url`, and then `_record_cached`.
-    bool _cache_attachment(
-            const std::string& url,
-            std::span<const std::byte, 32> key,
-            std::span<const std::byte> data);
-
     // Records `file`, already in the attachment cache and taking `on_disk` bytes there, as `url`'s,
     // and tells every message showing that file that it is now here.  The row is an index over the
     // file, so this comes after the file exists -- and is handed its size rather than finding it
@@ -1039,6 +1033,15 @@ class Client {
     // finishes the send.  Each upload's completion calls this again, so the chain runs one file at
     // a time and resumes wherever it was left -- which is also what a retry does.
     void _upload_next(int64_t client_id, Conversation::upload_progress on_upload);
+
+    // The rest of `_upload_next`, once the disk loop has looked at the file: uploads attachment
+    // `index` from `path`, or fails the message for good if `file_size` says the file is gone.
+    void _upload_one(
+            int64_t client_id,
+            size_t index,
+            std::string path,
+            std::optional<int64_t> file_size,
+            Conversation::upload_progress on_upload);
 
     // Rebuilds the message's content with its now-uploaded attachments named in it, replaces what
     // was stored, and dispatches it.  Rebuilt from the database rather than from what send_message
