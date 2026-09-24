@@ -3255,3 +3255,223 @@ TEST_CASE(
     CHECK(reported->code == err::file_unreadable);
     CHECK(reported->message.find("decryption failed") != std::string::npos);
 }
+
+TEST_CASE("Client: a request for an attachment can be withdrawn", "[client][attachments][cancel]") {
+    TempCacheDir dir, out;
+    std::vector<AttachmentProgress> broadcast;
+    callbacks cbs;
+    cbs.attachment_progress = [&](const ConversationId&, const AttachmentProgress& p) {
+        broadcast.push_back(p);
+    };
+    TempClient c{cbs};
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, await);
+
+    // Several chunks, so that half of it is partway through something.
+    std::vector<std::byte> plaintext(200'000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    auto arrive = [&] {
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(1000),
+                "h1",
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(1);
+                    a->set_url(network::file_server::generate_download_url("wanted", {}, true));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                7);
+        sync(*c);
+        return c->conversation(convo, await)->messages(await)[0].id;
+    };
+    auto availability = [&](int64_t id) {
+        return c->message(id, await)->attachments[0].availability;
+    };
+
+    network::file_metadata meta{"wanted", static_cast<int64_t>(ciphertext.size()), {}, {}};
+    std::span all{ciphertext};
+    auto half = all.size() / 2;
+    auto take_request = [&] {
+        REQUIRE(net->downloads.size() == 1);
+        auto r = std::move(net->downloads[0]);
+        net->downloads.clear();
+        return r;
+    };
+    auto serve_half = [&](network::DownloadRequest& r) {
+        r.on_data(meta, all.first(half));
+        sync(*c);
+    };
+    auto serve_rest = [&](network::DownloadRequest& r) {
+        r.on_data(meta, all.subspan(half));
+        r.on_complete(meta, false);
+        sync(*c);
+    };
+    auto was_cancelled = [](const auto& r) {
+        return !r.has_value() && r.error().code == err::download_cancelled;
+    };
+
+    std::optional<Expected<std::vector<std::byte>>> shown;
+    std::vector<AttachmentProgress> seen;
+    auto show = [&](int64_t id) {
+        return c->attachment_data(
+                id,
+                0,
+                [&](const AttachmentProgress& p) { seen.push_back(p); },
+                [&](auto r) { shown = std::move(r); });
+    };
+    std::vector<Expected<std::filesystem::path>> saved;
+    auto dest = out.path / "saved.png";
+    auto save = [&](int64_t id) {
+        return c->Client::save_attachment(
+                id, 0, dest, nullptr, [&](auto r) { saved.push_back(std::move(r)); }, false);
+    };
+
+    SECTION("a display alone stops the download, and leaves nothing behind") {
+        auto id = arrive();
+        auto token = show(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+        CHECK(partial_cache_files(dir.path).size() == 1);
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        REQUIRE(shown);
+        CHECK(was_cancelled(*shown));
+        REQUIRE_FALSE(seen.empty());
+        CHECK(seen.back().token == token);
+        CHECK(failure_code(seen.back().result) == err::download_cancelled);
+        CHECK(*request.cancelled);
+        CHECK(partial_cache_files(dir.path).empty());
+        CHECK(availability(id) == AttachmentAvailability::absent);
+
+        // Whatever the network still delivers changes nothing.
+        auto reports = seen.size();
+        serve_rest(request);
+        CHECK(seen.size() == reports);
+        CHECK(was_cancelled(*shown));
+        CHECK(partial_cache_files(dir.path).empty());
+        CHECK(availability(id) == AttachmentAvailability::absent);
+    }
+
+    SECTION("a display sharing the download leaves it running for the other") {
+        auto id = arrive();
+        std::optional<Expected<std::vector<std::byte>>> other;
+        c->attachment_data(id, 0, nullptr, [&](auto r) { other = std::move(r); });
+        auto token = show(id);
+        CHECK(token != 0);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        REQUIRE(shown);
+        CHECK(was_cancelled(*shown));
+        CHECK_FALSE(*request.cancelled);
+        CHECK(availability(id) == AttachmentAvailability::fetching);
+
+        serve_rest(request);
+        REQUIRE(other);
+        REQUIRE(other->has_value());
+        CHECK(**other == plaintext);
+        CHECK(availability(id) == AttachmentAvailability::cached);
+    }
+
+    SECTION("a save alone stops the download, and removes what it had written") {
+        auto id = arrive();
+        auto token = save(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+        CHECK_FALSE(std::filesystem::is_empty(out.path));
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        REQUIRE(saved.size() == 1);
+        CHECK(was_cancelled(saved[0]));
+        CHECK(std::filesystem::is_empty(out.path));
+        CHECK(*request.cancelled);
+        CHECK(partial_cache_files(dir.path).empty());
+        CHECK(availability(id) == AttachmentAvailability::absent);
+
+        serve_rest(request);
+        CHECK(saved.size() == 1);
+        CHECK(std::filesystem::is_empty(out.path));
+    }
+
+    SECTION("a save leaves the download running for a display") {
+        // Either way round: a save that started the download is written as it arrives, and one
+        // that joined is served afterwards, and withdrawing either is the same to the display.
+        auto id = arrive();
+        bool save_first = GENERATE(true, false);
+        uint64_t token;
+        if (save_first) {
+            token = save(id);
+            show(id);
+        } else {
+            show(id);
+            token = save(id);
+        }
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        REQUIRE(saved.size() == 1);
+        CHECK(was_cancelled(saved[0]));
+        CHECK_FALSE(*request.cancelled);
+
+        serve_rest(request);
+        REQUIRE(shown);
+        REQUIRE(shown->has_value());
+        CHECK(**shown == plaintext);
+        CHECK(saved.size() == 1);
+        CHECK(std::filesystem::is_empty(out.path));
+        CHECK(availability(id) == AttachmentAvailability::cached);
+    }
+
+    SECTION("an auto-download is withdrawn by the token its progress carries") {
+        c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+        auto id = arrive();
+        auto request = take_request();
+        REQUIRE_FALSE(broadcast.empty());
+        auto token = broadcast.back().token;
+        CHECK(token != 0);
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        CHECK(*request.cancelled);
+        CHECK(failure_code(broadcast.back().result) == err::download_cancelled);
+        CHECK(availability(id) == AttachmentAvailability::absent);
+    }
+
+    SECTION("a request that has already finished is not withdrawn") {
+        auto id = arrive();
+        auto token = save(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+        serve_rest(request);
+        REQUIRE(saved.size() == 1);
+        REQUIRE(saved[0].has_value());
+
+        c->cancel_attachment_transfer(token);
+        sync(*c);
+        CHECK(saved.size() == 1);
+        CHECK(std::filesystem::exists(*saved[0]));
+    }
+}

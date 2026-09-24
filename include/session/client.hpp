@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -377,11 +378,29 @@ class Client {
     /// The two about the file are verdicts on it: every message quoting it shows them as its
     /// `availability`, and asking for it again answers at once, downloading nothing, until the
     /// sender sends it again.
-    void attachment_data(
+    ///
+    /// Returns the request's token, for `cancel_attachment_transfer`, which fails it with
+    /// `err::download_cancelled`.
+    uint64_t attachment_data(
             int64_t message_id,
             size_t index,
             std::function<void(const AttachmentProgress&)> on_progress,
             result_function<std::vector<std::byte>> cb);
+
+    /// Withdraws one request made by `attachment_data` or `save_attachment`, by the token it
+    /// returned or that its progress reports carry: its callback, and the last progress report it
+    /// gets, fail with `err::download_cancelled`, and a save leaves nothing behind.  An
+    /// auto-download is withdrawn the same way, by the token in its progress.
+    ///
+    /// The download itself stops only once nothing else is waiting on it -- another display of
+    /// the same file, a save, an auto-download -- since cancelling one of them is not cancelling
+    /// the others.  A copy that was being written to the cache goes with it.
+    ///
+    /// Nothing happens for a token that has already finished, or never existed.  One that finishes
+    /// while this is on its way reports how it finished, so a save that is told it succeeded has
+    /// its file.  An `attachment_data` answered from the cache is too quick to withdraw, and is
+    /// always served.
+    void cancel_attachment_transfer(uint64_t token);
 
     /// Removes one deleted message's leftover row.  The conversation-wide form, and the reason a
     /// deletion leaves a row at all — including how this can bring a message back — are on
@@ -472,9 +491,11 @@ class Client {
     /// neither chooses nor needs to know: current clients still send the legacy scheme, and files
     /// we send use the stream one.
     ///
+    /// Returns the request's token, as `attachment_data` does.
+    ///
     /// @throws std::invalid_argument if `dest` names a directory or its parent does not exist;
     /// thrown on the calling thread, before anything is fetched.
-    void save_attachment(
+    uint64_t save_attachment(
             int64_t message_id,
             size_t index,
             std::filesystem::path dest,
@@ -764,6 +785,22 @@ class Client {
     using transfer_progress =
             std::function<void(int64_t done, int64_t total, std::optional<Expected<void>> result)>;
 
+    // Somebody wanting a file's bytes: a display, an auto-download, a picture fetch.
+    //
+    // `token` is what `cancel_attachment_transfer` finds it by, and 0 for a fetch nothing outside
+    // can name, which is therefore never withdrawn.  `message_id` is the message it was asked for,
+    // if it was, so that deleting the message can withdraw it.
+    struct Waiter {
+        uint64_t token = 0;
+        std::optional<int64_t> message_id;
+        transfer_progress progress;
+        result_function<std::vector<std::byte>> cb;
+    };
+
+    // Where tokens come from.  Taken on the caller's thread, so a request can hand its token back
+    // before anything has happened on the loop.
+    std::atomic<uint64_t> _next_token{1};
+
     // A download that is already happening, and everyone waiting on it.  Defined beside the code
     // that runs it: what it holds -- the cache writer the bytes stream into, and which of its
     // fields belong to which loop -- is nothing a reader of this header needs.
@@ -817,6 +854,14 @@ class Client {
     // everything that reads or writes this hops first; the application's own callbacks then hop
     // again, out through the dispatcher.
     std::map<std::string, std::shared_ptr<Transfer>> _in_flight;
+
+    // Withdraws the waiter or save holding `token`, wherever it is, and stops a transfer left with
+    // nobody on it.
+    void _cancel(uint64_t token);
+
+    // Stops `found`'s transfer and forgets it if nobody is left on it, discarding whatever it was
+    // keeping; true if it did.
+    bool _abort_if_unwanted(std::map<std::string, std::shared_ptr<Transfer>>::iterator found);
 
     /// What to tell a reader about an attachment's file: the `Attachment` fields that report it,
     /// given the `cached` reference and `unavailable` verdict already read from its row.
@@ -1018,6 +1063,7 @@ class Client {
             int64_t message_id,
             size_t index,
             bool automatic,
+            uint64_t token,
             std::function<void(const AttachmentProgress&)> on_progress,
             result_function<std::vector<std::byte>> cb);
 
@@ -1113,6 +1159,7 @@ class Client {
     transfer_progress _attachment_progress(
             int64_t message_id,
             size_t index,
+            uint64_t token,
             std::function<void(const AttachmentProgress&)> on_progress);
 
     // What is being downloaded.  Only ever consulted to pick between the two *legacy* formats,
@@ -1164,9 +1211,12 @@ class Client {
     // the wrong length for the scheme it resolves to -- ends `unreadable` without anything being
     // sent, through `on_done` like any other failure and so before this returns.
     //
+    // Returns the flag that stops the download when set, or nullptr for one that has already
+    // ended.  Stopped that way, it ends `failed` like any other cancel.
+    //
     // Throws `session::error` with `err::network_unavailable`, before starting anything, if no
     // network is attached.
-    void _download_decrypted(
+    std::shared_ptr<std::atomic<bool>> _download_decrypted(
             RemoteFile remote,
             DownloadKind kind,
             std::function<void(std::span<const std::byte> plaintext, size_t padding)> on_data,
@@ -1199,18 +1249,10 @@ class Client {
     // instead, since there is then nowhere to read it back from.  `target.dir` says whether the
     // cached copy is an attachment, which is indexed and evictable, or a picture, which is
     // neither.
-    void _fetch_cached(
-            FetchTarget target,
-            bool caching,
-            transfer_progress progress,
-            result_function<std::vector<std::byte>> cb);
+    void _fetch_cached(FetchTarget target, bool caching, Waiter w);
 
     // `_fetch_cached` once the cache has missed: joins a transfer of the same claim, or starts one.
-    void _fetch_uncached(
-            FetchTarget target,
-            bool caching,
-            transfer_progress progress,
-            result_function<std::vector<std::byte>> cb);
+    void _fetch_uncached(FetchTarget target, bool caching, Waiter w);
 
     // Registers `t` under `name` and starts its download.  Its waiters are told of a download that
     // cannot even start.
@@ -1252,6 +1294,7 @@ class Client {
     void _save_attachment(
             int64_t message_id,
             size_t index,
+            uint64_t token,
             std::filesystem::path dest,
             std::function<void(const AttachmentProgress&)> on_progress,
             result_function<std::filesystem::path> cb,
@@ -1260,6 +1303,10 @@ class Client {
 
     // A save in progress; defined beside the code that runs it.
     struct Save;
+
+    // Every save not yet reported, by token: Core's loop's, and how a cancel finds one wherever it
+    // has got to -- on a transfer, or reading from the cache.
+    std::unordered_map<uint64_t, std::shared_ptr<Save>> _saves;
 
     // Joins a transfer of the file, to be served from it once it ends, or starts one written
     // straight to the save as it arrives.
@@ -1280,15 +1327,19 @@ class Client {
     static void _save_write(Save& s, std::span<const std::byte> data);
 
     // On the disk loop: renames the save into place, or removes what it wrote if `error` says the
-    // transfer failed or the save itself has.
+    // transfer failed or the save itself has.  Settles it, so nothing after this touches it.
     static Expected<std::filesystem::path> _save_finish(Save& s, std::optional<Error> error);
+
+    // Finishes a save written as its transfer arrived, once the transfer has ended: `_save_finish`
+    // on the disk loop, then `_saved`.
+    void _save_complete(std::shared_ptr<Save> s, std::optional<Error> error);
 
     // On the disk loop: closes and removes the save's temporary file.
     static void _save_discard(Save& s);
 
     // On Core's loop: tells the caller how the save ended, and on success records it and tells the
-    // sender.
-    void _saved(const Save& s, Expected<std::filesystem::path> result);
+    // sender.  Only the first report counts: a cancel and the save's own ending can cross.
+    void _saved(Save& s, Expected<std::filesystem::path> result);
 
     // Tells a message's sender that we saved one of its attachments.  Fire and forget: nothing
     // waits on it and a failure is logged rather than reported, since it is a courtesy to them

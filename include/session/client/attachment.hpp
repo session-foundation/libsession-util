@@ -82,6 +82,11 @@ struct AttachmentProgress {
     int64_t message_id;
     size_t index;
 
+    /// The request this reports on, as `attachment_data` and `save_attachment` return it, for
+    /// `Client::cancel_attachment_transfer`.  Several requests sharing one download each have their
+    /// own, and an auto-download has one too, which reaches the application only through here.
+    uint64_t token = 0;
+
     /// Encrypted bytes so far, and how many are expected.  Encrypted rather than the file's own
     /// size because that is what is actually being moved and therefore what a proportion should be
     /// computed from; the two differ by padding and framing.
