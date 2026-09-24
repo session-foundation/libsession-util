@@ -8,6 +8,7 @@
 #include <concepts>
 #include <exception>
 #include <fstream>
+#include <limits>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic.hpp>
@@ -55,9 +56,12 @@ namespace {
     // exactly what a persistent rejection source would produce.
     const std::chrono::seconds EVIDENCE_REFRESH_BASE_BACKOFF = 1min;
 
-    // Two nodes disagreeing about who owns a swarm can redirect us back and forth; after this many
-    // in a row without an intervening pool refresh, stop believing them and go and refresh.
-    constexpr uint8_t MAX_CONSECUTIVE_SWARM_REDIRECTS = 3;
+    // An account redirected more than this many times within one pool generation is being bounced
+    // between nodes that disagree, or its swarm has moved on too far for our pool to keep up.  A
+    // redirect is still the best information we have, so past it each one is still followed, and
+    // also asks for the refresh that can settle it.  Legitimate rearrangements count too (nothing
+    // resets this short of a refresh), hence the headroom.
+    constexpr uint8_t SWARM_REDIRECTS_BEFORE_REFRESH = 8;
 }  // namespace
 
 SnodePool::SnodePool(
@@ -1261,25 +1265,31 @@ bool SnodePool::record_swarm_redirect(
         }
 
         auto& [nodes, redirects] = _swarm_overrides[swarm_pubkey];
+        nodes = std::move(resolved);
 
-        if (++redirects > MAX_CONSECUTIVE_SWARM_REDIRECTS) {
-            log::warning(
-                    cat,
-                    "Dropping redirects for {} after {} in a row; refreshing the pool instead.",
-                    swarm_pubkey.hex(),
-                    MAX_CONSECUTIVE_SWARM_REDIRECTS);
-            _swarm_overrides.erase(swarm_pubkey);
-            return false;
-        }
+        // Saturating, because counting carries on past the limit for as long as the refresh it
+        // asks for is throttled, and wrapping would stop it asking
+        if (redirects < std::numeric_limits<decltype(redirects)>::max())
+            ++redirects;
 
         log::info(
                 cat,
-                "Redirected to a swarm of {} nodes for {} ({} of at most {}).",
-                resolved.size(),
+                "Redirected to a swarm of {} nodes for {} (redirect {} since the pool was "
+                "refreshed).",
+                nodes.size(),
                 swarm_pubkey.hex(),
-                redirects,
-                MAX_CONSECUTIVE_SWARM_REDIRECTS);
-        nodes = std::move(resolved);
+                redirects);
+
+        if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH) {
+            log::warning(
+                    cat,
+                    "{} has been redirected {} times since the pool was refreshed; asking for a "
+                    "refresh.",
+                    swarm_pubkey.hex(),
+                    redirects);
+            invalidate_swarm(swarm_pubkey);
+        }
+
         return true;
     });
 }

@@ -135,8 +135,8 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     // Swarms a node has redirected us to, which `get_swarm` prefers over its own calculation.  Kept
     // apart from `_swarm_cache` deliberately: that is a memo of `_all_swarms` and stays one, where
-    // these are claims from outside that outrank it until the pool is refreshed.  The count bounds
-    // how far a disagreement between nodes can bounce us before we go and refresh instead.
+    // these are claims from outside that outrank it until the pool is refreshed.  The count is the
+    // account's redirects since that refresh, which past a limit also ask for the next one.
     std::unordered_map<x25519_pubkey, std::pair<std::vector<service_node>, uint8_t>>
             _swarm_overrides;
     std::map<ed25519_pubkey, std::vector<std::chrono::sys_seconds>> _snode_strikes;

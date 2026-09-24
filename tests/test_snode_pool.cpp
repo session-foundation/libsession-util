@@ -609,11 +609,24 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
     CHECK(current_swarm() == sorted(calculated));
 
-    // Every redirect counts, though, so two sets of nodes that keep disagreeing can't bounce us
-    // between them forever; after the third we stop believing them and the calculated swarm is
-    // back, for the caller to fall back on refreshing the pool
-    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    // Two sets of nodes that disagree, each redirecting to the other
+    auto bounce = [&](int times) {
+        for (int i = 0; i < times; ++i)
+            REQUIRE(snode_pool->record_swarm_redirect(
+                    swarm_pubkey, i % 2 == 0 ? keys_of(elsewhere, 4) : keys_of(calculated, 6)));
+    };
+
+    // Every redirect counts, but none is refused for it - refusing would only fail the request.
+    // Up to the limit nothing else happens...
+    bounce(5);
+    CHECK(current_swarm() == overridden);
+    CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+
+    // ... and past it the redirect is still followed, but also asks for a refresh, which the pool
+    // being old enough lets start
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
     CHECK(current_swarm() == sorted(calculated));
+    CHECK(snode_pool->debug_refresh_in_progress());
 
     // A refreshed pool is ground truth again, so redirects correcting the old one are dropped
     REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
@@ -626,6 +639,13 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     auto remaining = std::vector<service_node>(calculated.begin() + 1, calculated.end());
     CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(remaining, 5)));
     CHECK(current_swarm() == sorted(remaining));
+
+    // Past the limit with the refresh throttled - the pool was only just refreshed - redirects are
+    // still followed, rather than leaving the account on a swarm already known to be wrong
+    bounce(6);
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    CHECK(current_swarm() == overridden);
+    CHECK_FALSE(snode_pool->debug_refresh_in_progress());
 }
 
 TEST_CASE("Network", "[network][strike_expiry]") {
