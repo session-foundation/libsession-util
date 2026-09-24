@@ -935,7 +935,16 @@ namespace {
     // fetching unasked, are properties of this machine and not of the account.
     constexpr auto CACHE_LIMIT_KEY = "client:attachment_cache_limit";
     constexpr auto AUTO_DL_MAX_KEY = "client:auto_download_max_size";
+    constexpr auto REQUESTED_MAX_KEY = "client:requested_cache_max_size";
 }  // namespace
+
+// Checked on the calling thread, so that a caller's mistake surfaces where they made it rather than
+// in a callback.
+static std::optional<int64_t> checked_limit(std::string_view setter, std::optional<int64_t> bytes) {
+    if (bytes && *bytes < 0)
+        throw std::invalid_argument{"{}: a limit cannot be negative"_format(setter)};
+    return bytes;
+}
 
 // Absent rather than sentinel: "no limit" is the key not being there, so nothing has to reserve a
 // magic value or decide whether 0 means unlimited or refuse-everything.
@@ -947,10 +956,16 @@ static void set_limit(core::Globals& g, std::string_view key, std::optional<int6
 }
 
 void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, result_function<> cb) {
-    _async([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); }, std::move(cb));
+    _async(
+            [this, bytes = checked_limit("set_attachment_cache_limit", bytes)] {
+                set_limit(core.globals, CACHE_LIMIT_KEY, bytes);
+            },
+            std::move(cb));
 }
 void Client::set_attachment_cache_limit(std::optional<int64_t> bytes, await_t) {
-    call_get([this, bytes] { set_limit(core.globals, CACHE_LIMIT_KEY, bytes); });
+    call_get([this, bytes = checked_limit("set_attachment_cache_limit", bytes)] {
+        set_limit(core.globals, CACHE_LIMIT_KEY, bytes);
+    });
 }
 void Client::attachment_cache_limit(result_function<std::optional<int64_t>> cb) {
     _async([this] { return core.globals.get_integer(CACHE_LIMIT_KEY); }, std::move(cb));
@@ -977,16 +992,50 @@ int64_t Client::attachment_cache_size(await_t) {
 }
 
 void Client::set_auto_download_max_size(std::optional<int64_t> bytes, result_function<> cb) {
-    _async([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); }, std::move(cb));
+    _async(
+            [this, bytes = checked_limit("set_auto_download_max_size", bytes)] {
+                set_limit(core.globals, AUTO_DL_MAX_KEY, bytes);
+            },
+            std::move(cb));
 }
 void Client::set_auto_download_max_size(std::optional<int64_t> bytes, await_t) {
-    call_get([this, bytes] { set_limit(core.globals, AUTO_DL_MAX_KEY, bytes); });
+    call_get([this, bytes = checked_limit("set_auto_download_max_size", bytes)] {
+        set_limit(core.globals, AUTO_DL_MAX_KEY, bytes);
+    });
 }
 void Client::auto_download_max_size(result_function<std::optional<int64_t>> cb) {
     _async([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); }, std::move(cb));
 }
 std::optional<int64_t> Client::auto_download_max_size(await_t) {
     return call_get([this] { return core.globals.get_integer(AUTO_DL_MAX_KEY); });
+}
+
+void Client::set_requested_cache_max_size(std::optional<int64_t> bytes, result_function<> cb) {
+    _async(
+            [this, bytes = checked_limit("set_requested_cache_max_size", bytes)] {
+                set_limit(core.globals, REQUESTED_MAX_KEY, bytes);
+            },
+            std::move(cb));
+}
+void Client::set_requested_cache_max_size(std::optional<int64_t> bytes, await_t) {
+    call_get([this, bytes = checked_limit("set_requested_cache_max_size", bytes)] {
+        set_limit(core.globals, REQUESTED_MAX_KEY, bytes);
+    });
+}
+void Client::requested_cache_max_size(result_function<std::optional<int64_t>> cb) {
+    _async([this] { return core.globals.get_integer(REQUESTED_MAX_KEY); }, std::move(cb));
+}
+std::optional<int64_t> Client::requested_cache_max_size(await_t) {
+    return call_get([this] { return core.globals.get_integer(REQUESTED_MAX_KEY); });
+}
+
+bool Client::_caches_requested(std::optional<int64_t> size) {
+    if (_cache_dir.empty())
+        return false;
+    // Unlimited when unset, so a file that declares no size is only turned away by a limit it
+    // cannot be shown to fit.
+    auto max = core.globals.get_integer(REQUESTED_MAX_KEY);
+    return !max || (size && *size <= *max);
 }
 
 void Client::display_name(result_function<std::string> cb) {
@@ -1040,7 +1089,7 @@ void Client::attachment_data(
         result_function<std::vector<std::byte>> cb) {
     call([this, message_id, index, on_progress = std::move(on_progress), cb]() mutable {
         try {
-            _attachment_data(message_id, index, std::move(on_progress), cb);
+            _attachment_data(message_id, index, false, std::move(on_progress), cb);
         } catch (const std::exception& e) {
             log_operation_failure(e);
             _fail<std::vector<std::byte>>(cb, error_from(e));
@@ -1051,14 +1100,17 @@ void Client::attachment_data(
 void Client::_attachment_data(
         int64_t message_id,
         size_t index,
+        bool automatic,
         std::function<void(const AttachmentProgress&)> on_progress,
         result_function<std::vector<std::byte>> cb) {
 
     auto remote = _remote_file(message_id, index);
+    // An auto-download exists to fill the cache, and has already been held to its own limit.
+    bool caching = automatic || _caches_requested(remote.size);
 
     _fetch_cached(
             {std::move(remote), DownloadKind::attachment, cache::ATTACHMENT_DIR},
-            true,
+            caching,
             _attachment_progress(message_id, index, std::move(on_progress)),
             std::move(cb));
 }
@@ -2513,6 +2565,7 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
             _attachment_data(
                     message_id,
                     a.index,
+                    true,
                     [this, convo_id](const AttachmentProgress& p) {
                         if (const auto& h = _cbs->attachment_progress)
                             h(convo_id, p);
@@ -4990,14 +5043,10 @@ void Client::_cache_outgoing_attachment(int64_t client_id, size_t index, const s
     if (auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY); max_size && size > *max_size)
         return;
 
-    // The fixed one applies whether or not the other is set, so that sending a large file does not
-    // also cost an equally large cache entry.  The price is that such a file cannot be drawn from
-    // the sender's own transcript, which is where it already stands for every recipient: none of
-    // them can fetch it.
-    //
-    // TODO: bound this by the setting for what a requested file may cost the cache, once there is
-    // one, rather than by this fixed limit.
-    if (size > static_cast<int64_t>(attachment::MAX_REGULAR_SIZE))
+    // And the one a requested file is held to, since that is what this copy stands in for: a
+    // sender drawing their own message would otherwise have fetched it back and kept it under the
+    // same rule.
+    if (!_caches_requested(size))
         return;
 
     // Not on `Attachment`, deliberately: where a file is locally is the application's business, and
@@ -5238,11 +5287,11 @@ void Client::_save_uncached(std::shared_ptr<Save> s) {
 
     // Written straight to its destination as the bytes arrive, and into the cache alongside, so
     // that the next save of the same file -- common: a file saved and saved again -- or a display
-    // of it does not download it a second time.  With no cache there is nothing kept that a
-    // newcomer could be served, so it is registered under a name nothing can find to join.
+    // of it does not download it a second time.  One that is not kept leaves nothing a newcomer
+    // could be served, so it is registered under a name nothing can find to join.
     auto t = std::make_shared<Transfer>();
     t->target = {s->remote, DownloadKind::attachment, cache::ATTACHMENT_DIR};
-    if (!_cache_dir.empty())
+    if (_caches_requested(s->remote.size))
         t->cache_file = _cache_path(cache::ATTACHMENT_DIR, s->remote.url);
     else {
         name += '\0';

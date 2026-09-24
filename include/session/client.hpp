@@ -359,7 +359,8 @@ class Client {
     /// Served from the cache when it is there, and fetched *and cached* when it is not, so a
     /// display does not re-fetch on every scroll.  Asking while the file is already on its way,
     /// whether for another display or for `save_attachment`, waits for that download rather than
-    /// starting a second.
+    /// starting a second -- unless it is a save of a file too big to keep (see
+    /// `requested_cache_max_size`), which keeps nothing a display could be served from.
     ///
     /// Not subject to the auto-download size limit.  That governs what arrives unasked, and this is
     /// asked for.
@@ -428,10 +429,13 @@ class Client {
     /// `dest` and is renamed only once it has been decrypted and verified, so an interrupted save
     /// leaves no half-file that looks finished.
     ///
-    /// The cache is read first and filled as the file arrives, as for `attachment_data`, since
-    /// saving a file and then saving it again somewhere else is common and should not cost a
-    /// second download.  A save asked for while the file is already on its way joins that
-    /// download, and while it runs the attachment shows as being fetched like any other.
+    /// The cache is read first and filled as the file arrives, as for `attachment_data` and within
+    /// the same `requested_cache_max_size`, since saving a file and then saving it again somewhere
+    /// else is common and should not cost a second download.  A save asked for while the file is
+    /// already on its way joins that download, and while it runs the attachment shows as being
+    /// fetched like any other.  The exception is a save of a file too big to keep, which nothing
+    /// can join -- a display or another save asked for meanwhile fetches the file for itself --
+    /// since it keeps nothing a latecomer could be served from.
     ///
     /// **`cb` reports where it actually went**, which is not always `dest`.  Whether `dest` was
     /// free is something the caller decided when it asked its user; the rename happens when the
@@ -556,6 +560,8 @@ class Client {
     /// how much disk to spend is a property of this machine rather than of the account.  Unlike
     /// `set_cache_dir`, which is the application's to decide every run — a stored path would be the
     /// wrong one the moment the database moved.
+    ///
+    /// @throws std::invalid_argument if `bytes` is negative.
     void set_attachment_cache_limit(std::optional<int64_t> bytes, result_function<> cb);
     void set_attachment_cache_limit(std::optional<int64_t> bytes, await_t);
     void attachment_cache_limit(result_function<std::optional<int64_t>> cb);
@@ -586,13 +592,38 @@ class Client {
     /// different size from what was declared fails.
     ///
     /// Only ever applies to automatic downloads.  `save_attachment` and `attachment_data` are
-    /// somebody asking for one particular file, and are never refused for being large.
+    /// somebody asking for one particular file, and are never refused for being large; whether
+    /// what they fetch is kept is `requested_cache_max_size`'s question.
     ///
     /// Persisted and device-local, for the same reasons as the cache limit.
+    ///
+    /// @throws std::invalid_argument if `bytes` is negative.
     void set_auto_download_max_size(std::optional<int64_t> bytes, result_function<> cb);
     void set_auto_download_max_size(std::optional<int64_t> bytes, await_t);
     void auto_download_max_size(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> auto_download_max_size(await_t);
+
+    /// The largest file that `attachment_data` or `save_attachment` will keep in the cache, or
+    /// nullopt for no limit, which is the default.  0 keeps nothing they fetch.
+    ///
+    /// Also bounds the copy kept of a file we send, which costs the cache what a download of it
+    /// would.
+    ///
+    /// A file over it is still fetched -- this never refuses anything -- and is simply not kept, so
+    /// asking for it again fetches it again.  One already in the cache is still served from there,
+    /// whatever put it there.
+    ///
+    /// Compared against the size the sender declared, as `auto_download_max_size` is; with a limit
+    /// set, a file that declares no size is not kept.  Independent of that setting, which is about
+    /// what is fetched unasked: an auto-download is kept whenever it is fetched at all.
+    ///
+    /// Persisted and device-local, for the same reasons as the cache limit.
+    ///
+    /// @throws std::invalid_argument if `bytes` is negative.
+    void set_requested_cache_max_size(std::optional<int64_t> bytes, result_function<> cb);
+    void set_requested_cache_max_size(std::optional<int64_t> bytes, await_t);
+    void requested_cache_max_size(result_function<std::optional<int64_t>> cb);
+    std::optional<int64_t> requested_cache_max_size(await_t);
 
     // -- Our own account ----------------------------------------------------------------------
     //
@@ -981,11 +1012,18 @@ class Client {
     // of what is left.
     void _post_disk(std::function<void()> job);
 
+    // `automatic` for an auto-download, which is always kept; anything else is kept only if
+    // `_caches_requested` says so.
     void _attachment_data(
             int64_t message_id,
             size_t index,
+            bool automatic,
             std::function<void(const AttachmentProgress&)> on_progress,
             result_function<std::vector<std::byte>> cb);
+
+    // Whether a file somebody asked for, of the size its sender declared, is kept once fetched: it
+    // needs somewhere to go, and to fit `requested_cache_max_size`.
+    bool _caches_requested(std::optional<int64_t> size);
 
     // Decides what an arriving message's attachments are worth fetching unasked, sets whether it is
     // shown as a gallery, and starts whatever it decided on.  Does nothing without a cache

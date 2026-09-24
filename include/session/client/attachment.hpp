@@ -122,6 +122,10 @@ enum class AttachmentAvailability {
     /// quoting the same file, or another part of the application.  `attachment_data` joins it
     /// rather than starting a second one, and reports progress from wherever it has reached.
     ///
+    /// Except behind a `save_attachment` of a file too big for `requested_cache_max_size`: that
+    /// writes straight to its destination and keeps nothing, so there is nothing to serve anyone
+    /// joining partway, and `attachment_data` (or another save) fetches the file for itself.
+    ///
     /// This outranks either failure below: a transfer running is about to settle the question,
     /// so what the last one found is not what to draw.
     fetching,

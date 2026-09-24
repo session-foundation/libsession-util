@@ -1435,6 +1435,119 @@ TEST_CASE("Client: a save that cannot be written fails alone", "[client][attachm
     CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::cached);
 }
 
+TEST_CASE(
+        "Client: a requested file too big to keep is fetched and not kept",
+        "[client][attachments][cache]") {
+    TempCacheDir dir, out;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    CHECK_THROWS_AS(c->set_requested_cache_max_size(-1, await), std::invalid_argument);
+    CHECK_THROWS_AS(c->set_auto_download_max_size(-1, await), std::invalid_argument);
+    CHECK_THROWS_AS(c->set_attachment_cache_limit(-1, await), std::invalid_argument);
+    CHECK_THROWS_AS(
+            c->set_requested_cache_max_size(-1, result_function<>{}), std::invalid_argument);
+    CHECK_FALSE(c->requested_cache_max_size(await));
+
+    std::vector<std::byte> plaintext(5000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    net->served["big"] = ciphertext;
+    net->served["unsized"] = ciphertext;
+    auto arrive = [&](std::string hash, std::string file, bool sized) {
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(sized ? 1000 : 2000),
+                hash,
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(1);
+                    a->set_url(network::file_server::generate_download_url(file, {}, true));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    if (sized)
+                        a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                7);
+        sync(*c);
+        for (const auto& m :
+             c->conversation(ConversationId::dm(peer.session_id), await)->messages(await))
+            if (m.attachments[0].size.has_value() == sized)
+                return m.id;
+        FAIL("no message for " << file);
+        return int64_t{0};
+    };
+    auto id = arrive("h1", "big", true);
+    auto availability = [&](int64_t id) {
+        return c->message(id, await)->attachments[0].availability;
+    };
+
+    // Either way of asking, each fetched in full and not kept, so each fetches again.
+    auto show = [&](int64_t id) {
+        std::optional<std::vector<std::byte>> got;
+        c->attachment_data(id, 0, nullptr, [&](auto r) {
+            REQUIRE(r.has_value());
+            got = *std::move(r);
+        });
+        sync(*c);
+        REQUIRE(serve_downloads(*net) == 1);
+        sync(*c);
+        REQUIRE(got);
+        CHECK(*got == plaintext);
+    };
+    auto save = [&](int64_t id) {
+        std::optional<Expected<std::filesystem::path>> saved;
+        c->Client::save_attachment(
+                id,
+                0,
+                out.path / "saved.png",
+                nullptr,
+                [&](auto r) { saved = std::move(r); },
+                false,
+                true);
+        sync(*c);
+        REQUIRE(serve_downloads(*net) == 1);
+        sync(*c);
+        REQUIRE(saved);
+        CHECK(saved->has_value());
+    };
+
+    c->set_requested_cache_max_size(plaintext.size() - 1, await);
+    CHECK(c->requested_cache_max_size(await) == plaintext.size() - 1);
+    for (int i = 0; i < 2; i++) {
+        show(id);
+        CHECK(availability(id) == AttachmentAvailability::absent);
+        save(id);
+        CHECK(availability(id) == AttachmentAvailability::absent);
+    }
+
+    // With a limit, a file that does not say how big it is cannot be shown to fit.
+    auto unsized = arrive("h2", "unsized", false);
+    c->set_requested_cache_max_size(1'000'000, await);
+    show(unsized);
+    CHECK(availability(unsized) == AttachmentAvailability::absent);
+
+    // A file that fits is kept -- and stays served from there once the limit would turn it away,
+    // since the limit is on what is kept, not on what is read.
+    c->set_requested_cache_max_size(plaintext.size(), await);
+    show(id);
+    CHECK(availability(id) == AttachmentAvailability::cached);
+    c->set_requested_cache_max_size(0, await);
+    std::optional<std::vector<std::byte>> got;
+    c->attachment_data(id, 0, nullptr, [&](auto r) { got = *std::move(r); });
+    sync(*c);
+    CHECK(net->downloads.empty());
+    REQUIRE(got);
+    CHECK(*got == plaintext);
+}
+
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
     TempCacheDir dir;
     std::vector<std::pair<ConversationId, AttachmentProgress>> progress;
@@ -1536,6 +1649,16 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
         c->set_auto_download_max_size(std::nullopt, await);
         arrive("h6", false);
         CHECK(net->downloads.size() == 1);
+    }
+
+    SECTION("what a requested file may keep does not govern what is fetched unasked") {
+        c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+        c->set_requested_cache_max_size(0, await);
+        arrive("h8", false);
+        REQUIRE(serve_downloads(*net, image_ct) == 1);
+        sync(*c);
+        CHECK(c->conversation(convo, await)->messages(await)[0].attachments[0].availability ==
+              AttachmentAvailability::cached);
     }
 
     SECTION("the fetch is reported, cached, and never told to the sender") {
@@ -2011,16 +2134,11 @@ TEST_CASE(
     in.read(reinterpret_cast<char*>(got.data()), got.size());
     CHECK(!!(got == contents));
 
-    // Nothing larger than a download may be, whatever the settings say: keeping it means reading
-    // and encrypting all of it on the loop, and nothing could fetch it back anyway.
-    auto large = dir / "large.png";
-    {
-        std::vector<std::byte> big(attachment::MAX_REGULAR_SIZE + 1);
-        std::ofstream out{large, std::ios::binary};
-        out.write(reinterpret_cast<const char*>(big.data()), big.size());
-    }
-    CHECK(availability(send({{.path = large, .content_type = "image/png"}}), 0) ==
-          AttachmentAvailability::absent);
+    // And nothing a requested file could not be: this copy stands in for fetching it back.
+    c->set_requested_cache_max_size(contents.size() - 1, await);
+    CHECK(availability(send({as_image}), 0) == AttachmentAvailability::absent);
+    c->set_requested_cache_max_size(contents.size(), await);
+    CHECK(availability(send({as_image}), 0) == AttachmentAvailability::cached);
 
     std::filesystem::remove_all(dir);
 }
