@@ -361,9 +361,8 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
             log::info(cat, "Ignoring refresh as pool is suspended.");
 
             // Anything queued against a refresh we are declining to start has nothing left to wait
-            // for, unless one is already in flight and still owns it
-            if (!_current_snode_cache_refresh_id)
-                _run_pending_refresh_callbacks(false);
+            // for: suspending abandons any refresh in progress, so none can answer it later
+            _run_pending_refresh_callbacks(false);
             return;
         }
 
@@ -464,7 +463,9 @@ void SnodePool::_launch_next_refresh_request(
                  refreshing_from_seed_nodes,
                  use_direct_fetcher,
                  total_requests] {
-        if (!_current_snode_cache_refresh_id)
+        // A retry scheduled for a refresh that has since been abandoned or replaced mustn't touch
+        // the one in its place - its candidates in particular
+        if (_current_snode_cache_refresh_id != request_id)
             return;
 
         const auto target_request_id = "{}-{}"_format(request_id, index);
@@ -570,12 +571,17 @@ void SnodePool::_launch_next_refresh_request(
                     "trying again in {}ms.",
                     target_request_id,
                     delay.count());
-            _loop->call_later(delay, [weak_self = weak_from_this(), this] {
+            _loop->call_later(delay, [weak_self = weak_from_this(), this, request_id] {
                 // We need to wait until after the `call_later` to reset the `refresh_id` (and clear
                 // previous results) as if we don't then additional refreshes could be triggered
                 // during the delay
                 auto self = weak_self.lock();
                 if (!self)
+                    return;
+
+                // Abandoned (by a suspend) or replaced during the delay: resetting the id would
+                // wipe out whichever refresh has it now, and there is nothing of ours to restart
+                if (_current_snode_cache_refresh_id != request_id)
                     return;
 
                 _current_snode_cache_refresh_id.reset();
@@ -958,6 +964,22 @@ void SnodePool::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         _suspended = true;
+
+        // A refresh in progress can only fail from here on, since every fetch is refused while
+        // suspended, so it is abandoned rather than left to work its way through the candidates,
+        // and whatever waits on it is answered now.  The failures it built up are dropped too:
+        // they say nothing about the network we resume on.
+        if (_current_snode_cache_refresh_id) {
+            log::info(
+                    cat,
+                    "[Request {}] Abandoning cache refresh for suspension.",
+                    *_current_snode_cache_refresh_id);
+            _current_snode_cache_refresh_id.reset();
+            _refresh_candidate_nodes.clear();
+            _snode_refresh_results.clear();
+            _snode_cache_refresh_failure_count = 0;
+            _run_pending_refresh_callbacks(false);
+        }
 
         // Force a strike write immediately if we had one scheduled
         if (_strikes_flush_scheduled)

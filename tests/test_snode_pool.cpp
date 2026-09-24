@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <session/network/snode_pool.hpp>
+#include <thread>
 
 #include "utils.hpp"
 
@@ -71,6 +72,37 @@ class TestSnodePool : public SnodePool {
 
     bool debug_refresh_in_progress() {
         return _loop->call_get([this] { return _current_snode_cache_refresh_id.has_value(); });
+    }
+
+    void debug_start_refresh() {
+        _loop->call_get([this] { _refresh_snode_cache(); });
+    }
+
+    std::optional<std::string> debug_refresh_id() {
+        return _loop->call_get([this] { return _current_snode_cache_refresh_id; });
+    }
+
+    size_t debug_refresh_candidate_count() {
+        return _loop->call_get([this] { return _refresh_candidate_nodes.size(); });
+    }
+
+    void debug_clear_refresh_candidates() {
+        _loop->call_get([this] { _refresh_candidate_nodes.clear(); });
+    }
+
+    int debug_refresh_failure_count() {
+        return _loop->call_get([this] { return _snode_cache_refresh_failure_count; });
+    }
+
+    void debug_set_refresh_failure_count(int count) {
+        _loop->call_get([this, count] { _snode_cache_refresh_failure_count = count; });
+    }
+
+    // Launches one of the refresh `request_id`'s fetches, as its retries do
+    void debug_launch_refresh_request(const std::string& request_id) {
+        _loop->call_get([this, request_id] {
+            _launch_next_refresh_request(request_id, 0, false, true, 1);
+        });
     }
 
     // Backdates the pool snapshot so the age-based policies can be exercised without waiting
@@ -767,4 +799,96 @@ TEST_CASE("Network", "[network][refresh_callback_contract]") {
     std::tie(called, refreshed) = run();
     CHECK(called);
     CHECK_FALSE(refreshed);
+}
+
+TEST_CASE("Network", "[network][suspend_refresh]") {
+    session::network::config::SnodePool pool_config{
+            .cache_expiration = 2h,
+            .cache_min_lifetime = 2s,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_min_size = 1,
+            .cache_min_swarm_size = 1,
+            .cache_num_nodes_to_use_for_refresh = 1,
+            .cache_min_num_refresh_presence_to_include_node = 1,
+            .cache_node_strike_threshold = 3};
+
+    std::vector<service_node> snode_cache;
+    for (uint16_t i = 0; i < 4; ++i)
+        snode_cache.emplace_back(service_node{
+                ed25519_pubkey::from_hex(
+                        "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46a{:02x}"_format(
+                                i)),
+                oxen::quic::ipv4{"192.168.0.{}"_format(i)},
+                static_cast<uint16_t>(20000 + i),
+                static_cast<uint16_t>(30000 + i),
+                {2, 11, 0},
+                0});
+
+    // The default fetcher never answers, so a refresh stays in progress until the test ends it
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    snode_pool->update_cache(snode_cache);
+
+    SECTION("Suspending abandons a refresh in progress, and answers what waits on it") {
+        snode_pool->debug_start_refresh();
+        REQUIRE(snode_pool->debug_refresh_in_progress());
+
+        std::optional<bool> answer;
+        snode_pool->debug_queue_post_refresh_callback(
+                [&answer](bool refreshed) { answer = refreshed; });
+        snode_pool->debug_set_refresh_failure_count(3);
+
+        snode_pool->suspend();
+        CHECK(answer == false);
+        CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+        CHECK(snode_pool->debug_refresh_failure_count() == 0);
+    }
+
+    SECTION("A fetch belonging to an abandoned refresh leaves the next refresh alone") {
+        snode_pool->debug_start_refresh();
+        auto abandoned = snode_pool->debug_refresh_id();
+        REQUIRE(abandoned);
+        snode_pool->suspend();
+        snode_pool->resume();
+
+        snode_pool->debug_start_refresh();
+        auto current = snode_pool->debug_refresh_id();
+        REQUIRE(current);
+        REQUIRE(current != abandoned);
+        auto candidates = snode_pool->debug_refresh_candidate_count();
+
+        snode_pool->debug_launch_refresh_request(*abandoned);
+        CHECK(snode_pool->debug_refresh_id() == current);
+        CHECK(snode_pool->debug_refresh_candidate_count() == candidates);
+    }
+
+    SECTION("An abandoned refresh's retry after running out of candidates restarts nothing") {
+        // Running out schedules a retry of the whole refresh, after the retry delay
+        auto run_out_then_suspend = [&] {
+            snode_pool->debug_start_refresh();
+            auto id = snode_pool->debug_refresh_id();
+            REQUIRE(id);
+            snode_pool->debug_clear_refresh_candidates();
+            snode_pool->debug_launch_refresh_request(*id);
+            snode_pool->suspend();
+            snode_pool->resume();
+        };
+        auto past_retry_delay = [] { std::this_thread::sleep_for(500ms); };
+
+        // Once it was the refresh that used to restart itself here
+        run_out_then_suspend();
+        past_retry_delay();
+        CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+
+        // ... and with another refresh started by the time it fires, that one is left running
+        run_out_then_suspend();
+        snode_pool->debug_start_refresh();
+        auto current = snode_pool->debug_refresh_id();
+        REQUIRE(current);
+        past_retry_delay();
+        CHECK(snode_pool->debug_refresh_id() == current);
+    }
 }
