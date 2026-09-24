@@ -118,6 +118,9 @@ class Network {
     /// subscriber.  Anything relying on pushed messages has to keep polling in that mode.
     bool supports_server_push() const { return config.router != opt::router::Type::onion_requests; }
 
+    /// How requests reach their destination on this network.
+    opt::router::Type router() const { return config.router; }
+
     void suspend();
     void resume(bool automatically_reconnect = true);
     void close_connections();

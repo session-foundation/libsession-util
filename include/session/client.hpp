@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -649,6 +650,23 @@ class Client {
     void requested_cache_max_size(result_function<std::optional<int64_t>> cb);
     std::optional<int64_t> requested_cache_max_size(await_t);
 
+    /// How many attachments are fetched unasked at once, or nullopt for the default of 4.
+    ///
+    /// The rest wait their turn, newest first: what has just arrived is what somebody is most
+    /// likely to be looking at, so it goes ahead of a backlog -- a conversation's history arriving
+    /// from another device, say -- rather than behind it.
+    ///
+    /// Ignored under onion requests, which always fetch one at a time: every file travels the same
+    /// few relays there, and several at once only make each of them more likely to time out.
+    ///
+    /// Persisted and device-local, for the same reasons as the cache limit.
+    ///
+    /// @throws std::invalid_argument if `n` is less than 1.
+    void set_auto_download_concurrency(std::optional<int> n, result_function<> cb);
+    void set_auto_download_concurrency(std::optional<int> n, await_t);
+    void auto_download_concurrency(result_function<std::optional<int>> cb);
+    std::optional<int> auto_download_concurrency(await_t);
+
     // -- Our own account ----------------------------------------------------------------------
     //
     // These read and write the UserProfile config, which follows the account between devices.  They
@@ -793,12 +811,17 @@ class Client {
     // `token` is what `cancel_attachment_transfer` finds it by, and 0 for a fetch nothing outside
     // can name, which is therefore never withdrawn.  `message_id` and `index` are the attachment it
     // was asked for, if it was one, so that deleting it can withdraw the request.
+    //
+    // `ended`, on Core's loop, once it has had its answer, whatever the answer was: for something
+    // counting what is under way, which `cb` cannot be, since a waiter with one is asking for the
+    // bytes.
     struct Waiter {
         uint64_t token = 0;
         std::optional<int64_t> message_id;
         size_t index = 0;
         transfer_progress progress;
         result_function<std::vector<std::byte>> cb;
+        std::function<void()> ended;
     };
 
     // Where tokens come from.  Taken on the caller's thread, so a request can hand its token back
@@ -1067,14 +1090,33 @@ class Client {
     void _post_disk(std::function<void()> job);
 
     // `automatic` for an auto-download, which is always kept; anything else is kept only if
-    // `_caches_requested` says so.
+    // `_caches_requested` says so.  `ended` is the waiter's.
     void _attachment_data(
             int64_t message_id,
             size_t index,
             bool automatic,
             uint64_t token,
             std::function<void(const AttachmentProgress&)> on_progress,
-            result_function<std::vector<std::byte>> cb);
+            result_function<std::vector<std::byte>> cb,
+            std::function<void()> ended = nullptr);
+
+    // An attachment waiting its turn to be fetched unasked.
+    struct PendingAutoDownload {
+        ConversationId convo;
+        int64_t message_id;
+        size_t index;
+    };
+
+    // Core's loop's.  Newest at the front, and taken from there.
+    std::deque<PendingAutoDownload> _auto_pending;
+    size_t _auto_running = 0;
+    bool _auto_pumping = false;
+
+    // Starts queued auto-downloads until as many are running as `auto_download_concurrency`
+    // allows.  Does nothing when called from within itself, which an auto-download ending as soon
+    // as it starts -- a cache hit, or no network -- does: the loop already running picks up the
+    // freed slot, where recursing would go one level deeper for every entry in the queue.
+    void _pump_auto_downloads();
 
     // Whether a file somebody asked for, of the size its sender declared, is kept once fetched: it
     // needs somewhere to go, and to fit `requested_cache_max_size`.

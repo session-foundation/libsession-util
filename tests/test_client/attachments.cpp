@@ -1625,7 +1625,11 @@ TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[cl
     SECTION("all fetches both, and an all-image message opens as a gallery") {
         c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
         arrive("h3", true);
-        CHECK(net->downloads.size() == 2);
+        // One at a time, as under onion requests there always is: the second once the first ends.
+        REQUIRE(net->downloads.size() == 1);
+        REQUIRE(serve_downloads(*net) == 1);
+        sync(*c);
+        CHECK(net->downloads.size() == 1);
 
         // Two attachments, one of them a pdf: still not gallery viewable even though both were
         // fetched.  What is downloaded and what can be displayed as a gallery are different
@@ -3499,5 +3503,126 @@ TEST_CASE("Client: a request for an attachment can be withdrawn", "[client][atta
         sync(*c);
         CHECK(saved.size() == 1);
         CHECK(std::filesystem::exists(*saved[0]));
+    }
+}
+
+TEST_CASE("Client: auto-downloads take turns, newest first", "[client][auto][queue]") {
+    TempCacheDir dir;
+    std::vector<AttachmentProgress> broadcast;
+    callbacks cbs;
+    cbs.attachment_progress = [&](const ConversationId&, const AttachmentProgress& p) {
+        broadcast.push_back(p);
+    };
+    TempClient c{cbs};
+    SenderKeys peer;
+    bool onion = GENERATE(false, true);
+    network::config::Config config;
+    if (!onion)
+        config.router = network::opt::router::Type::direct;
+    auto* net = attach_mock_network(c->core, std::move(config));
+    c->set_cache_dir(dir.path);
+    auto convo = ConversationId::dm(peer.session_id);
+    c->open_dm(convo, await);
+    c->conversation(convo, await)->set_auto_download(AutoDownload::all, await);
+
+    CHECK_THROWS_AS(c->set_auto_download_concurrency(0, await), std::invalid_argument);
+    CHECK_FALSE(c->auto_download_concurrency(await));
+
+    std::vector<std::byte> plaintext(3000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    int64_t when = 1000;
+    auto arrive = [&](const std::string& file) {
+        net->served[file] = ciphertext;
+        deliver(
+                *c,
+                peer,
+                "",
+                from_epoch_ms(when++),
+                "h" + file,
+                "",
+                std::nullopt,
+                [&](SessionProtos::DataMessage& d) {
+                    auto* a = d.add_attachments();
+                    a->set_id(1);
+                    a->set_url(network::file_server::generate_download_url(file, {}, true));
+                    a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                    a->set_size(plaintext.size());
+                    a->set_contenttype("image/png");
+                },
+                7);
+        sync(*c);
+    };
+    // Which files are being fetched, in the order they were asked for.
+    auto fetching = [&] {
+        std::vector<std::string> files;
+        for (const auto& r : net->downloads)
+            files.push_back(network::file_server::parse_download_url(r.download_url)->file_id);
+        return files;
+    };
+    using files = std::vector<std::string>;
+
+    SECTION("as many at once as the setting allows, or one under onion requests") {
+        for (auto f : {"a", "b", "c", "d", "e"})
+            arrive(f);
+        // The default of 4, the rest waiting; one of them under onion requests, whatever the
+        // setting says.
+        CHECK(fetching() == (onion ? files{"a"} : files{"a", "b", "c", "d"}));
+
+        c->set_auto_download_concurrency(5, await);
+        sync(*c);
+        CHECK(fetching().size() == (onion ? 1 : 5));
+    }
+
+    SECTION("what arrives while others wait goes first") {
+        c->set_auto_download_concurrency(1, await);
+        for (auto f : {"a", "b", "c"})
+            arrive(f);
+        CHECK(fetching() == files{"a"});
+
+        std::vector<std::string> order;
+        while (!net->downloads.empty()) {
+            order.push_back(fetching()[0]);
+            REQUIRE(serve_downloads(*net) == 1);
+            sync(*c);
+        }
+        CHECK(order == files{"a", "c", "b"});
+    }
+
+    SECTION("withdrawing one, or its failing, frees its turn") {
+        c->set_auto_download_concurrency(1, await);
+        arrive("a");
+        arrive("b");
+        arrive("c");
+        REQUIRE(fetching() == files{"a"});
+
+        REQUIRE_FALSE(broadcast.empty());
+        c->cancel_attachment_transfer(broadcast.back().token);
+        sync(*c);
+        REQUIRE(fetching().size() == 2);
+        CHECK(fetching()[1] == "c");
+
+        // A 404 is as much an ending as a success.
+        net->served.erase("c");
+        net->downloads.erase(net->downloads.begin());
+        REQUIRE(serve_downloads(*net) == 1);
+        sync(*c);
+        CHECK(fetching() == files{"b"});
+    }
+
+    SECTION("one deleted while it waits is not fetched") {
+        c->set_auto_download_concurrency(1, await);
+        arrive("a");
+        arrive("b");
+        auto messages = c->conversation(convo, await)->messages(await);
+        auto waiting = std::ranges::find_if(
+                messages, [&](const Message& m) { return m.timestamp == from_epoch_ms(1001); });
+        REQUIRE(waiting != messages.end());
+        CHECK(c->delete_message(waiting->id, await));
+
+        REQUIRE(serve_downloads(*net) == 1);
+        sync(*c);
+        CHECK(net->downloads.empty());
     }
 }

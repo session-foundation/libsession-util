@@ -936,6 +936,8 @@ namespace {
     constexpr auto CACHE_LIMIT_KEY = "client:attachment_cache_limit";
     constexpr auto AUTO_DL_MAX_KEY = "client:auto_download_max_size";
     constexpr auto REQUESTED_MAX_KEY = "client:requested_cache_max_size";
+    constexpr auto AUTO_DL_CONCURRENCY_KEY = "client:auto_download_concurrency";
+    constexpr int DEFAULT_AUTO_DL_CONCURRENCY = 4;
 }  // namespace
 
 // Checked on the calling thread, so that a caller's mistake surfaces where they made it rather than
@@ -1029,6 +1031,41 @@ std::optional<int64_t> Client::requested_cache_max_size(await_t) {
     return call_get([this] { return core.globals.get_integer(REQUESTED_MAX_KEY); });
 }
 
+static std::optional<int> checked_concurrency(std::optional<int> n) {
+    if (n && *n < 1)
+        throw std::invalid_argument{
+                "set_auto_download_concurrency: at least one download has to be allowed"};
+    return n;
+}
+static std::optional<int> get_concurrency(core::Globals& g) {
+    if (auto n = g.get_integer(AUTO_DL_CONCURRENCY_KEY))
+        return static_cast<int>(*n);
+    return std::nullopt;
+}
+
+void Client::set_auto_download_concurrency(std::optional<int> n, result_function<> cb) {
+    _async(
+            [this, n = checked_concurrency(n)] {
+                set_limit(core.globals, AUTO_DL_CONCURRENCY_KEY, n);
+                // Raising it starts what is now allowed to, rather than waiting for something to
+                // finish first.
+                _pump_auto_downloads();
+            },
+            std::move(cb));
+}
+void Client::set_auto_download_concurrency(std::optional<int> n, await_t) {
+    call_get([this, n = checked_concurrency(n)] {
+        set_limit(core.globals, AUTO_DL_CONCURRENCY_KEY, n);
+        _pump_auto_downloads();
+    });
+}
+void Client::auto_download_concurrency(result_function<std::optional<int>> cb) {
+    _async([this] { return get_concurrency(core.globals); }, std::move(cb));
+}
+std::optional<int> Client::auto_download_concurrency(await_t) {
+    return call_get([this] { return get_concurrency(core.globals); });
+}
+
 bool Client::_caches_requested(std::optional<int64_t> size) {
     if (_cache_dir.empty())
         return false;
@@ -1105,7 +1142,8 @@ void Client::_attachment_data(
         bool automatic,
         uint64_t token,
         std::function<void(const AttachmentProgress&)> on_progress,
-        result_function<std::vector<std::byte>> cb) {
+        result_function<std::vector<std::byte>> cb,
+        std::function<void()> ended) {
 
     auto remote = _remote_file(message_id, index);
     // An auto-download exists to fill the cache, and has already been held to its own limit.
@@ -1118,7 +1156,8 @@ void Client::_attachment_data(
              message_id,
              index,
              _attachment_progress(message_id, index, token, std::move(on_progress)),
-             std::move(cb)});
+             std::move(cb),
+             std::move(ended)});
 }
 
 void Client::cancel_attachment_transfer(uint64_t token) {
@@ -1251,6 +1290,8 @@ void Client::_fetch_cached(FetchTarget target, bool caching, Waiter w) {
                     if (entry_id)
                         _touch_cached(*entry_id);
                     _report(w.cb, Expected<std::vector<std::byte>>{std::move(*cached)});
+                    if (w.ended)
+                        w.ended();
                 });
             });
             return;
@@ -1412,8 +1453,7 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
         log::warning(cat, "Could not start a fetch of {}: {}", target.remote.url, e.what());
         _in_flight.erase(name);
         auto error = error_from(e);
-        for (const auto& w : t->waiting)
-            _report(w.cb, Expected<std::vector<std::byte>>{unexpected{error}});
+        _serve_waiters(*t, unexpected{error});
         // Nothing of theirs has been opened yet: a save's file is opened by its first bytes.
         for (const auto& s : t->writing)
             _saved(*s, unexpected{error});
@@ -1464,9 +1504,13 @@ void Client::_finish_transfer(
     }
 
     // Some waiters only wanted the file fetched -- an auto-download, a picture prefetch -- and have
-    // had all they asked for.
-    bool bytes_wanted = std::ranges::any_of(t->waiting, [](const Waiter& w) { return !!w.cb; });
-    if (!bytes_wanted && t->saves.empty())
+    // had all they asked for, whatever else happens: a refetch would not cache.
+    for (const auto& w : t->waiting)
+        if (!w.cb && w.ended)
+            w.ended();
+    std::erase_if(t->waiting, [](const Waiter& w) { return !w.cb; });
+
+    if (t->waiting.empty() && t->saves.empty())
         return;
 
     if (!ok) {
@@ -1489,7 +1533,7 @@ void Client::_finish_transfer(
     for (auto& s : t->saves)
         _save_from_cache(std::move(s), t->cache_file, std::nullopt);
     t->saves.clear();
-    if (!bytes_wanted)
+    if (t->waiting.empty())
         return;
 
     // Read back rather than kept as it arrived, so that nothing held the whole file while it
@@ -1508,8 +1552,11 @@ void Client::_finish_transfer(
 }
 
 void Client::_serve_waiters(const Transfer& t, Expected<std::vector<std::byte>> answer) {
-    for (const auto& w : t.waiting)
+    for (const auto& w : t.waiting) {
         _report(w.cb, answer);
+        if (w.ended)
+            w.ended();
+    }
 }
 
 void Client::_refetch(std::shared_ptr<Transfer> t) {
@@ -1559,6 +1606,8 @@ void Client::_cancel(uint64_t token, std::string_view why) {
             waiter.progress(t.done, t.total, unexpected{cancelled});
         _report(waiter.cb, Expected<std::vector<std::byte>>{unexpected{cancelled}});
         _abort_if_unwanted(it);
+        if (waiter.ended)
+            waiter.ended();
         return;
     }
 
@@ -2683,6 +2732,7 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
 
     auto max_size = core.globals.get_integer(AUTO_DL_MAX_KEY);
 
+    std::vector<PendingAutoDownload> wanted;
     for (const auto& a : msg->attachments) {
         if (!auto_download_wants(*mode, a.content_type))
             continue;
@@ -2693,35 +2743,72 @@ void Client::_auto_download(const ConversationId& convo_id, int64_t message_id) 
         if (max_size && (!a.size || *a.size > *max_size))
             continue;
 
+        wanted.push_back({convo_id, message_id, a.index});
+    }
+
+    // Ahead of everything already waiting, and in the message's own order among themselves.
+    _auto_pending.insert(_auto_pending.begin(), wanted.begin(), wanted.end());
+    _pump_auto_downloads();
+}
+
+void Client::_pump_auto_downloads() {
+    if (_auto_pumping)
+        return;
+    _auto_pumping = true;
+
+    size_t limit = 1;
+    if (auto net = core.network();
+        net && net->router() != network::opt::router::Type::onion_requests)
+        limit = get_concurrency(core.globals).value_or(DEFAULT_AUTO_DL_CONCURRENCY);
+
+    while (_auto_running < limit && !_auto_pending.empty()) {
+        auto next = std::move(_auto_pending.front());
+        _auto_pending.pop_front();
+
+        // Once, however it ends: an ending that throws after the waiter has already been told would
+        // otherwise give back its slot twice.
+        ++_auto_running;
+        auto ended = [this, once = std::make_shared<bool>(false)] {
+            if (std::exchange(*once, true))
+                return;
+            --_auto_running;
+            _pump_auto_downloads();
+        };
+
         // No completion handler: this wants the cache filled and nothing else, and whoever
         // eventually displays the file joins the transfer rather than starting another.
         //
         // Progress is broadcast rather than handed to a caller, because there is no caller: a
         // display that opens midway learns from this that something is already happening.
         //
-        // Best effort, per attachment.  This runs while the message is still arriving and before it
-        // is announced, so a pointer that cannot be fetched -- one with no url, say -- must cost
-        // that one attachment, not the rest of them and not the announcement.
+        // Best effort, per attachment.  This can run while the message is still arriving and before
+        // it is announced, so a pointer that cannot be fetched -- one with no url, say, or one
+        // deleted while it waited -- must cost that one attachment, not the rest of the queue and
+        // not the announcement.
         try {
             _attachment_data(
-                    message_id,
-                    a.index,
+                    next.message_id,
+                    next.index,
                     true,
                     _next_token++,
-                    [this, convo_id](const AttachmentProgress& p) {
+                    [this, convo = next.convo](const AttachmentProgress& p) {
                         if (const auto& h = _cbs->attachment_progress)
-                            h(convo_id, p);
+                            h(convo, p);
                     },
-                    nullptr);
+                    nullptr,
+                    ended);
         } catch (const std::exception& e) {
             log::warning(
                     cat,
                     "Not auto-downloading attachment {} of message {}: {}",
-                    a.index,
-                    message_id,
+                    next.index,
+                    next.message_id,
                     e.what());
+            ended();
         }
     }
+
+    _auto_pumping = false;
 }
 
 bool Client::_set_gallery(int64_t message_id, bool gallery) {

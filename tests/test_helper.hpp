@@ -35,7 +35,8 @@ inline nlohmann::json parse_json(std::span<const std::byte> body) {
 /// `sent_requests` to observe outgoing requests and fire their callbacks.
 class MockNetwork : public network::Network {
   public:
-    MockNetwork() : network::Network(network::config::Config{}) {}
+    explicit MockNetwork(network::config::Config config = {}) :
+            network::Network(std::move(config)) {}
 
     struct SentRequest {
         network::Request request;
@@ -151,8 +152,10 @@ class MockNetwork : public network::Network {
 /// Gives `core` a fresh MockNetwork and hands back a non-owning pointer to it.  A Core owns its
 /// Network outright -- nothing else may hold it alive -- so a test that goes on poking at the mock
 /// keeps a raw pointer rather than a second reference.
-inline MockNetwork* attach_mock_network(core::Core& core) {
-    auto net = std::make_unique<MockNetwork>();
+///
+/// `config` for a test that depends on how the network is configured -- which router it uses, say.
+inline MockNetwork* attach_mock_network(core::Core& core, network::config::Config config = {}) {
+    auto net = std::make_unique<MockNetwork>(std::move(config));
     auto* raw = net.get();
     raw->core = &core;
     core.set_network(std::move(net));
