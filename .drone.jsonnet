@@ -53,6 +53,14 @@ local llvm_deps(deps) = std.setDiff(std.set(deps), std.set([
 
 local default_test_deps = libngtcp2_deps + default_system_deps;
 
+// s390x, our big-endian target, cross-compiled against multiarch :s390x libraries and tested under
+// qemu.  deb.session.foundation publishes nothing for s390x, so its packages are left to submodules.
+local s390x_libs = std.map(function(p) p + ':s390x',
+                           std.setDiff(std.set(default_test_deps), std.set(['liboxen-quic-dev', 'liboxenc-dev']))
+                           + ['libsimdutf-dev', 'pkgconf']);
+local s390x_test_deps = s390x_libs + ['qemu-user'];
+local s390x_deps = ['crossbuild-essential-s390x', 'libcli11-dev', 'nlohmann-json3-dev'] + s390x_test_deps;
+
 local docker_base = 'registry.oxen.rocks/';
 
 // cmake options for static deps mirror
@@ -71,10 +79,14 @@ local add_stf_repo(image) = [
   'eatmydata ' + apt_get_quiet + ' update',
 ];
 
+// Enables a multiarch architecture's packages; has to come before the `apt-get update`.
+local add_foreign_arch(arch) = if arch != '' then ['dpkg --add-architecture ' + arch] else [];
+
 // Fresh-container apt bootstrap shared by every post-build test step: eatmydata, optional STF repo,
 // upgrade, then install `pkgs`. When `pkgs` is empty the repo/upgrade block is skipped entirely
 // (only eatmydata is installed), matching the original inline behaviour.
-local apt_setup(image, pkgs, stf_repo=true) =
+local apt_setup(image, pkgs, stf_repo=true, foreign_arch='') =
+  add_foreign_arch(foreign_arch) +
   [apt_get_quiet + ' install -y eatmydata'] +
   (if std.length(pkgs) > 0 then
      (if stf_repo then add_stf_repo(image) else []) + [
@@ -90,6 +102,7 @@ local debian_pipeline(name,
                       deps=default_deps,
                       stf_repo=true,
                       kitware_repo=''/* ubuntu codename, if wanted */,
+                      foreign_arch=''/* multiarch architecture to install packages of, e.g. s390x */,
                       allow_fail=false,
                       cmake_pkg='cmake',
                       build=['echo "Error: drone build argument not set"', 'exit 1'],
@@ -110,6 +123,7 @@ local debian_pipeline(name,
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+      ] + add_foreign_arch(foreign_arch) + [
         apt_get_quiet + ' update',
         apt_get_quiet + ' install -y eatmydata',
       ] + (
@@ -147,6 +161,8 @@ local debian_build(name,
                    tests=true,
                    stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
+                   foreign_arch=''/* multiarch architecture to install packages of, e.g. s390x */,
+                   test_runner=''/* prefix for running test binaries, e.g. an emulator */,
                    extra_steps=[],
                    allow_fail=false)
       = debian_pipeline(
@@ -156,6 +172,7 @@ local debian_build(name,
   deps=deps + (if static_deps then [] else system_deps),
   stf_repo=stf_repo,
   kitware_repo=kitware_repo,
+  foreign_arch=foreign_arch,
   allow_fail=allow_fail,
   build=[
     'mkdir build',
@@ -177,10 +194,10 @@ local debian_build(name,
                    image: image,
                    pull: 'always',
                    [if allow_fail then 'failure']: 'ignore',
-                   commands: apt_setup(image, test_deps, stf_repo=stf_repo) + [
+                   commands: apt_setup(image, test_deps, stf_repo=stf_repo, foreign_arch=foreign_arch) + [
                      'cd build',
-                     './tests/testLogging --colour-mode ansi -d yes',
-                     './tests/testAll --colour-mode ansi -d yes',
+                     test_runner + './tests/testLogging --colour-mode ansi -d yes',
+                     test_runner + './tests/testAll --colour-mode ansi -d yes',
                    ],
                  }] else []) + extra_steps
 );
@@ -503,6 +520,17 @@ local static_build(name,
   // ARM builds (ARM64 and armhf)
   debian_build('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', jobs=4),
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
+
+  // Big-endian:
+  debian_build('Debian forky (s390x cross)',
+               docker_base + 'debian-forky-s390x-cross',
+               deps=s390x_deps,
+               system_deps=[],
+               test_deps=s390x_test_deps,
+               stf_repo=false,
+               foreign_arch='s390x',
+               test_runner='qemu-s390x ',
+               cmake_extra='-DCMAKE_TOOLCHAIN_FILE=../cmake/debian-cross-s390x-toolchain.cmake '),
 
 
   mac_pipeline('Static iOS', arch='arm64', build=[
