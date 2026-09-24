@@ -1219,7 +1219,7 @@ void SnodePool::invalidate_swarm(x25519_pubkey swarm_pubkey, refresh_callback_t 
                 _evidence_refresh_backoff = 0s;
 
             if (pool_age < EVIDENCE_REFRESH_MIN_POOL_AGE || since_last < _evidence_refresh_backoff)
-                log::info(
+                log::debug(
                         cat,
                         "Swarm {} was rejected, but the pool is {}s old and the last refresh on a "
                         "rejection was {}s ago (backoff {}s); leaving it alone.",
@@ -1299,7 +1299,7 @@ bool SnodePool::record_swarm_redirect(
         if (redirects < std::numeric_limits<decltype(redirects)>::max())
             ++redirects;
 
-        log::info(
+        log::debug(
                 cat,
                 "Redirected to a swarm of {} nodes for {} (redirect {} since the pool was "
                 "refreshed).",
@@ -1307,14 +1307,28 @@ bool SnodePool::record_swarm_redirect(
                 swarm_pubkey.hex(),
                 redirects);
 
-        if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH || pool_missing_members) {
+        if (pool_missing_members) {
             log::warning(
                     cat,
-                    "Asking for a refresh for {}: {}.",
-                    swarm_pubkey.hex(),
-                    pool_missing_members
-                            ? "its redirect names nodes our pool doesn't have"
-                            : "{} redirects since the pool was refreshed"_format(redirects));
+                    "Asking for a refresh for {}: its redirect names nodes our pool doesn't have.",
+                    swarm_pubkey.hex());
+            invalidate_swarm(swarm_pubkey);
+        } else if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH) {
+            // Past the limit every redirect asks again, for as long as the refresh stays
+            // throttled, so only crossing it is worth a warning
+            if (redirects == SWARM_REDIRECTS_BEFORE_REFRESH + 1)
+                log::warning(
+                        cat,
+                        "Asking for a refresh for {}: {} redirects since the pool was refreshed.",
+                        swarm_pubkey.hex(),
+                        redirects);
+            else
+                log::debug(
+                        cat,
+                        "Asking again for a refresh for {}: {} redirects since the pool was "
+                        "refreshed.",
+                        swarm_pubkey.hex(),
+                        redirects);
             invalidate_swarm(swarm_pubkey);
         }
 
