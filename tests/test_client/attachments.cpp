@@ -3,6 +3,7 @@
 #include "../../src/client/download_cache.hpp"
 #include "../utils.hpp"
 #include "common.hpp"
+#include "config_helpers.hpp"
 
 namespace cache = session::client::cache;
 
@@ -3489,6 +3490,69 @@ TEST_CASE("Client: a request for an attachment can be withdrawn", "[client][atta
         CHECK(partial_cache_files(dir.path).empty());
     }
 
+    // Holds the disk loop until released, so that what is queued there behind it runs in a known
+    // order once it is.  Released on the way out whatever happens, or the loop never stops.
+    struct Gate {
+        std::promise<void> opened;
+        std::shared_future<void> open = opened.get_future().share();
+        bool released = false;
+        void release() {
+            if (!std::exchange(released, true))
+                opened.set_value();
+        }
+        ~Gate() { release(); }
+    };
+    auto core_turn = [&] { c->core.loop().call_get([] { return 0; }); };
+
+    SECTION("a cancel that crosses a save finishing as it arrived loses to it") {
+        auto id = arrive();
+        auto token = save(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+        request.on_data(meta, all.subspan(half));
+        request.on_complete(meta, false);
+
+        // The download's ending on the disk loop, which hands it to Core's loop; that queues the
+        // save's finish behind the gate, and the cancel then goes in behind the finish.
+        c->core.disk_loop()->call_get([] { return 0; });
+        Gate gate;
+        c->core.disk_loop()->call([open = gate.open] { open.wait(); });
+        core_turn();
+        c->cancel_attachment_transfer(token);
+        core_turn();
+        gate.release();
+        sync(*c);
+
+        REQUIRE(saved.size() == 1);
+        REQUIRE(saved[0].has_value());
+        CHECK(std::filesystem::exists(*saved[0]));
+    }
+
+    SECTION("a cancel that crosses a save from the cache loses to it") {
+        auto id = arrive();
+        show(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+        serve_rest(request);
+        REQUIRE(availability(id) == AttachmentAvailability::cached);
+
+        Gate gate;
+        c->core.disk_loop()->call([open = gate.open] { open.wait(); });
+        auto token = save(id);
+        core_turn();
+        c->cancel_attachment_transfer(token);
+        core_turn();
+        gate.release();
+        sync(*c);
+
+        CHECK(net->downloads.empty());
+        REQUIRE(saved.size() == 1);
+        REQUIRE(saved[0].has_value());
+        CHECK(std::filesystem::exists(*saved[0]));
+    }
+
     SECTION("a request that has already finished is not withdrawn") {
         auto id = arrive();
         auto token = save(id);
@@ -3625,4 +3689,93 @@ TEST_CASE("Client: auto-downloads take turns, newest first", "[client][auto][que
         sync(*c);
         CHECK(net->downloads.empty());
     }
+}
+
+TEST_CASE(
+        "Client: a deletion from another device withdraws the requests it orphans",
+        "[client][attachments][cancel][configs]") {
+    TempCacheDir dir, out;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(200'000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+
+    // Each way a merge deletes, and the conversation it has to be in: note to self's history is
+    // the profile's to clear, anyone else's the contact's.
+    auto how = GENERATE(
+            as<std::string>{}, "delete before", "delete attachments before", "remove", "self");
+    bool self = how == "self";
+    auto convo = self ? self_convo(*c) : ConversationId::dm(peer.session_id);
+    auto them = oxenc::to_hex(peer.session_id.begin(), peer.session_id.end());
+    if (!self)
+        c->open_dm(convo, await);
+
+    deliver(
+            *c,
+            self ? self_keys(*c) : peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            self ? std::optional{own_sid(*c)} : std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("doomed", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto messages = c->conversation(convo, await)->messages(await);
+    REQUIRE(messages.size() == 1);
+    auto id = messages[0].id;
+
+    // The save first, so that it is the one written as the file arrives and has something on disk
+    // to lose; the display joins it.
+    std::optional<Expected<std::filesystem::path>> saved;
+    c->Client::save_attachment(
+            id, 0, out.path / "saved.png", nullptr, [&](auto r) { saved = std::move(r); }, false);
+    std::optional<Expected<std::vector<std::byte>>> shown;
+    c->attachment_data(id, 0, nullptr, [&](auto r) { shown = std::move(r); });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+    auto request = std::move(net->downloads[0]);
+    net->downloads.clear();
+    network::file_metadata meta{"doomed", static_cast<int64_t>(ciphertext.size()), {}, {}};
+    request.on_data(meta, std::span{ciphertext}.first(ciphertext.size() / 2));
+    sync(*c);
+    REQUIRE_FALSE(std::filesystem::is_empty(out.path));
+
+    auto later = std::chrono::sys_seconds{2000s};
+    if (self)
+        merge_profile(*c, profile_from_another_device(*c, [&](config::UserProfile& theirs) {
+            theirs.set_nts_delete_before(later);
+        }));
+    else
+        merge_contacts(*c, contacts_update_from_another_device(*c, [&](config::Contacts& theirs) {
+            if (how == "remove") {
+                theirs.erase(them);
+                return;
+            }
+            auto e = theirs.get_or_construct(them);
+            (how == "delete before" ? e.delete_before : e.delete_attach_before) = later;
+            theirs.set(e);
+        }));
+    sync(*c);
+
+    auto withdrawn = [](const auto& r) {
+        return r && !r->has_value() && r->error().code == err::download_cancelled;
+    };
+    CHECK(withdrawn(shown));
+    CHECK(withdrawn(saved));
+    CHECK(*request.cancelled);
+    CHECK(std::filesystem::is_empty(out.path));
+    CHECK(partial_cache_files(dir.path).empty());
 }
