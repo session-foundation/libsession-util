@@ -963,14 +963,9 @@ class Client {
     // ever attribute those files to anything, so nothing else can ever remove them.
     void _sweep_cache();
 
-    // The deciding half of `_sweep_cache`, on the loop.  Takes the directory listings because
-    // taking them is the slow part and does not belong here.
+    // The deciding half of `_sweep_cache`, on the loop, given the listings the disk loop took.
+    // What it decides is carried out back on the disk loop, which is where files are removed.
     void _reconcile_cache(std::vector<std::string> attachments, std::vector<std::string> pictures);
-
-    // Runs the listing half of a sweep.  Joined before anything it touches goes away, which is why
-    // it hands its result back with `call_get`: joining a thread that had merely *posted* a job
-    // would not wait for the job.
-    std::thread _sweeper;
 
     // This Client's work on `core.disk_loop()`: everything it does on disk, and the decryption of
     // what it downloads, none of which belongs on the network's loop or on Core's.  Stopped at the

@@ -1650,15 +1650,11 @@ TEST_CASE("Client: the sweep reconciles the cache with what the database says", 
     });
 
     // Reopened, which is when a client sweeps: the leaks above are exactly what survives a restart.
+    // The sweep goes back and forth between the disk loop, which lists and removes, and Core's,
+    // which decides -- which is what `sync` waits out.
     c.reopen();
     c->set_cache_dir(dir.path);
-
-    // Reopened *again* rather than waited on, because destruction is what a sweep is guaranteed
-    // against: the destructor joins the sweeper, and the sweeper does not finish until the
-    // reconcile it posted has run.  A `sync` here would only prove the loop was idle, which it is
-    // well before the listing is done.  This one is given no cache directory, so it does not sweep
-    // in turn.
-    c.reopen();
+    sync(*c);
 
     CHECK(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / real_name));
     CHECK_FALSE(std::filesystem::exists(dir.path / cache::ATTACHMENT_DIR / orphan_name));

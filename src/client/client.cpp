@@ -735,10 +735,6 @@ Client::~Client() {
     // First, while everything a disk job reaches is still here.  On the disk loop, so that a job
     // already running there finishes before the queue stops rather than alongside it.
     _disk_loop->call_get([this] { _disk_jq->stop(); });
-
-    // Before the loop it hands its listing back to, and before the members that listing is about.
-    if (_sweeper.joinable())
-        _sweeper.join();
 }
 
 void Client::_post_disk(std::function<void()> job) {
@@ -753,29 +749,24 @@ void Client::_sweep_cache() {
     if (_cache_dir.empty())
         return;
 
-    if (_sweeper.joinable())
-        _sweeper.join();
-
-    // Split so that the walk -- the slow half, which reads nothing but the directory -- stays off
-    // the loop, and the deciding -- the quick half, which reads the database -- stays on it.  That
-    // split is also the whole of the concurrency argument: a file is written and its row inserted
-    // by one loop job, so a reconcile running on the loop cannot land between the two and take a
-    // freshly cached file for an orphan.  Files that appear after the listing are simply not in it.
-    _sweeper = std::thread{[this, dir = _cache_dir] {
+    // Listed on the disk loop and decided on Core's, where the rows are.  A download landing
+    // meanwhile cannot be taken for an orphan, because both halves of one run in the same order: a
+    // file is committed on the disk loop and then recorded on Core's.  So a file the listing saw
+    // was committed before it, and its recording is queued on Core's loop ahead of this reconcile;
+    // one committed after the listing is simply not in it.
+    _post_disk([this, dir = _cache_dir] {
         auto attachments = cache::list(dir, cache::ATTACHMENT_DIR);
         auto pictures = cache::list(dir, cache::PROFILE_DIR);
-
-        // `call_get`, not `call`: the destructor joins this thread to know the sweep is over, and a
-        // thread that had only posted the job would finish while the job was still queued.
-        call_get([this, &attachments, &pictures] {
+        call([this,
+              attachments = std::move(attachments),
+              pictures = std::move(pictures)]() mutable {
             try {
                 _reconcile_cache(std::move(attachments), std::move(pictures));
             } catch (const std::exception& e) {
                 log::warning(cat, "Cache sweep failed: {}", e.what());
             }
-            return 0;
         });
-    }};
+    });
 }
 
 void Client::_reconcile_cache(
@@ -784,12 +775,11 @@ void Client::_reconcile_cache(
 
     // An attachment file without a row cannot be found by a lookup or counted by eviction, so it is
     // not a cache entry at all -- it is a file taking up room under a name nobody can resolve.
-    size_t orphans = 0;
-    for (const auto& name : attachments)
+    std::vector<std::string> orphans;
+    for (auto& name : attachments)
         if (!c.prepared_get<int64_t>(
-                    "SELECT EXISTS(SELECT 1 FROM attachment_cache WHERE name = ?)", name) &&
-            cache::remove(_cache_dir, cache::ATTACHMENT_DIR, name))
-            orphans++;
+                    "SELECT EXISTS(SELECT 1 FROM attachment_cache WHERE name = ?)", name))
+            orphans.push_back(std::move(name));
 
     // The other direction, which is not cosmetic: eviction totals `size` over the rows, so a row
     // naming a file that is gone makes the cache look fuller than it is and evicts live files to
@@ -797,26 +787,13 @@ void Client::_reconcile_cache(
     //
     // Rows the listing covers are fine by definition.  The rest are checked against the disk rather
     // than assumed missing, because a row inserted after the listing was taken is legitimately
-    // absent from it and dropping it would strand the file it names.  Collected before deleting
-    // any, rather than deleted as they are found: this is a read of the table it would modify.
+    // absent from it and dropping it would strand the file it names.
     std::set<std::string> listed{attachments.begin(), attachments.end()};
-    std::vector<std::pair<int64_t, std::string>> stale;
+    std::vector<std::pair<int64_t, std::string>> unlisted;
     for (auto&& [id, name] :
-         c.prepared_results<int64_t, std::string>("SELECT id, name FROM attachment_cache")) {
-        std::error_code ec;
-        if (!listed.contains(name) &&
-            !std::filesystem::exists(_cache_dir / cache::ATTACHMENT_DIR / name, ec))
-            stale.emplace_back(id, std::move(name));
-    }
-    // Through the same path an eviction takes, so a file that went missing behind our back is
-    // reported to the messages drawing it exactly as one we deleted on purpose would be -- and as
-    // one report for the sweep, not one per file.
-    std::vector<int64_t> affected;
-    for (const auto& [id, name] : stale) {
-        auto showing = _drop_cached(c, id, name);
-        affected.insert(affected.end(), showing.begin(), showing.end());
-    }
-    _emit_messages_showing(c, affected);
+         c.prepared_results<int64_t, std::string>("SELECT id, name FROM attachment_cache"))
+        if (!listed.contains(name))
+            unlisted.emplace_back(id, std::move(name));
 
     // A picture is referenced by an account naming its url and by nothing else, so the referenced
     // set is that column.  Recomputed here rather than passed in, so that an account that appeared
@@ -825,20 +802,53 @@ void Client::_reconcile_cache(
     for (auto url : c.prepared_results<std::string>(
                  "SELECT profile_pic_url FROM accounts WHERE profile_pic_url IS NOT NULL"))
         keep.insert(_cache_name(url));
+    std::vector<std::string> unreferenced;
+    for (auto& name : pictures)
+        if (!keep.contains(name))
+            unreferenced.push_back(std::move(name));
 
-    size_t unreferenced = 0;
-    for (const auto& name : pictures)
-        if (!keep.contains(name) && cache::remove(_cache_dir, cache::PROFILE_DIR, name))
-            unreferenced++;
+    // What only the disk can answer, and do: removing what nothing refers to, and whether each row
+    // the listing did not cover still has its file.
+    _post_disk([this,
+                dir = _cache_dir,
+                orphans = std::move(orphans),
+                unlisted = std::move(unlisted),
+                unreferenced = std::move(unreferenced)]() mutable {
+        size_t dropped_files = 0, dropped_pictures = 0;
+        for (const auto& name : orphans)
+            dropped_files += cache::remove(dir, cache::ATTACHMENT_DIR, name);
+        for (const auto& name : unreferenced)
+            dropped_pictures += cache::remove(dir, cache::PROFILE_DIR, name);
 
-    if (orphans || !stale.empty() || unreferenced)
-        log::info(
-                cat,
-                "Cache sweep: dropped {} untracked attachment(s), {} row(s) for missing files, {} "
-                "unreferenced picture(s)",
-                orphans,
-                stale.size(),
-                unreferenced);
+        std::vector<std::pair<int64_t, std::string>> gone;
+        for (auto& [id, name] : unlisted) {
+            std::error_code ec;
+            if (!std::filesystem::exists(dir / cache::ATTACHMENT_DIR / name, ec))
+                gone.emplace_back(id, std::move(name));
+        }
+
+        call([this, gone = std::move(gone), dropped_files, dropped_pictures] {
+            // Through the same path an eviction takes, so a file that went missing behind our back
+            // is reported to the messages drawing it exactly as one we deleted on purpose would be
+            // -- and as one report for the sweep, not one per file.
+            auto c = core.database().conn();
+            std::vector<int64_t> affected;
+            for (const auto& [id, name] : gone) {
+                auto showing = _drop_cached(c, id, name);
+                affected.insert(affected.end(), showing.begin(), showing.end());
+            }
+            _emit_messages_showing(c, affected);
+
+            if (dropped_files || !gone.empty() || dropped_pictures)
+                log::info(
+                        cat,
+                        "Cache sweep: dropped {} untracked attachment(s), {} row(s) for missing "
+                        "files, {} unreferenced picture(s)",
+                        dropped_files,
+                        gone.size(),
+                        dropped_pictures);
+        });
+    });
 }
 
 std::filesystem::path Client::_cache_path(std::string_view kind, std::string_view url) {
@@ -2761,8 +2771,10 @@ void Client::_drop_unused_picture(sqlite::Connection& c, std::string_view url) {
                 "SELECT EXISTS(SELECT 1 FROM accounts WHERE profile_pic_url = ?)", url))
         return;
 
-    std::error_code ec;
-    std::filesystem::remove(_cache_path(cache::PROFILE_DIR, url), ec);
+    _post_disk([file = _cache_path(cache::PROFILE_DIR, url)] {
+        std::error_code ec;
+        std::filesystem::remove(file, ec);
+    });
 }
 
 void Client::_reconcile_contacts() {
@@ -5061,9 +5073,15 @@ std::vector<int64_t> Client::_drop_cached(
 
     // The row is an index, not the truth: a file that is already gone still costs a row, and
     // removing it is as much progress as unlinking one.
-    std::error_code ec;
-    std::filesystem::remove(_cache_dir / cache::ATTACHMENT_DIR / name, ec);
     c.prepared_exec("DELETE FROM attachment_cache WHERE id = ?", id);
+
+    // The file goes after the row, on the disk loop.  In order there, so a read of it posted while
+    // the row still stood finishes first, and a download of the same file started after this
+    // commits after it.
+    _post_disk([file = _cache_dir / cache::ATTACHMENT_DIR / name] {
+        std::error_code ec;
+        std::filesystem::remove(file, ec);
+    });
 
     return showing;
 }
