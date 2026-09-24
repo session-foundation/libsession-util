@@ -156,6 +156,15 @@ Core::~Core() {
     }
 }
 
+network::Network& Core::make_network(network::config::Config config) {
+    if (!config.disk_loop)
+        config.disk_loop = _disk_loop;
+    auto net = std::make_unique<network::Network>(std::move(config));
+    auto& ref = *net;
+    set_network(std::move(net));
+    return ref;
+}
+
 void Core::set_network(std::unique_ptr<network::Network> network) {
     // Polling signs its retrieve requests with the account key, so attaching a network before the
     // account has an identity would fail inside a background poll rather than here.  Refuse at the

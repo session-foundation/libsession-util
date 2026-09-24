@@ -152,9 +152,11 @@ class MockNetwork : public network::Network {
 /// Network outright -- nothing else may hold it alive -- so a test that goes on poking at the mock
 /// keeps a raw pointer rather than a second reference.
 inline MockNetwork* attach_mock_network(core::Core& core) {
-    auto& net = core.make_network<MockNetwork>();
-    net.core = &core;
-    return &net;
+    auto net = std::make_unique<MockNetwork>();
+    auto* raw = net.get();
+    raw->core = &core;
+    core.set_network(std::move(net));
+    return raw;
 }
 
 /// Answers one captured download with `data`, delivered in chunks as a transport would rather than
@@ -436,6 +438,7 @@ class TestHelper {
         net._router = std::move(router);
     }
     static network::SnodePool& snode_pool(network::Network& net) { return *net._snode_pool; }
+    static oxen::quic::Loop& disk_loop(network::Network& net) { return *net._disk_loop; }
 
     static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
 
