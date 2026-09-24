@@ -356,10 +356,10 @@ class Client {
     /// For showing a file rather than keeping it: a gallery needs the bytes, and `save_attachment`
     /// would have it write files it then reads back and deletes.
     ///
-    /// Served from the cache when it is there, and fetched *and cached* when it is not — which is
-    /// the difference from `save_attachment`, which reads the cache but never fills it.  A save has
-    /// a home of its own to put the file in; a display does not, and would otherwise re-fetch on
-    /// every scroll.
+    /// Served from the cache when it is there, and fetched *and cached* when it is not, so a
+    /// display does not re-fetch on every scroll.  Asking while the file is already on its way,
+    /// whether for another display or for `save_attachment`, waits for that download rather than
+    /// starting a second.
     ///
     /// Not subject to the auto-download size limit.  That governs what arrives unasked, and this is
     /// asked for.
@@ -427,6 +427,11 @@ class Client {
     /// what it says.  The file is written whole or not at all: it lands at a temporary name beside
     /// `dest` and is renamed only once it has been decrypted and verified, so an interrupted save
     /// leaves no half-file that looks finished.
+    ///
+    /// The cache is read first and filled as the file arrives, as for `attachment_data`, since
+    /// saving a file and then saving it again somewhere else is common and should not cost a
+    /// second download.  A save asked for while the file is already on its way joins that
+    /// download, and while it runs the attachment shows as being fetched like any other.
     ///
     /// **`cb` reports where it actually went**, which is not always `dest`.  Whether `dest` was
     /// free is something the caller decided when it asked its user; the rename happens when the
@@ -1203,9 +1208,9 @@ class Client {
     // `display_picture_progress` as it goes.
     void _fetch_picture(const ConversationId& id, std::string url, std::vector<std::byte> key);
 
-    // Starts the download behind save_attachment.  Everything after the row lookup happens off the
-    // loop, on the disk loop: the file is decrypted and written there, and nothing about it is
-    // recorded, so this is the one attachment path that never comes back to the database.
+    // The work behind save_attachment: served from the cache when the file is there, and otherwise
+    // written as a transfer of it arrives -- one it starts, or joins -- with the file itself only
+    // ever touched on the disk loop.
     void _save_attachment(
             int64_t message_id,
             size_t index,
@@ -1214,6 +1219,38 @@ class Client {
             result_function<std::filesystem::path> cb,
             bool notify_sender,
             bool replace);
+
+    // A save in progress; defined beside the code that runs it.
+    struct Save;
+
+    // Joins a transfer of the file, to be served from it once it ends, or starts one written
+    // straight to the save as it arrives.
+    void _save_uncached(std::shared_ptr<Save> s);
+
+    // Copies the cache entry at `file` into the save, a chunk at a time on the disk loop, and
+    // fetches it instead if the entry turns out not to be readable.  `entry_id`, when given, is the
+    // entry to mark as used.
+    void _save_from_cache(
+            std::shared_ptr<Save> s, std::filesystem::path file, std::optional<int64_t> entry_id);
+
+    // Writes the whole of `bytes` into the save, on the disk loop, for one served from a transfer
+    // that held its file rather than caching it.
+    void _save_bytes(std::shared_ptr<Save> s, std::vector<std::byte> bytes);
+
+    // On the disk loop: writes into the save, opening its temporary file on the first write, and
+    // gives up on the save -- not the transfer -- if it cannot.
+    static void _save_write(Save& s, std::span<const std::byte> data);
+
+    // On the disk loop: renames the save into place, or removes what it wrote if `error` says the
+    // transfer failed or the save itself has.
+    static Expected<std::filesystem::path> _save_finish(Save& s, std::optional<Error> error);
+
+    // On the disk loop: closes and removes the save's temporary file.
+    static void _save_discard(Save& s);
+
+    // On Core's loop: tells the caller how the save ended, and on success records it and tells the
+    // sender.
+    void _saved(const Save& s, Expected<std::filesystem::path> result);
 
     // Tells a message's sender that we saved one of its attachments.  Fire and forget: nothing
     // waits on it and a failure is logged rather than reported, since it is a courtesy to them

@@ -1101,6 +1101,31 @@ struct Client::Transfer {
     // The whole file, for a transfer that is not caching and so has nowhere to read it back from.
     // The disk loop's until the transfer ends, when it is handed to Core's.
     std::unique_ptr<std::vector<std::byte>> memory;
+
+    // Saves written to as the bytes arrive: those that started this transfer.  Set before it
+    // starts; the disk loop's after that.
+    std::vector<std::shared_ptr<Save>> sinks;
+
+    // Saves that joined partway, and are served from what the transfer kept once it ends.  Core's
+    // loop's.
+    std::vector<std::shared_ptr<Save>> saves;
+};
+
+// A save_attachment on its way to disk: written under a temporary name beside the destination and
+// renamed only once it is whole, so an interrupted save leaves nothing that looks finished.  The
+// file and whether the save has failed are the disk loop's; the rest is set before any of it runs.
+struct Client::Save {
+    RemoteFile remote;
+    int64_t message_id;
+    size_t index;
+    std::filesystem::path dest;
+    bool replace, notify_sender;
+    result_function<std::filesystem::path> cb;
+    transfer_progress report;
+
+    std::filesystem::path partial;
+    std::ofstream out;
+    std::optional<Error> failed;
 };
 
 void Client::_fetch_cached(
@@ -1221,6 +1246,8 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
         }
         if (t->memory)
             t->memory->insert(t->memory->end(), plain.begin(), plain.end());
+        for (const auto& s : t->sinks)
+            _save_write(*s, plain);
     };
 
     // Onto Core's loop before touching the registry -- this arrives on the disk loop, and
@@ -1259,13 +1286,23 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
         if (t->memory)
             memory = std::move(*t->memory);
 
+        // And the saves written as it arrived are finished here too, where their files are: renamed
+        // into place if it worked, and removed if not.
+        std::vector<Expected<std::filesystem::path>> saved;
+        for (const auto& s : t->sinks)
+            saved.push_back(_save_finish(
+                    *s,
+                    result == DownloadResult::ok ? std::nullopt
+                                                 : std::optional{_to_error(result, why)}));
+
         call([this,
               name,
               t,
               result,
               why = std::move(why),
               cached_size,
-              memory = std::move(memory)]() mutable {
+              memory = std::move(memory),
+              saved = std::move(saved)]() mutable {
             auto found = _in_flight.find(name);
             if (found == _in_flight.end() || found->second != t)
                 return;
@@ -1276,6 +1313,8 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
             // while this entry stood; a waiter may ask for the same file again, and must find a
             // finished transfer rather than join one about to be erased.
             _in_flight.erase(found);
+            for (size_t i = 0; i < saved.size(); i++)
+                _saved(*t->sinks[i], std::move(saved[i]));
             _finish_transfer(std::move(t), result, std::move(why), cached_size, std::move(memory));
         });
     };
@@ -1298,8 +1337,12 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
     } catch (const std::exception& e) {
         log::warning(cat, "Could not start a fetch of {}: {}", target.remote.url, e.what());
         _in_flight.erase(name);
+        auto error = error_from(e);
         for (const auto& w : t->waiting)
-            _report(w, Expected<std::vector<std::byte>>{unexpected{error_from(e)}});
+            _report(w, Expected<std::vector<std::byte>>{unexpected{error}});
+        // Nothing of theirs has been opened yet: a save's file is opened by its first bytes.
+        for (const auto& s : t->sinks)
+            _saved(*s, unexpected{error});
         return;
     }
 
@@ -1346,16 +1389,31 @@ void Client::_finish_transfer(
         _emit_attachment_availability(target.remote.url);
     }
 
-    if (t->waiting.empty())
+    if (t->waiting.empty() && t->saves.empty())
         return;
 
-    if (!ok)
-        return _serve_waiters(*t, unexpected{_to_error(result, std::move(why))});
+    if (!ok) {
+        auto error = _to_error(result, std::move(why));
+        for (const auto& s : t->saves)
+            _saved(*s, unexpected{error});
+        return _serve_waiters(*t, unexpected{std::move(error)});
+    }
 
-    if (memory)
+    if (memory) {
+        for (const auto& s : t->saves)
+            _save_bytes(s, *memory);
         return _serve_waiters(*t, std::move(*memory));
+    }
     if (!cached_size)
         return _refetch(std::move(t));
+
+    // A save that joined partway copies from the cache a chunk at a time, going back to fetching
+    // the file if that turns out not to be readable after all.
+    for (auto& s : t->saves)
+        _save_from_cache(std::move(s), t->cache_file, std::nullopt);
+    t->saves.clear();
+    if (t->waiting.empty())
+        return;
 
     // Read back rather than kept as it arrived, so that nothing held the whole file while it
     // downloaded -- and now only because somebody asked for it that way.  Decided here rather than
@@ -1387,6 +1445,7 @@ void Client::_refetch(std::shared_ptr<Transfer> t) {
     again->memory = std::make_unique<std::vector<std::byte>>();
     again->progress = std::move(t->progress);
     again->waiting = std::move(t->waiting);
+    again->saves = std::move(t->saves);
     auto name = _transfer_key(again->target.remote);
     _start_transfer(std::move(name), std::move(again));
 }
@@ -5138,160 +5197,179 @@ void Client::_save_attachment(
         bool notify_sender,
         bool replace) {
 
-    auto remote = _remote_file(message_id, index);
-    const auto& url = remote.url;
-
-    // Written to a temporary name beside the destination and renamed only once it is whole, so an
-    // interrupted save leaves nothing that looks finished.
-    struct SaveState {
-        std::filesystem::path dest, partial, saved_to;
-        std::ofstream out;
-    };
-    auto state = std::make_shared<SaveState>();
-    state->dest = std::move(dest);
-    state->partial = open_partial(state->out, state->dest);
-
-    auto report = _attachment_progress(message_id, index, std::move(on_progress));
-
-    auto finish = [this, state, message_id, index, notify_sender, replace, cb](
-                          Expected<void> fetched) {
-        auto fail = [&](Error why) {
-            state->out.close();
-            std::error_code ec;
-            std::filesystem::remove(state->partial, ec);
-            _fail<std::filesystem::path>(cb, std::move(why));
-        };
-
-        if (!fetched)
-            return fail(std::move(fetched).error());
-
-        try {
-            state->out.close();
-            if (!state->out)
-                throw std::runtime_error{"writing {} failed"_format(state->partial.string())};
-
-            // Only now does it get a name a user would recognise -- and only now can it be
-            // known whether the one they asked for is still free, which is why the choice
-            // is here rather than where the caller made it.
-            state->saved_to = final_path(state->dest, replace);
-            std::filesystem::rename(state->partial, state->saved_to);
-        } catch (const std::exception& e) {
-            return fail(Error{err::save_failed, e.what()});
-        }
-
-        _report(cb, Expected<std::filesystem::path>{state->saved_to});
-
-        // Both of these say the same thing -- that the recipient now has the file -- one to
-        // ourselves and one to the sender, and neither is true until it is on disk under
-        // its final name, which is why they are here rather than anywhere earlier.
-        // Recording it does not depend on telling them: a caller who saved privately still
-        // gets to see that they did.
-        //
-        // Both are also only true when the recipient is *us*.  `saved_at` says the
-        // recipient saved it, which is what lets a sender read it as "the file reached a
-        // person rather than a file server", so stamping it for our own save of something
-        // we sent would claim they have a file they may never have opened.  A note to self
-        // is exempt: there the recipient is us, so saving it really is the recipient
-        // saving it.
-        call([this, message_id, index, notify_sender] {
-            if (_saved_by_recipient(message_id))
-                _record_saved(message_id, index, clock_now_ms());
-
-            // The account's own answer overrides the caller's, and only downwards.
-            // Somebody who has said not to report their saves has said it for every client
-            // on the account, and a client that forgot to ask -- or never grew the setting
-            // -- would otherwise report them anyway.  A caller passing false is still
-            // respected: this can refuse a notification, never require one.
-            if (notify_sender && core.configs.user_profile().get_notify_media_saved())
-                _notify_media_saved(message_id, index);
-        });
-    };
-
-    // Writes what was fetched to the destination and finishes as a completed download would, for
-    // the two paths that hand over a whole buffer rather than streaming into it.  Neither records a
-    // verdict: a cache hit did not fail, and a transfer this joined records its own.
-    auto write_and_finish = [state, finish](Expected<std::vector<std::byte>> fetched) {
-        if (!fetched)
-            return finish(unexpected{std::move(fetched).error()});
-        state->out.write(
-                reinterpret_cast<const char*>(fetched->data()),
-                static_cast<std::streamsize>(fetched->size()));
-        finish({});
-    };
+    auto s = std::make_shared<Save>();
+    s->remote = _remote_file(message_id, index);
+    s->message_id = message_id;
+    s->index = index;
+    s->dest = std::move(dest);
+    s->replace = replace;
+    s->notify_sender = notify_sender;
+    s->cb = std::move(cb);
+    s->report = _attachment_progress(message_id, index, std::move(on_progress));
 
     // Served from the cache when it is there.  Indistinguishable to everyone else: the file lands
     // where it was asked to, and the sender is still told we saved it, because being able to skip
     // the download is our business and says nothing about whether the recipient has the file.
     //
     // No progress is reported for it -- there is no transfer to watch, and a bar that appears and
-    // completes in the same frame is noise.  A save does not *fill* the cache, only read it: it has
-    // a destination of its own, and writing a second encrypted copy would double what it costs.
+    // completes in the same frame is noise.
     if (!_cache_dir.empty()) {
         auto c = core.database().conn();
-        if (auto entry = _cached_entry(c, url))
-            if (auto cached = cache::read(
-                        _cache_dir / cache::ATTACHMENT_DIR / entry->second,
-                        _cache_encryption_key())) {
-                _touch_cached(entry->first);
-                write_and_finish(std::move(*cached));
-                return;
-            }
+        if (auto entry = _cached_entry(c, s->remote.url))
+            return _save_from_cache(
+                    std::move(s), _cache_dir / cache::ATTACHMENT_DIR / entry->second, entry->first);
     }
 
-    // Already being kept for somebody else -- a gallery, or the auto-downloader.  Waiting on that
-    // costs nothing: the file is kept either way, and asking for the same bytes again would mean
-    // two transfers of one file.
-    //
-    // The reverse does not hold, which is why nothing is registered below: this streams to the
-    // destination as bytes arrive and keeps none of them, so there would be nothing to give a
-    // joiner that turned up midway.
-    //
-    // TODO: which also means a save is invisible while it runs.  Every message showing the file
-    // reads `absent` rather than `fetching`, and a display asking meanwhile starts a second
-    // transfer of the same bytes.  The fix is a transfer that fans each decrypted chunk out to all
-    // of its consumers -- a cache sink, save destinations, waiters -- and aborts only when the last
-    // one detaches, so that a save is registered like anything else.
-    if (auto found = _in_flight.find(_transfer_key(remote)); found != _in_flight.end()) {
-        if (report) {
-            report(found->second->done, found->second->total, std::nullopt);
-            found->second->progress.push_back(report);
+    _save_uncached(std::move(s));
+}
+
+void Client::_save_uncached(std::shared_ptr<Save> s) {
+    // Already being fetched: waited on and served from what that transfer keeps once it ends,
+    // rather than asking for the same bytes again.
+    auto name = _transfer_key(s->remote);
+    if (auto found = _in_flight.find(name); found != _in_flight.end()) {
+        if (s->report) {
+            s->report(found->second->done, found->second->total, std::nullopt);
+            found->second->progress.push_back(s->report);
         }
-        found->second->waiting.push_back(write_and_finish);
+        found->second->saves.push_back(std::move(s));
         return;
     }
 
-    // A download that cannot start never calls `finish`, which is what removes the temporary file,
-    // so it has to go here or be left beside the destination.  Rethrown for `save_attachment` to
-    // report, which still holds the caller's handler.
-    try {
-        _download_decrypted(
-                remote,
-                DownloadKind::attachment,
-                [state](std::span<const std::byte> plain, size_t) {
-                    state->out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
-                },
-                report,
-                [this, claim = remote, finish](DownloadResult result, std::string why) {
-                    // A save is as good a witness as a background fetch, and records the same
-                    // verdict on the same rows.  Onto the loop like the rest of the save's state
-                    // changes, since this arrives on the disk loop.
-                    if (auto verdict = _to_unavailable(result))
-                        call([this, claim, verdict = *verdict] {
-                            auto c = core.database().conn();
-                            _emit_messages_showing(c, _mark_unavailable(c, claim, verdict));
-                        });
-
-                    if (result == DownloadResult::ok)
-                        finish({});
-                    else
-                        finish(unexpected{_to_error(result, std::move(why))});
-                });
-    } catch (...) {
-        state->out.close();
-        std::error_code ec;
-        std::filesystem::remove(state->partial, ec);
-        throw;
+    // Written straight to its destination as the bytes arrive, and into the cache alongside, so
+    // that the next save of the same file -- common: a file saved and saved again -- or a display
+    // of it does not download it a second time.  With no cache there is nothing kept that a
+    // newcomer could be served, so it is registered under a name nothing can find to join.
+    auto t = std::make_shared<Transfer>();
+    t->target = {s->remote, DownloadKind::attachment, cache::ATTACHMENT_DIR};
+    if (!_cache_dir.empty())
+        t->cache_file = _cache_path(cache::ATTACHMENT_DIR, s->remote.url);
+    else {
+        name += '\0';
+        name += random::unique_id("save", 8);
     }
+    if (s->report)
+        t->progress.push_back(s->report);
+    t->sinks.push_back(std::move(s));
+    _start_transfer(std::move(name), std::move(t));
+}
+
+void Client::_save_from_cache(
+        std::shared_ptr<Save> s, std::filesystem::path file, std::optional<int64_t> entry_id) {
+    _post_disk([this,
+                s = std::move(s),
+                file = std::move(file),
+                key = _cache_encryption_key(),
+                entry_id]() mutable {
+        std::optional<Expected<std::filesystem::path>> result;
+        if (cache::read_into(file, key, [&](std::span<const std::byte> d) { _save_write(*s, d); }))
+            result = _save_finish(*s, std::nullopt);
+        else
+            // Gone, or unreadable: back to where the save started, to be fetched instead.
+            _save_discard(*s);
+
+        call([this, s = std::move(s), entry_id, result = std::move(result)]() mutable {
+            if (!result)
+                return _save_uncached(std::move(s));
+            if (entry_id)
+                _touch_cached(*entry_id);
+            _saved(*s, std::move(*result));
+        });
+    });
+}
+
+void Client::_save_bytes(std::shared_ptr<Save> s, std::vector<std::byte> bytes) {
+    _post_disk([this, s = std::move(s), bytes = std::move(bytes)]() mutable {
+        _save_write(*s, bytes);
+        auto result = _save_finish(*s, std::nullopt);
+        call([this, s = std::move(s), result = std::move(result)]() mutable {
+            _saved(*s, std::move(result));
+        });
+    });
+}
+
+void Client::_save_write(Save& s, std::span<const std::byte> data) {
+    if (s.failed)
+        return;
+    try {
+        if (!s.out.is_open())
+            s.partial = open_partial(s.out, s.dest);
+        s.out.write(
+                reinterpret_cast<const char*>(data.data()),
+                static_cast<std::streamsize>(data.size()));
+        if (!s.out)
+            throw std::runtime_error{"writing {} failed"_format(s.partial.string())};
+    } catch (const std::exception& e) {
+        // Given up on here, not the transfer: whatever else wants these bytes still gets them.
+        s.failed = Error{err::save_failed, e.what()};
+        _save_discard(s);
+    }
+}
+
+Expected<std::filesystem::path> Client::_save_finish(Save& s, std::optional<Error> error) {
+    if (!error && s.failed)
+        error = std::move(s.failed);
+    if (error) {
+        _save_discard(s);
+        return unexpected{std::move(*error)};
+    }
+    try {
+        // An empty file is never written to, and is still a file.
+        if (!s.out.is_open())
+            s.partial = open_partial(s.out, s.dest);
+        s.out.close();
+        if (!s.out)
+            throw std::runtime_error{"writing {} failed"_format(s.partial.string())};
+
+        // Only now does it get a name a user would recognise -- and only now can it be known
+        // whether the one they asked for is still free, which is why the choice is here rather
+        // than where the caller made it.
+        auto saved_to = final_path(s.dest, s.replace);
+        std::filesystem::rename(s.partial, saved_to);
+        return saved_to;
+    } catch (const std::exception& e) {
+        _save_discard(s);
+        return unexpected{Error{err::save_failed, e.what()}};
+    }
+}
+
+void Client::_save_discard(Save& s) {
+    try {
+        s.out.close();
+    } catch (...) {
+    }
+    if (!s.partial.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(s.partial, ec);
+        s.partial.clear();
+    }
+}
+
+void Client::_saved(const Save& s, Expected<std::filesystem::path> result) {
+    bool ok = result.has_value();
+    _report(s.cb, std::move(result));
+    if (!ok)
+        return;
+
+    // Both of these say the same thing -- that the recipient now has the file -- one to ourselves
+    // and one to the sender, and neither is true until it is on disk under its final name, which is
+    // why they are here rather than anywhere earlier.  Recording it does not depend on telling
+    // them: a caller who saved privately still gets to see that they did.
+    //
+    // Both are also only true when the recipient is *us*.  `saved_at` says the recipient saved it,
+    // which is what lets a sender read it as "the file reached a person rather than a file server",
+    // so stamping it for our own save of something we sent would claim they have a file they may
+    // never have opened.  A note to self is exempt: there the recipient is us, so saving it really
+    // is the recipient saving it.
+    if (_saved_by_recipient(s.message_id))
+        _record_saved(s.message_id, s.index, clock_now_ms());
+
+    // The account's own answer overrides the caller's, and only downwards.  Somebody who has said
+    // not to report their saves has said it for every client on the account, and a client that
+    // forgot to ask -- or never grew the setting -- would otherwise report them anyway.  A caller
+    // passing false is still respected: this can refuse a notification, never require one.
+    if (s.notify_sender && core.configs.user_profile().get_notify_media_saved())
+        _notify_media_saved(s.message_id, s.index);
 }
 
 void Client::_on_media_saved(

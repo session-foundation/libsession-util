@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -71,6 +72,15 @@ std::filesystem::path path_for(
 /// The unreadable file is removed, since nothing else would ever remove it.
 std::optional<std::vector<std::byte>> read(
         const std::filesystem::path& file, std::span<const std::byte, 32> key);
+
+/// `read`, a piece at a time: each decrypted piece is handed to `out` as it comes, so a file too
+/// large to hold whole never has to be.  False, having removed it, for a file that turns out to be
+/// unreadable -- in which case `out` may already have been handed part of it, and whatever it did
+/// with that is its to undo.
+bool read_into(
+        const std::filesystem::path& file,
+        std::span<const std::byte, 32> key,
+        const std::function<void(std::span<const std::byte>)>& out);
 
 /// Encrypts `data` and writes it to `file`, creating the directory if needed.
 ///

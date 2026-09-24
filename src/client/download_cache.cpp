@@ -71,6 +71,40 @@ std::optional<std::vector<std::byte>> read(
     }
 }
 
+bool read_into(
+        const std::filesystem::path& file,
+        std::span<const std::byte, 32> key,
+        const std::function<void(std::span<const std::byte>)>& out) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec))
+        return false;
+
+    try {
+        std::ifstream in;
+        in.exceptions(std::ios::badbit);
+        in.open(file, std::ios::binary);
+
+        attachment::Decryptor d{key, out};
+        std::vector<std::byte> chunk(attachment::ENCRYPTED_CHUNK_TOTAL);
+        while (in) {
+            in.read(reinterpret_cast<char*>(chunk.data()),
+                    static_cast<std::streamsize>(chunk.size()));
+            auto got = static_cast<size_t>(in.gcount());
+            if (got > 0 && !d.update(std::span{chunk}.first(got)))
+                throw std::runtime_error{"decryption failed"};
+        }
+        if (!d.finalize())
+            throw std::runtime_error{"entry ends partway"};
+        return true;
+    } catch (const std::exception& e) {
+        // As for `read`.  The caller may already have been handed some of it, which is theirs to
+        // discard: a failure here is a failure of the whole read.
+        log::warning(cat, "Discarding unreadable cache entry {}: {}", file.string(), e.what());
+        std::filesystem::remove(file, ec);
+        return false;
+    }
+}
+
 void write(
         const std::filesystem::path& file,
         std::span<const std::byte, 32> key,

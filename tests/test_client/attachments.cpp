@@ -1197,13 +1197,9 @@ TEST_CASE(
 }
 
 TEST_CASE("Client: saving joins a fetch already under way", "[client][attachments][join]") {
-    // The direction that *can* combine: something is being accumulated for the cache -- a gallery,
-    // or the auto-downloader -- and a save asks for the same file.  Waiting on it costs nothing,
-    // since that buffer is committed either way, and fetching it twice would be two transfers of
-    // one file.
-    //
-    // (The reverse cannot: a save streams to disk and keeps nothing, so a display arriving midway
-    // has no way to be given the half already written.)
+    // Something is being fetched into the cache -- a gallery, or the auto-downloader -- and a save
+    // asks for the same file.  Waiting on it costs nothing, since that copy is kept either way, and
+    // fetching it twice would be two transfers of one file.
     TempCacheDir dir;
     TempClient c;
     SenderKeys peer;
@@ -1285,6 +1281,158 @@ TEST_CASE("Client: saving joins a fetch already under way", "[client][attachment
     // The save was told how the transfer it joined was going, not left silent until it finished.
     CHECK_FALSE(saw.empty());
     CHECK(succeeded(saw.back().result));
+}
+
+TEST_CASE("Client: a save is a fetch like any other", "[client][attachments][join]") {
+    // Saved straight to its destination as it arrives, and still shown as being fetched while it
+    // runs -- and, with somewhere to keep it, kept too, so that a display asking meanwhile waits
+    // for it and a second save does not fetch the file again.
+    TempCacheDir dir, out;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    bool caching = GENERATE(true, false);
+    if (caching)
+        c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(9000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    net->served["saved"] = ciphertext;
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("saved", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+    auto availability = [&] { return c->message(id, await)->attachments[0].availability; };
+    auto contents = [](const std::filesystem::path& p) {
+        std::ifstream in{p, std::ios::binary};
+        std::vector<std::byte> got(std::filesystem::file_size(p));
+        in.read(reinterpret_cast<char*>(got.data()), static_cast<std::streamsize>(got.size()));
+        return got;
+    };
+
+    std::vector<Expected<std::filesystem::path>> saved;
+    auto save = [&](const std::filesystem::path& dest) {
+        c->Client::save_attachment(
+                id, 0, dest, nullptr, [&](auto r) { saved.push_back(std::move(r)); }, false);
+    };
+
+    save(out.path / "first.png");
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+    // Without a cache nothing ever reads as fetching, a display's download included: whatever it
+    // fetches, the next ask fetches again.
+    CHECK(availability() ==
+          (caching ? AttachmentAvailability::fetching : AttachmentAvailability::absent));
+
+    std::optional<std::vector<std::byte>> shown;
+    c->attachment_data(id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        shown = *std::move(r);
+    });
+    sync(*c);
+
+    // Nothing is kept of a save with no cache, so there is no way to hand a display the part that
+    // has already been written: it fetches the file for itself.
+    CHECK(net->downloads.size() == (caching ? 1 : 2));
+
+    REQUIRE(serve_downloads(*net) == (caching ? 1 : 2));
+    sync(*c);
+
+    REQUIRE(saved.size() == 1);
+    REQUIRE(saved[0].has_value());
+    CHECK(*saved[0] == out.path / "first.png");
+    CHECK(contents(*saved[0]) == plaintext);
+    REQUIRE(shown);
+    CHECK(*shown == plaintext);
+    CHECK(availability() ==
+          (caching ? AttachmentAvailability::cached : AttachmentAvailability::absent));
+
+    save(out.path / "second.png");
+    sync(*c);
+    if (caching)
+        CHECK(net->downloads.empty());
+    else
+        REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+    REQUIRE(saved.size() == 2);
+    REQUIRE(saved[1].has_value());
+    CHECK(contents(*saved[1]) == plaintext);
+}
+
+TEST_CASE("Client: a save that cannot be written fails alone", "[client][attachments][join]") {
+    // One download with a save and a display on it: the save's destination going away is the
+    // save's failure, and the display still gets its bytes.
+    TempCacheDir dir, out;
+    TempClient c;
+    SenderKeys peer;
+    auto* net = attach_mock_network(c->core);
+    c->set_cache_dir(dir.path);
+
+    std::vector<std::byte> plaintext(9000);
+    random::fill(plaintext);
+    auto [ciphertext, key] =
+            attachment::encrypt(random::random(32), plaintext, attachment::Domain::ATTACHMENT);
+    net->served["lost"] = ciphertext;
+    deliver(
+            *c,
+            peer,
+            "",
+            from_epoch_ms(1000),
+            "h1",
+            "",
+            std::nullopt,
+            [&](SessionProtos::DataMessage& d) {
+                auto* a = d.add_attachments();
+                a->set_id(1);
+                a->set_url(network::file_server::generate_download_url("lost", {}, true));
+                a->set_key(std::string{reinterpret_cast<const char*>(key.data()), key.size()});
+                a->set_size(plaintext.size());
+                a->set_contenttype("image/png");
+            },
+            7);
+    sync(*c);
+    auto id = c->conversation(ConversationId::dm(peer.session_id), await)->messages(await)[0].id;
+
+    auto gone = out.path / "gone";
+    std::filesystem::create_directories(gone);
+    std::optional<Expected<std::filesystem::path>> saved;
+    c->Client::save_attachment(
+            id, 0, gone / "x.png", nullptr, [&](auto r) { saved = std::move(r); }, false);
+    std::optional<std::vector<std::byte>> shown;
+    c->attachment_data(id, 0, nullptr, [&](auto r) {
+        REQUIRE(r.has_value());
+        shown = *std::move(r);
+    });
+    sync(*c);
+    REQUIRE(net->downloads.size() == 1);
+
+    std::filesystem::remove_all(gone);
+    REQUIRE(serve_downloads(*net) == 1);
+    sync(*c);
+
+    REQUIRE(saved);
+    REQUIRE_FALSE(saved->has_value());
+    CHECK(saved->error().code == err::save_failed);
+    REQUIRE(shown);
+    CHECK(*shown == plaintext);
+    CHECK(c->message(id, await)->attachments[0].availability == AttachmentAvailability::cached);
 }
 
 TEST_CASE("Client: a conversation set to auto-download fetches on arrival", "[client][auto]") {
