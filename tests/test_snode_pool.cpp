@@ -31,10 +31,15 @@ class TestSnodePool : public SnodePool {
         });
     }
 
+    // How often the pool was asked to check whether it needs refreshing; read it only after a
+    // loop job has run, since the checks are scheduled onto the loop
+    int refresh_checks = 0;
+
     void refresh_if_needed(
             const std::vector<service_node>& /*in_use_nodes*/,
             refresh_callback_t /*on_refresh_complete*/ = nullptr) override {
-        // Do nothing (don't want to trigger a cache refresh)
+        // Don't trigger a cache refresh
+        ++refresh_checks;
     }
 
     void debug_queue_post_refresh_callback(refresh_callback_t cb) {
@@ -682,6 +687,60 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     CHECK(current_swarm() ==
           sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 2)));
     CHECK(snode_pool->debug_refresh_in_progress());
+}
+
+TEST_CASE("Network", "[network][get_swarm_checks_age]") {
+    session::network::config::SnodePool pool_config{
+            .cache_expiration = 2h,
+            .cache_min_lifetime = 2s,
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .cache_min_swarm_size = 3,
+            .cache_node_strike_threshold = 3};
+
+    std::vector<service_node> snode_cache;
+    for (uint16_t i = 0; i < 6; ++i)
+        snode_cache.emplace_back(service_node{
+                ed25519_pubkey::from_hex(
+                        "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46a{:02x}"_format(
+                                i)),
+                oxen::quic::ipv4{"192.168.0.{}"_format(i)},
+                static_cast<uint16_t>(20000 + i),
+                static_cast<uint16_t>(30000 + i),
+                {2, 11, 0},
+                static_cast<uint64_t>(i < 3 ? 0 : 1)});
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    snode_pool->update_cache(snode_cache);
+
+    auto swarm_pubkey = x25519_pubkey::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000000");
+
+    // The check is scheduled onto the loop, so it has run by the time a later loop job does
+    auto checks_for_one_get_swarm = [&] {
+        snode_pool->debug_run_on_loop([&] {
+            snode_pool->refresh_checks = 0;
+            snode_pool->get_swarm(swarm_pubkey, true, [](auto, auto) {});
+        });
+        snode_pool->debug_run_on_loop([] {});
+        return snode_pool->refresh_checks;
+    };
+
+    // Worked out from the pool and cached...
+    CHECK(checks_for_one_get_swarm() == 1);
+
+    // ... then answered from that cache, and from an override, each of which returns before the
+    // swarm is worked out, and neither of which may skip checking whether the pool is stale
+    CHECK(checks_for_one_get_swarm() == 1);
+
+    std::vector<ed25519_pubkey> redirect;
+    for (const auto& node : snode_cache)
+        redirect.push_back(node.remote_pubkey);
+    REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, redirect));
+    CHECK(checks_for_one_get_swarm() == 1);
 }
 
 TEST_CASE("Network", "[network][strike_expiry]") {

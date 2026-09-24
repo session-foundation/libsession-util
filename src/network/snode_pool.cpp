@@ -1397,6 +1397,14 @@ void SnodePool::get_swarm(
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
     _loop->call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
+        // Trigger a non-blocking background refresh if the data is stale.  Up here so that it runs
+        // for every call: answers from an override or the swarm cache below return early, and
+        // they are most of them.
+        _loop->call_soon([weak_self = weak_from_this()] {
+            if (auto self = weak_self.lock())
+                self->refresh_if_needed({});
+        });
+
         auto filter_by_strikes =
                 [this](std::vector<service_node> nodes) -> std::vector<service_node> {
             // Shuffle everything to start with
@@ -1472,12 +1480,6 @@ void SnodePool::get_swarm(
 
             return;
         }
-
-        // Trigger a non-blocking background refresh if the data is stale
-        _loop->call_soon([weak_self = weak_from_this()] {
-            if (auto self = weak_self.lock())
-                self->refresh_if_needed({});
-        });
 
         // Perform the swarm calculation using our local copy of the data
         auto swarm = swarm::get_swarm(swarm_pubkey, _all_swarms);
