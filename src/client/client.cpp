@@ -1114,17 +1114,47 @@ void Client::_fetch_cached(
         } else
             file = _cache_path(target.dir, target.remote.url);
 
-        if (!file.empty())
-            if (auto cached = cache::read(file, _cache_encryption_key())) {
-                // Nothing to report: there is no transfer, and a progress bar for a local read is a
-                // flicker that means nothing.  The caller gets the bytes.
-                if (entry_id)
-                    _touch_cached(*entry_id);
-                _report(cb, Expected<std::vector<std::byte>>{std::move(*cached)});
-                return;
-            }
+        // Read on the disk loop and decided back here, since what a miss goes on to do -- join a
+        // transfer or start one -- is this loop's registry to touch.
+        if (!file.empty()) {
+            _post_disk([this,
+                        file = std::move(file),
+                        key = _cache_encryption_key(),
+                        entry_id,
+                        target = std::move(target),
+                        caching,
+                        progress = std::move(progress),
+                        cb = std::move(cb)]() mutable {
+                auto cached = cache::read(file, key);
+                call([this,
+                      cached = std::move(cached),
+                      entry_id,
+                      target = std::move(target),
+                      caching,
+                      progress = std::move(progress),
+                      cb = std::move(cb)]() mutable {
+                    if (!cached)
+                        return _fetch_uncached(
+                                std::move(target), caching, std::move(progress), std::move(cb));
+                    // Nothing to report: there is no transfer, and a progress bar for a local read
+                    // is a flicker that means nothing.  The caller gets the bytes.
+                    if (entry_id)
+                        _touch_cached(*entry_id);
+                    _report(cb, Expected<std::vector<std::byte>>{std::move(*cached)});
+                });
+            });
+            return;
+        }
     }
 
+    _fetch_uncached(std::move(target), caching, std::move(progress), std::move(cb));
+}
+
+void Client::_fetch_uncached(
+        FetchTarget target,
+        bool caching,
+        transfer_progress progress,
+        result_function<std::vector<std::byte>> cb) {
     // Already being fetched under the same claim: wait on that rather than asking for the same
     // bytes again.
     auto name = _transfer_key(target.remote);
@@ -1202,11 +1232,15 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
         // Settled on the disk loop, where the copy was written: it is the file only if the
         // download was, so it is committed on success and otherwise discarded with its writer,
         // which removes what it had written.
-        bool committed = false;
+        //
+        // Its size is taken here too, while this is the loop touching the disk: what the file
+        // actually takes, rather than anything computed, since the cache limit is a limit on disk
+        // and padding and framing are part of what it costs.
+        std::optional<int64_t> cached_size;
         if (auto writer = std::move(t->cache); writer && result == DownloadResult::ok) {
             try {
                 writer->commit();
-                committed = true;
+                cached_size = static_cast<int64_t>(std::filesystem::file_size(t->cache_file));
             } catch (const std::exception& e) {
                 log::warning(cat, "Could not cache {}: {}", t->target.remote.url, e.what());
             }
@@ -1220,7 +1254,7 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
               t,
               result,
               why = std::move(why),
-              committed,
+              cached_size,
               memory = std::move(memory)]() mutable {
             auto found = _in_flight.find(name);
             if (found == _in_flight.end() || found->second != t)
@@ -1232,7 +1266,7 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
             // while this entry stood; a waiter may ask for the same file again, and must find a
             // finished transfer rather than join one about to be erased.
             _in_flight.erase(found);
-            _finish_transfer(std::move(t), result, std::move(why), committed, std::move(memory));
+            _finish_transfer(std::move(t), result, std::move(why), cached_size, std::move(memory));
         });
     };
 
@@ -1274,14 +1308,14 @@ void Client::_finish_transfer(
         std::shared_ptr<Transfer> t,
         DownloadResult result,
         std::string why,
-        bool committed,
+        std::optional<int64_t> cached_size,
         std::optional<std::vector<std::byte>> memory) {
     const auto& target = t->target;
     bool ok = result == DownloadResult::ok;
 
     // Recorded before anyone is told, since a waiter may go straight back to the cache.
-    bool told = committed && target.dir == cache::ATTACHMENT_DIR &&
-                _record_cached(target.remote.url, t->cache_file);
+    bool told = cached_size && target.dir == cache::ATTACHMENT_DIR &&
+                _record_cached(target.remote.url, t->cache_file, *cached_size);
 
     // The transfer has stopped either way, so what a message can offer has changed -- and it is
     // `absent` for every outcome not already reported by the recording: a download that failed,
@@ -1310,7 +1344,7 @@ void Client::_finish_transfer(
 
     if (memory)
         return _serve_waiters(*t, std::move(*memory));
-    if (!committed)
+    if (!cached_size)
         return _refetch(std::move(t));
 
     // Read back rather than kept as it arrived, so that nothing held the whole file while it
@@ -4919,25 +4953,22 @@ bool Client::_cache_attachment(
         std::span<const std::byte, 32> key,
         std::span<const std::byte> data) {
     auto file = _cache_path(cache::ATTACHMENT_DIR, url);
+    int64_t size;
     try {
         cache::write(file, key, data);
+        size = static_cast<int64_t>(std::filesystem::file_size(file));
     } catch (const std::exception& e) {
         // A cache that cannot be written is a cache that misses next time, which is not worth
         // failing the caller's fetch over.
         log::warning(cat, "Could not cache an attachment: {}", e.what());
         return false;
     }
-    return _record_cached(url, file);
+    return _record_cached(url, file, size);
 }
 
-bool Client::_record_cached(const std::string& url, const std::filesystem::path& file) {
-    // Recorded after the file exists, so a row never describes something that is not there.  The
-    // size is what the file actually takes, read back rather than computed: the cache limit is a
-    // limit on disk, and padding and framing are part of what it costs.
-    std::error_code ec;
-    auto on_disk = std::filesystem::file_size(file, ec);
-    if (ec)
-        return false;
+bool Client::_record_cached(
+        const std::string& url, const std::filesystem::path& file, int64_t on_disk) {
+    // Recorded after the file exists, so a row never describes something that is not there.
 
     auto c = core.database().conn();
     auto name = file.filename().string();
@@ -4947,7 +4978,7 @@ bool Client::_record_cached(const std::string& url, const std::filesystem::path&
         ON CONFLICT (name) DO UPDATE SET size = ?2, last_used = ?3
     )",
             name,
-            static_cast<int64_t>(on_disk),
+            on_disk,
             epoch_ms(clock_now_ms()));
 
     auto id = c.prepared_get<int64_t>("SELECT id FROM attachment_cache WHERE name = ?", name);

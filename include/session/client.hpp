@@ -873,13 +873,14 @@ class Client {
             std::span<const std::byte, 32> key,
             std::span<const std::byte> data);
 
-    // Records `file`, already in the attachment cache, as `url`'s, and tells every message showing
-    // that file that it is now here.  The row is an index over the file, so this comes after the
-    // file exists.
+    // Records `file`, already in the attachment cache and taking `on_disk` bytes there, as `url`'s,
+    // and tells every message showing that file that it is now here.  The row is an index over the
+    // file, so this comes after the file exists -- and is handed its size rather than finding it
+    // out, since that is the disk loop's to do.
     //
     // Returns whether it got that far, which is what says the messages have been told: a caller
     // that gets false has left them where they were and owes them the news itself.
-    bool _record_cached(const std::string& url, const std::filesystem::path& file);
+    bool _record_cached(const std::string& url, const std::filesystem::path& file, int64_t on_disk);
 
     /// Keeps a copy of a file we just uploaded, so that a message we sent can be drawn without
     /// fetching back a file that came off this disk in the first place.
@@ -1163,18 +1164,25 @@ class Client {
             transfer_progress progress,
             result_function<std::vector<std::byte>> cb);
 
+    // `_fetch_cached` once the cache has missed: joins a transfer of the same claim, or starts one.
+    void _fetch_uncached(
+            FetchTarget target,
+            bool caching,
+            transfer_progress progress,
+            result_function<std::vector<std::byte>> cb);
+
     // Registers `t` under `name` and starts its download.  Its waiters are told of a download that
     // cannot even start.
     void _start_transfer(std::string name, std::shared_ptr<Transfer> t);
 
     // Settles a transfer that has ended and been taken out of `_in_flight`: records what the ending
-    // says about the file, and serves its waiters.  `committed` says its cached copy was kept, and
-    // `memory` is what it held instead, for one with no cache.
+    // says about the file, and serves its waiters.  `cached_size` is what its cached copy takes on
+    // disk, when it was kept, and `memory` is what it held instead, for one with no cache.
     void _finish_transfer(
             std::shared_ptr<Transfer> t,
             DownloadResult result,
             std::string why,
-            bool committed,
+            std::optional<int64_t> cached_size,
             std::optional<std::vector<std::byte>> memory);
 
     // Tells every waiter on `t` the same answer.
