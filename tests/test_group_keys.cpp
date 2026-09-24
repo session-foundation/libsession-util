@@ -1309,6 +1309,50 @@ TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recover
             CHECK(reloaded.keys.size() == member.keys.size());
         }
 
+        SECTION("re-loading the messages captures bytes an old dump never had") {
+            // An old dump knows the hashes but not the bytes, so re-loading the same messages is
+            // the one way a device that predates retention can come to hold them.  Every key in
+            // them is already known, so nothing about the keys changes -- only the bytes, and a
+            // dump has to be flagged for those or they are gone again after the next restart.
+            pseudo_client reloaded{
+                    member_seed,
+                    false,
+                    group_pk.data(),
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    strip_retained_messages(dump)};
+            REQUIRE(reloaded.keys.active_key_messages().empty());
+            reloaded.keys.dump();
+            REQUIRE_FALSE(reloaded.keys.needs_dump());
+
+            CHECK(reloaded.keys.load_key_message(
+                    "keyhash1", rekey1, t0, reloaded.info, reloaded.members));
+            CHECK(reloaded.keys.needs_dump());
+
+            // The supplemental holds no key for this member, so the load reports false; the bytes
+            // are retained all the same.
+            reloaded.keys.dump();
+            CHECK_FALSE(reloaded.keys.load_key_message(
+                    "keyhash2", supp, t0 + 1000, reloaded.info, reloaded.members));
+            CHECK(reloaded.keys.needs_dump());
+
+            CHECK(reloaded.keys.size() == member.keys.size());
+
+            pseudo_client restarted{
+                    member_seed,
+                    false,
+                    group_pk.data(),
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    reloaded.keys.dump()};
+            auto held = restarted.keys.active_key_messages();
+            REQUIRE(held.size() == 2);
+            CHECK(to_hex(session::to_vector(held.at("keyhash1"))) == to_hex(rekey1));
+            CHECK(to_hex(session::to_vector(held.at("keyhash2"))) == to_hex(supp));
+        }
+
         SECTION("a new dump loads under old code") {
             // Old code reads with skip_until over "A", "L", "P" and never asks for "C", so the
             // unknown key is skipped.  Parsing the new dump the way the old code does must still
