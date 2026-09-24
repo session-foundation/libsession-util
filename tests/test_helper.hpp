@@ -164,16 +164,23 @@ inline MockNetwork* attach_mock_network(core::Core& core) {
 /// meant to catch -- and stops the moment its caller asks it to, as a router does.  Returns how
 /// many chunks were delivered, which is how a test tells a transfer that was cut short from one
 /// that ran to the end.
+///
+/// `between` runs after each chunk.  A consumer that handles chunks on a thread of its own only
+/// asks to stop once it has got to one, and a test counting how soon that happens lets it catch up
+/// here -- as a real transfer's pace would -- rather than having every chunk delivered first.
 inline size_t serve_one_download(
         network::DownloadRequest& r,
         std::string id,
         std::span<const std::byte> data,
-        size_t chunk = 4096) {
+        size_t chunk = 4096,
+        std::function<void()> between = nullptr) {
     network::file_metadata meta{std::move(id), static_cast<int64_t>(data.size()), {}, {}};
     size_t delivered = 0;
     for (size_t at = 0; at < data.size() && !r.is_cancelled(); at += chunk) {
         r.on_data(meta, data.subspan(at, std::min(chunk, data.size() - at)));
         delivered++;
+        if (between)
+            between();
     }
     if (r.is_cancelled())
         r.on_complete(network::ERROR_REQUEST_CANCELLED, false);

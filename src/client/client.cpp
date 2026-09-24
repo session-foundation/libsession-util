@@ -401,6 +401,9 @@ core::callbacks Client::_core_callbacks() {
 }
 
 void Client::_init() {
+    _disk_loop = core.disk_loop();
+    _disk_jq.emplace(*_disk_loop);
+
     // Core's send queue is in-memory, so anything still mid-flight when the last run ended is not
     // resumed and its outcome is unknowable.  Say so rather than guessing either way.
     auto c = core.database().conn();
@@ -729,9 +732,21 @@ void Client::set_cache_dir(std::filesystem::path dir) {
 }
 
 Client::~Client() {
+    // First, while everything a disk job reaches is still here.  On the disk loop, so that a job
+    // already running there finishes before the queue stops rather than alongside it.
+    _disk_loop->call_get([this] { _disk_jq->stop(); });
+
     // Before the loop it hands its listing back to, and before the members that listing is about.
     if (_sweeper.joinable())
         _sweeper.join();
+}
+
+void Client::_post_disk(std::function<void()> job) {
+    try {
+        _disk_jq->call_soon(std::move(job));
+    } catch (const std::exception&) {
+        // Stopped: this Client is going away.
+    }
 }
 
 void Client::_sweep_cache() {
@@ -1051,29 +1066,30 @@ std::string Client::_transfer_key(const RemoteFile& f) {
     return key;
 }
 
-// The registry entry for one download.  Two threads meet here: the loop owns the lists of who wants
-// it and hears how it ended, and the network thread delivers the bytes straight into whatever is
-// keeping them, so that writing them to disk costs the loop nothing.  What a delivery touches is
-// behind `mutex`; the rest is the loop's alone.
+// The registry entry for one download.  Two threads share it, each with fields of its own: Core's
+// loop owns the lists of who wants it, and the disk loop, where every delivery runs, owns whatever
+// keeps the bytes -- so neither needs a lock.
 struct Client::Transfer {
     FetchTarget target;
 
-    // The loop's.  The figures are the last reported, so somebody joining midway can be told where
-    // it has got to rather than being left with nothing to draw until the next chunk lands.
+    // Core's loop's.  The figures are the last reported, so somebody joining midway can be told
+    // where it has got to rather than being left with nothing to draw until the next chunk lands.
     int64_t done = 0, total = 0;
     std::vector<transfer_progress> progress;
     std::vector<result_function<std::vector<std::byte>>> waiting;
 
-    std::mutex mutex;
-
-    // Where the cached copy goes, or empty for a transfer that is not caching.  The writer is made
-    // on the first delivery, which is when the padding it needs is known, and dropped if it fails:
-    // the download carries on for whoever is waiting, and they are served another way.
+    // Set before the transfer starts and read by both.  Where the cached copy goes, or empty for a
+    // transfer that is not caching.
     std::filesystem::path cache_file;
+
+    // The disk loop's.  The writer is made on the first delivery, which is when the padding it
+    // needs is known, and dropped if it fails: the download carries on for whoever is waiting, and
+    // they are served another way.
     std::unique_ptr<cache::Writer> cache;
     bool cache_failed = false;
 
     // The whole file, for a transfer that is not caching and so has nowhere to read it back from.
+    // The disk loop's until the transfer ends, when it is handed to Core's.
     std::unique_ptr<std::vector<std::byte>> memory;
 };
 
@@ -1141,12 +1157,11 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
     _in_flight[name] = t;
     const auto& target = t->target;
 
-    // On the network thread, straight into whatever keeps the bytes.
+    // On the disk loop, straight into whatever keeps the bytes.
     b32 key{};
     if (!t->cache_file.empty())
         key = _cache_encryption_key();
     auto on_data = [t, key](std::span<const std::byte> plain, size_t padding) {
-        std::lock_guard lock{t->mutex};
         if (!t->cache_file.empty() && !t->cache && !t->cache_failed) {
             try {
                 t->cache = std::make_unique<cache::Writer>(t->cache_file, key, padding);
@@ -1168,8 +1183,8 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
             t->memory->insert(t->memory->end(), plain.begin(), plain.end());
     };
 
-    // Onto the loop before touching the registry -- this arrives on the network thread, and
-    // `_in_flight` is ours.
+    // Onto Core's loop before touching the registry -- this arrives on the disk loop, and
+    // `_in_flight` is Core's loop's.
     auto on_progress = [this, name, t](
                                int64_t done, int64_t total, std::optional<Expected<void>> r) {
         call([this, name, t, done, total, r = std::move(r)] {
@@ -1184,7 +1199,29 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
     };
 
     auto on_done = [this, name, t](DownloadResult result, std::string why) {
-        call([this, name, t, result, why = std::move(why)]() mutable {
+        // Settled on the disk loop, where the copy was written: it is the file only if the
+        // download was, so it is committed on success and otherwise discarded with its writer,
+        // which removes what it had written.
+        bool committed = false;
+        if (auto writer = std::move(t->cache); writer && result == DownloadResult::ok) {
+            try {
+                writer->commit();
+                committed = true;
+            } catch (const std::exception& e) {
+                log::warning(cat, "Could not cache {}: {}", t->target.remote.url, e.what());
+            }
+        }
+        std::optional<std::vector<std::byte>> memory;
+        if (t->memory)
+            memory = std::move(*t->memory);
+
+        call([this,
+              name,
+              t,
+              result,
+              why = std::move(why),
+              committed,
+              memory = std::move(memory)]() mutable {
             auto found = _in_flight.find(name);
             if (found == _in_flight.end() || found->second != t)
                 return;
@@ -1195,7 +1232,7 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
             // while this entry stood; a waiter may ask for the same file again, and must find a
             // finished transfer rather than join one about to be erased.
             _in_flight.erase(found);
-            _finish_transfer(std::move(t), result, std::move(why));
+            _finish_transfer(std::move(t), result, std::move(why), committed, std::move(memory));
         });
     };
 
@@ -1233,27 +1270,14 @@ void Client::_start_transfer(std::string name, std::shared_ptr<Transfer> t) {
         _emit_attachment_availability(target.remote.url);
 }
 
-void Client::_finish_transfer(std::shared_ptr<Transfer> t, DownloadResult result, std::string why) {
+void Client::_finish_transfer(
+        std::shared_ptr<Transfer> t,
+        DownloadResult result,
+        std::string why,
+        bool committed,
+        std::optional<std::vector<std::byte>> memory) {
     const auto& target = t->target;
     bool ok = result == DownloadResult::ok;
-
-    // The copy is the file only if the download was: committed on success, and otherwise
-    // discarded with its writer, which removes what it had written.
-    bool committed = false;
-    std::unique_ptr<std::vector<std::byte>> memory;
-    {
-        std::lock_guard lock{t->mutex};
-        auto writer = std::move(t->cache);
-        if (ok && writer) {
-            try {
-                writer->commit();
-                committed = true;
-            } catch (const std::exception& e) {
-                log::warning(cat, "Could not cache {}: {}", target.remote.url, e.what());
-            }
-        }
-        memory = std::move(t->memory);
-    }
 
     // Recorded before anyone is told, since a waiter may go straight back to the cache.
     bool told = committed && target.dir == cache::ATTACHMENT_DIR &&
@@ -1281,36 +1305,46 @@ void Client::_finish_transfer(std::shared_ptr<Transfer> t, DownloadResult result
     if (t->waiting.empty())
         return;
 
-    if (!ok) {
-        Expected<std::vector<std::byte>> answer{unexpected{_to_error(result, std::move(why))}};
-        for (const auto& w : t->waiting)
-            _report(w, answer);
-        return;
-    }
+    if (!ok)
+        return _serve_waiters(*t, unexpected{_to_error(result, std::move(why))});
+
+    if (memory)
+        return _serve_waiters(*t, std::move(*memory));
+    if (!committed)
+        return _refetch(std::move(t));
 
     // Read back rather than kept as it arrived, so that nothing held the whole file while it
-    // downloaded -- and now only because somebody asked for it that way.
-    std::optional<std::vector<std::byte>> bytes;
-    if (memory)
-        bytes = std::move(*memory);
-    else if (committed)
-        bytes = cache::read(t->cache_file, _cache_encryption_key());
-    if (bytes) {
-        Expected<std::vector<std::byte>> answer{std::move(*bytes)};
-        for (const auto& w : t->waiting)
-            _report(w, answer);
-        return;
-    }
+    // downloaded -- and now only because somebody asked for it that way.  Decided here rather than
+    // on the disk loop because who is waiting is this loop's to know, and is final only now that
+    // the transfer is out of `_in_flight`.
+    _post_disk([this, t = std::move(t), key = _cache_encryption_key()]() mutable {
+        auto bytes = cache::read(t->cache_file, key);
+        call([this, t = std::move(t), bytes = std::move(bytes)]() mutable {
+            if (bytes)
+                _serve_waiters(*t, std::move(*bytes));
+            else
+                _refetch(std::move(t));
+        });
+    });
+}
 
-    // The download worked but the copy they were to be served from did not: a cache that could not
-    // be written, or not read back.  Fetched again for them without one, which is the only way left
-    // to have the bytes -- their progress sees that as a second transfer, which it is.
+void Client::_serve_waiters(const Transfer& t, Expected<std::vector<std::byte>> answer) {
+    for (const auto& w : t.waiting)
+        _report(w, answer);
+}
+
+void Client::_refetch(std::shared_ptr<Transfer> t) {
+    // The download worked but the copy its waiters were to be served from did not: a cache that
+    // could not be written, or not read back.  Fetched again for them without one, which is the
+    // only way left to have the bytes -- their progress sees that as a second transfer, which it
+    // is.
     auto again = std::make_shared<Transfer>();
-    again->target = target;
+    again->target = t->target;
     again->memory = std::make_unique<std::vector<std::byte>>();
     again->progress = std::move(t->progress);
     again->waiting = std::move(t->waiting);
-    _start_transfer(_transfer_key(target.remote), std::move(again));
+    auto name = _transfer_key(again->target.remote);
+    _start_transfer(std::move(name), std::move(again));
 }
 
 void Client::set_gallery(int64_t message_id, bool gallery, result_function<bool> cb) {
@@ -4487,7 +4521,7 @@ void Client::_download_decrypted(
 
     bool stream = scheme == Scheme::stream;
 
-    // Shared with the network's thread, where every callback below runs.  The stream case hands
+    // Shared with the disk loop, where every callback below runs.  The stream case hands
     // plaintext over as it decrypts and so never holds the whole thing; the legacy case has to
     // accumulate, because its MAC and digest cover the whole ciphertext and neither can be checked
     // until all of it is here.
@@ -4557,8 +4591,9 @@ void Client::_download_decrypted(
     req.request_timeout = ATTACHMENT_REQUEST_TIMEOUT;
     req.overall_timeout = ATTACHMENT_OVERALL_TIMEOUT;
 
-    req.on_data = [state, stream, on_progress, throttle, give_up](
-                          const network::file_metadata& meta, std::span<const std::byte> data) {
+    auto handle_data = [state, stream, on_progress, throttle, give_up](
+                               const network::file_metadata& meta,
+                               std::span<const std::byte> data) {
         // Needed even though giving up cancels: a chunk already in flight arrives either way.
         if (state->failure)
             return;
@@ -4585,16 +4620,17 @@ void Client::_download_decrypted(
         }
     };
 
-    req.on_complete = [state,
-                       scheme,
-                       deliver,
-                       on_progress,
-                       on_done,
-                       end_failed,
-                       key = std::move(key),
-                       digest = std::move(digest),
-                       claimed_size](
-                              std::variant<network::file_metadata, int16_t> result, bool timeout) {
+    auto handle_complete = [state,
+                            scheme,
+                            deliver,
+                            on_progress,
+                            on_done,
+                            end_failed,
+                            key = std::move(key),
+                            digest = std::move(digest),
+                            claimed_size](
+                                   std::variant<network::file_metadata, int16_t> result,
+                                   bool timeout) {
         auto gave_up = [&] {
             auto& [result, why] = *state->failure;
             end_failed(result, std::move(why));
@@ -4676,6 +4712,32 @@ void Client::_download_decrypted(
             on_progress(state->received, state->received, Expected<void>{});
         on_done(DownloadResult::ok, {});
     };
+
+    // The network's loop does no more than copy each chunk -- it has to, since the span is the
+    // transport's buffer -- and hand it on: everything above runs on the disk loop, one job at a
+    // time and in arrival order, so the state it shares needs no lock.  The completion goes the
+    // same way, which is what puts it after the last chunk.
+    //
+    // The network can deliver after this Client has begun going away, until `core` tears it down;
+    // a post then finds the queue stopped and is dropped.
+    req.on_data = [this,
+                   cancel,
+                   handle = std::make_shared<decltype(handle_data)>(std::move(handle_data))](
+                          const network::file_metadata& meta, std::span<const std::byte> data) {
+        if (cancel->load())
+            return;
+        _post_disk([handle, meta, bytes = std::vector<std::byte>(data.begin(), data.end())] {
+            (*handle)(meta, bytes);
+        });
+    };
+    req.on_complete =
+            [this,
+             handle = std::make_shared<decltype(handle_complete)>(std::move(handle_complete))](
+                    std::variant<network::file_metadata, int16_t> result, bool timeout) {
+                _post_disk([handle, result = std::move(result), timeout]() mutable {
+                    (*handle)(std::move(result), timeout);
+                });
+            };
 
     net->download(std::move(req));
 }
@@ -5135,7 +5197,7 @@ void Client::_save_attachment(
                 [this, claim = remote, finish](DownloadResult result, std::string why) {
                     // A save is as good a witness as a background fetch, and records the same
                     // verdict on the same rows.  Onto the loop like the rest of the save's state
-                    // changes, since this arrives on the network thread.
+                    // changes, since this arrives on the disk loop.
                     if (auto verdict = _to_unavailable(result))
                         call([this, claim, verdict = *verdict] {
                             auto c = core.database().conn();

@@ -2625,6 +2625,7 @@ TEST_CASE("Client: a download fills the cache as it arrives", "[client][attachme
     std::span all{ciphertext};
     auto half = all.size() / 2;
     request.on_data(meta, all.first(half));
+    sync(*c);
 
     // Halfway through a file of several chunks, some of it is already on disk.  Under a temporary
     // name, though: nothing can be found in the cache until it is whole and verified.
@@ -2974,7 +2975,8 @@ TEST_CASE(
     sync(*c);
     REQUIRE(net->downloads.size() == 1);
 
-    auto chunks = serve_one_download(net->downloads[0], "tampered", corrupt);
+    auto chunks =
+            serve_one_download(net->downloads[0], "tampered", corrupt, 4096, [&] { sync(*c); });
     net->downloads.clear();
     sync(*c);
 

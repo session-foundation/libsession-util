@@ -729,8 +729,8 @@ class Client {
             std::function<void(int64_t done, int64_t total, std::optional<Expected<void>> result)>;
 
     // A download that is already happening, and everyone waiting on it.  Defined beside the code
-    // that runs it: what it holds -- the cache writer the bytes stream into, and the lock the
-    // network thread takes to deliver them -- is nothing a reader of this header needs.
+    // that runs it: what it holds -- the cache writer the bytes stream into, and which of its
+    // fields belong to which loop -- is nothing a reader of this header needs.
     //
     // Without this, a conversation opening while its attachments are auto-downloading would fetch
     // every one of them a second time: the cache is still empty, so a display asking for bytes sees
@@ -777,7 +777,7 @@ class Client {
     // Ordered so that everything under one url sits together: whether *anything* is fetching a
     // file is a question about the url, asked once per attachment on a page.
     //
-    // **Only ever touched on the loop.**  Download callbacks arrive on the network thread, so
+    // **Only ever touched on the loop.**  A download's own callbacks run on the disk loop, so
     // everything that reads or writes this hops first; the application's own callbacks then hop
     // again, out through the dispatcher.
     std::map<std::string, std::shared_ptr<Transfer>> _in_flight;
@@ -971,6 +971,21 @@ class Client {
     // would not wait for the job.
     std::thread _sweeper;
 
+    // This Client's work on `core.disk_loop()`: everything it does on disk, and the decryption of
+    // what it downloads, none of which belongs on the network's loop or on Core's.  Stopped at the
+    // start of ~Client, so that nothing still waiting in it runs against a Client being torn down.
+    //
+    // Above `core`, because the network posts to it -- each chunk as it arrives -- until `core`
+    // tears the network down.  So it outlives `core`, and holds the loop alive itself: a queue has
+    // to go before its loop does.  Emplaced in _init, since `core` does not exist yet when the
+    // members declared before it are built.
+    std::shared_ptr<oxen::quic::Loop> _disk_loop;
+    std::optional<oxen::quic::JobQueue> _disk_jq;
+
+    // Posts onto `_disk_jq`, or drops the job once it has stopped: a Client going away wants none
+    // of what is left.
+    void _post_disk(std::function<void()> job);
+
     void _attachment_data(
             int64_t message_id,
             size_t index,
@@ -1066,9 +1081,10 @@ class Client {
         display_pic,  ///< A profile picture or a group avatar.
     };
 
-    // Downloads `url`, decrypts it, and hands the plaintext to `on_plain` — possibly in pieces, and
-    // on the network's thread.  Whatever wants the bytes decides what to do with them: write them
-    // to a file the user chose, keep them in memory, put them in the cache.
+    // Downloads `url`, decrypts it, and hands the plaintext to `on_data` — possibly in pieces, and
+    // on the disk loop, where the network hands each chunk as it arrives.  Whatever wants the bytes
+    // decides what to do with them: write them to a file the user chose, keep them in memory, put
+    // them in the cache.
     //
     // **This is the one place that chooses between Session's three at-rest formats**, and no caller
     // above it learns there was a choice.  The rule:
@@ -1151,9 +1167,22 @@ class Client {
     // cannot even start.
     void _start_transfer(std::string name, std::shared_ptr<Transfer> t);
 
-    // Settles a transfer that has ended and been taken out of `_in_flight`: keeps or discards its
-    // cached copy, records what the ending says about the file, and serves its waiters.
-    void _finish_transfer(std::shared_ptr<Transfer> t, DownloadResult result, std::string why);
+    // Settles a transfer that has ended and been taken out of `_in_flight`: records what the ending
+    // says about the file, and serves its waiters.  `committed` says its cached copy was kept, and
+    // `memory` is what it held instead, for one with no cache.
+    void _finish_transfer(
+            std::shared_ptr<Transfer> t,
+            DownloadResult result,
+            std::string why,
+            bool committed,
+            std::optional<std::vector<std::byte>> memory);
+
+    // Tells every waiter on `t` the same answer.
+    void _serve_waiters(const Transfer& t, Expected<std::vector<std::byte>> answer);
+
+    // Starts a fresh transfer without a cache for `t`'s waiters and progress, when the cache they
+    // were to be served from failed them.
+    void _refetch(std::shared_ptr<Transfer> t);
 
     // Queues a fetch of a picture we have just learned the url of, so that it is to hand before
     // anything asks to draw it.  Unconditional: unlike an attachment there is no setting, because a
@@ -1169,8 +1198,8 @@ class Client {
     void _fetch_picture(const ConversationId& id, std::string url, std::vector<std::byte> key);
 
     // Starts the download behind save_attachment.  Everything after the row lookup happens off the
-    // loop, on the network's thread: the file is decrypted and written there, and nothing about it
-    // is recorded, so this is the one attachment path that never comes back to the database.
+    // loop, on the disk loop: the file is decrypted and written there, and nothing about it is
+    // recorded, so this is the one attachment path that never comes back to the database.
     void _save_attachment(
             int64_t message_id,
             size_t index,
