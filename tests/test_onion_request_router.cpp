@@ -25,7 +25,7 @@ class TestOnionRequestRouter {
             std::shared_ptr<OnionRequestRouter> router,
             PathCategory category,
             std::vector<OnionPath> paths) {
-        router->_paths.emplace(category, paths);
+        router->_paths[category] = std::move(paths);
     }
 
     static std::vector<OnionPath> get_paths(
@@ -84,6 +84,13 @@ class TestOnionRequestRouter {
             Request request,
             network_response_callback_t callback) {
         router->_send_on_path(path, std::move(request), std::move(callback));
+    }
+
+    static void rotate_path(
+            std::shared_ptr<OnionRequestRouter> router,
+            const std::string& path_id,
+            PathCategory category) {
+        router->_rotate_path(path_id, category);
     }
 
     static void handle_transport_response(
@@ -200,8 +207,12 @@ namespace {
             // Do nothing (don't want to trigger a cache refresh)
         }
 
+        // The `count` of each `get_unused_nodes` call, which the mock result doesn't reflect
+        std::vector<size_t> unused_node_counts;
+
         std::vector<service_node> get_unused_nodes(
                 size_t count, const std::vector<service_node>& exclude = {}) override {
+            unused_node_counts.push_back(count);
             if (check_should_ignore_and_log_call("get_unused_nodes"))
                 return {};
 
@@ -1107,5 +1118,50 @@ TEST_CASE("Network", "[network][onion_request_router][build_path_too_few_nodes]"
     CHECK_FALSE(result->success);
     CHECK(result->status_code == ERROR_INSUFFICIENT_NODES);
     CHECK(result->response.value_or("").find("too few usable nodes") != std::string::npos);
+}
+
+TEST_CASE("Network", "[network][onion_request_router][rotate_path]") {
+    auto key1 = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"sv;
+    auto key2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"sv;
+    auto key3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"sv;
+    auto key4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"sv;
+    auto edge = test_node(key1, 20001);
+    auto path_nodes = std::vector{edge, test_node(key2, 20002), test_node(key3, 20003)};
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(test_pool_config(), loop, disk_loop);
+    auto transport = std::make_shared<TestTransport>();
+    auto config = test_router_config();
+    auto router =
+            std::make_shared<OnionRequestRouter>(config, loop, disk_loop, snode_pool, transport);
+    snode_pool->mock_unused_nodes =
+            std::vector{test_node(key2, 20012), test_node(key3, 20013), test_node(key4, 20014)};
+
+    // Rotates a path whose edge node was connected just now, so well inside
+    // `edge_node_cache_duration`, and returns what the rotation asked the pool for.  The first
+    // request says which it chose: a whole new path, or the rest of one that keeps the edge node.
+    auto rotate = [&] {
+        std::vector<size_t> counts;
+        loop->call_get([&] {
+            auto now = std::chrono::system_clock::now();
+            TestOnionRequestRouter::set_paths(
+                    router, PathCategory::standard, {OnionPath{"Test", path_nodes, now, now}});
+            snode_pool->unused_node_counts.clear();
+            TestOnionRequestRouter::rotate_path(router, "Test", PathCategory::standard);
+            counts = snode_pool->unused_node_counts;
+        });
+        return counts;
+    };
+
+    auto kept = rotate();
+    REQUIRE_FALSE(kept.empty());
+    CHECK(kept.front() == config.path_length - 1u);
+
+    // Struck out since we connected to it, the edge node is replaced along with the rest
+    snode_pool->record_node_failure(edge, true);
+    auto replaced = rotate();
+    REQUIRE_FALSE(replaced.empty());
+    CHECK(replaced.front() == config.path_length);
 }
 }  // namespace session::network
