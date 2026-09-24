@@ -49,6 +49,11 @@ namespace session::config {
 ///         equivalent "j"oined field). Omitted if 0.
 ///     t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
 ///     f - session pro profile features bitset for this contact
+///     d - "delete before" unix timestamp (seconds): messages in this conversation older than this
+///         are to be deleted, and arriving ones older than it are to be dropped.  Omitted if 0.
+///         Named to match the group info config's equivalent field.
+///     D - "delete attachments before" unix timestamp (seconds): as above but for attachments
+///         alone, leaving the messages themselves.  Omitted if 0.
 ///
 /// b - dict of blinded contacts.  This is a nested dict where the outer keys are the BASE_URL of
 ///     the community the blinded contact originated from and the outer value is a dict containing:
@@ -96,7 +101,21 @@ struct contact_info {
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_bitset = {};
+    /// Messages in this conversation older than this are to be deleted, and arriving ones older
+    /// than it dropped.  This is what makes clearing a conversation, and deleting one, mean the
+    /// same thing on every device: the instruction is recorded rather than inferred from when some
+    /// config happened to be written.  Epoch (the default) means no such instruction.
+    std::chrono::sys_seconds delete_before{};
+
+    /// As above, but only the attachments: the messages themselves stay.  Attachments are most of
+    /// what there is to reclaim, so they are worth being able to drop on their own.
+    ///
+    /// Only stored while it says something `delete_before` does not: deleting a message takes its
+    /// attachments with it, so a value at or before `delete_before` is dropped when the contact is
+    /// stored rather than kept as a redundant instruction.
+    std::chrono::sys_seconds delete_attach_before{};
+
+    ProProfileFlags profile_flags = ProProfileFlags::None;
 
     explicit contact_info(std::string sid);
 
@@ -113,19 +132,67 @@ struct contact_info {
 
     /// API: contacts/contact_info::set_name
     ///
-    /// Sets a name or nickname; this is exactly the same as assigning to .name/.nickname directly,
-    /// except that we throw an exception if the given name is longer than MAX_NAME_LENGTH.
+    /// Sets the contact's own name, as assigning to .name does, except that an over-long one is
+    /// put through `fixup_contact_name` rather than rejected: this is their name, arriving in their
+    /// profile, and refusing it would leave us unable to hold the contact at all.
     ///
     /// Inputs:
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
+
+    /// API: contacts/contact_info::set_nickname
+    ///
+    /// Sets our own name for the contact, as assigning to .nickname does, except that it throws if
+    /// the nickname is longer than MAX_NAME_LENGTH.  It throws rather than truncating because a
+    /// nickname is something a person here typed, and storing a prefix of what they wrote changes
+    /// what they said.  Check it with `validate_contact_name` before calling this -- or as it is
+    /// typed -- and put the refusal in front of them.
+    ///
+    /// Inputs:
+    /// - `nickname` -- Nickname to assign to the contact
     void set_nickname(std::string nickname);
+
+    /// API: contacts/contact_info::set_nickname_truncated
+    ///
+    /// As `set_nickname`, but truncating rather than throwing.  Only for a caller that has already
+    /// decided truncation is acceptable for what it holds.
+    ///
+    /// Inputs:
+    /// - `nickname` -- Nickname to assign to the contact
     void set_nickname_truncated(std::string nickname);
 
   private:
     friend class Contacts;
     void load(const dict& info_dict);
 };
+
+/// API: contacts/validate_contact_name
+///
+/// Reports what is wrong with `name` as a contact name, nickname or profile name, or nullopt when
+/// nothing is.  The same limits apply to all three, so one check serves them.
+///
+/// A free function needing no account or config, so an application can call it on each keystroke
+/// while a name is being typed, rather than finding out when it tries to store one.  That is the
+/// intended use: anything a person typed should be refused here and corrected by them, because the
+/// alternative -- keeping a prefix of what they wrote -- changes what they said.
+///
+/// Inputs:
+/// - `name` -- the candidate name
+///
+/// Outputs:
+/// - `std::optional<std::string>` -- what is wrong with it, or nullopt if nothing is
+std::optional<std::string> validate_contact_name(std::string_view name);
+
+/// API: contacts/fixup_contact_name
+///
+/// Makes `name` storable as a contact name, changing as little as it can -- today that is
+/// truncating it to MAX_NAME_LENGTH on a utf8 boundary, but it is the place for whatever else
+/// storing a name comes to require.
+///
+/// For names we are *given* rather than told: a peer's profile name has to be stored whatever they
+/// set it to, and refusing it would leave us unable to hold their contact at all.  Never use it on
+/// something a person typed here -- see `validate_contact_name`.
+void fixup_contact_name(std::string& name);
 
 struct blinded_contact_info {
     const std::string session_id() const;  // in hex
@@ -141,12 +208,12 @@ struct blinded_contact_info {
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_bitset = {};
+    ProProfileFlags profile_flags = ProProfileFlags::None;
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
             std::string_view community_base_url,
-            std::span<const unsigned char> community_pubkey,
+            std::span<const std::byte, 32> community_pubkey,
             std::string_view blinded_id);
 
     // Internal ctor/method for C API implementations:
@@ -187,8 +254,8 @@ struct blinded_contact_info {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `const std::vector<unsigned char>&` -- Returns the pubkey
-    const std::vector<unsigned char>& community_pubkey() const { return comm.pubkey(); }
+    /// - `const std::vector<std::byte>&` -- Returns the pubkey
+    const std::vector<std::byte>& community_pubkey() const { return comm.pubkey(); }
 
     /// API: contacts/blinded_contact_info::community_pubkey_hex
     ///
@@ -212,7 +279,7 @@ struct blinded_contact_info {
     /// into this struct
     void set_base_url(std::string_view base_url);
     void set_room(std::string_view room);
-    void set_pubkey(std::span<const unsigned char> pubkey);
+    void set_pubkey(std::span<const std::byte, 32> pubkey);
     void set_pubkey(std::string_view pubkey);
 };
 
@@ -239,8 +306,8 @@ class Contacts : public ConfigBase {
     /// Outputs:
     /// - `Contact` - Constructor
     Contacts(
-            std::span<const unsigned char> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+            const ed25519::PrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: contacts/Contacts::storage_namespace
     ///
@@ -443,7 +510,7 @@ class Contacts : public ConfigBase {
     /// Inputs:
     /// - `session_id` -- hex string of the session id
     /// - `features` -- The updated profile features to use
-    void set_pro_features(std::string_view session_id, ProProfileBitset features);
+    void set_pro_features(std::string_view session_id, ProProfileFlags features);
 
     /// API: contacts/contacts::erase
     ///
@@ -482,8 +549,7 @@ class Contacts : public ConfigBase {
   protected:
     // Drills into the nested dicts to access community details
     DictFieldProxy blinded_contact_field(
-            const blinded_contact_info& bc,
-            std::span<const unsigned char>* get_pubkey = nullptr) const;
+            const blinded_contact_info& bc, std::span<const std::byte>* get_pubkey = nullptr) const;
 
   public:
     /// API: contacts/Contacts::blinded

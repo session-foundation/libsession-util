@@ -10,6 +10,7 @@
 #include <ranges>
 #include <vector>
 
+#include "../internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
@@ -37,9 +38,19 @@ namespace {
 
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
+    // Checks a precondition and, if true, fires the request's on_complete with the given error.
+    // Returns true if the condition was met (i.e. the caller should return).
+    template <typename Req>
+    bool fail_if(Req& req, bool cond, int16_t err) {
+        if (cond && req.on_complete)
+            req.on_complete(err, false);
+        return cond;
+    }
+
     config::FileServer build_file_server_config(const config::Config& main_config) {
-        config::FileServer file_server_config = file_server::DEFAULT_CONFIG;
-        file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
+        config::FileServer file_server_config = main_config.netid == opt::netid::Target::testnet
+                                                      ? file_server::TESTNET_CONFIG
+                                                      : file_server::DEFAULT_CONFIG;
 
         if (main_config.custom_file_server_scheme)
             file_server_config.scheme = *main_config.custom_file_server_scheme;
@@ -55,6 +66,12 @@ namespace {
 
         if (main_config.custom_file_server_max_file_size)
             file_server_config.max_file_size = *main_config.custom_file_server_max_file_size;
+
+        if (main_config.custom_file_server_srouter_address)
+            file_server_config.srouter = file_server::SRouterTarget{
+                    *main_config.custom_file_server_srouter_address,
+                    main_config.custom_file_server_srouter_port.value_or(
+                            file_server::QUIC_DEFAULT_PORT)};
 
         return file_server_config;
     }
@@ -72,18 +89,30 @@ namespace {
                 main_config.cache_min_swarm_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
                 main_config.cache_min_num_refresh_presence_to_include_node,
-                main_config.cache_node_strike_threshold};
+                main_config.cache_node_strike_threshold,
+                // Session Router only.  Onion requests reach a storage server through relays that
+                // do not care what it runs, and `direct` talks to it straight, so in neither case
+                // does the version predict anything -- preferring on it there would narrow the
+                // swarm for no reason.
+                main_config.router == opt::router::Type::session_router
+                        ? std::optional{opt::MIN_SESSION_ROUTER_SS_VERSION}
+                        : std::nullopt};
     }
 
     config::QuicTransport build_quic_transport_config(const config::Config& main_config) {
         return {main_config.quic_handshake_timeout,
+                main_config.quic_tunnel_handshake_timeout,
                 main_config.quic_keep_alive,
-                main_config.quic_disable_mtu_discovery};
+                main_config.quic_max_udp_payload};
     }
 
     config::DirectRouter build_direct_router_config(
-            const config::Config& /*main_config*/, const config::FileServer& file_server_config) {
-        return {file_server_config};
+            const config::Config& main_config, const config::FileServer& file_server_config) {
+        return {file_server_config,
+                main_config.netid,
+                main_config.quic_file_server_address,
+                main_config.quic_file_server_ed_pubkey,
+                main_config.quic_file_server_port.value_or(file_server::QUIC_DEFAULT_PORT)};
     }
 
     config::SessionRouter build_session_router_config(
@@ -119,10 +148,6 @@ namespace {
                 main_config.onionreq_min_path_counts};
     }
 
-}  // namespace
-
-namespace detail {
-
     std::vector<network_service_node> convert_service_nodes(
             std::vector<session::network::service_node> nodes) {
         std::vector<network_service_node> converted_nodes;
@@ -135,7 +160,7 @@ namespace detail {
         return converted_nodes;
     }
 
-}  // namespace detail
+}  // namespace
 
 Network::Network(config::Config _conf) :
         config{std::move(_conf)}, file_server_config{std::move(build_file_server_config(config))} {
@@ -160,17 +185,31 @@ Network::Network(config::Config _conf) :
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
     _disk_loop = std::make_shared<quic::Loop>();
+    _jq.emplace(*_loop);
 
     // Setup the transport layer
     switch (config.transport) {
         case opt::transport::Type::quic:
-            _transport = std::make_shared<QuicTransport>(
-                    std::move(build_quic_transport_config(config)), _loop);
+            // Created through the loop's deleter, so that dropping our reference to it in
+            // ~Network destroys it *on the loop* and blocks until that has happened: no libquic
+            // callback can then be in flight into it, which is what lets it hold a bare `this`.
+            _transport = _loop->make_shared<QuicTransport>(
+                    std::move(build_quic_transport_config(config)), *_loop);
             break;
     }
 
     // The SnodePool is needed regardless of the transport layer as it includes swarm information
     // which is needed by the clients in order to send requests
+    //
+    // This fetcher goes straight to the transport, bypassing the router: it is what fills an empty
+    // snode cache, and onion requests cannot be built before there is one.  Hence the seed list --
+    // a bootstrap that has to leak the client's IP is at least aimed at nodes chosen in advance.
+    //
+    // TODO: session-router mode does not need this exemption.  It bootstraps itself onto the
+    // network before it can carry anything of ours, so a tunnel to a seed node is available at the
+    // point this runs, and routing the bootstrap would close the one hole in that mode's IP
+    // guarantee.  Left direct for now because the routed fetcher is installed further down, after
+    // the router exists.
     auto bootstrap_fetcher = [bt = std::weak_ptr{_transport}](
                                      Request req, network_response_callback_t on_complete) {
         if (auto transport = bt.lock())
@@ -181,7 +220,7 @@ Network::Network(config::Config _conf) :
                     "Transport provided to the SnodePool bootstrap fetcher has been destroyed.");
     };
     _snode_pool = std::make_shared<SnodePool>(
-            std::move(build_snode_pool_config(config)), _loop, _disk_loop, bootstrap_fetcher);
+            std::move(build_snode_pool_config(config)), *_loop, *_disk_loop, bootstrap_fetcher);
 
     // Additional transport configuration
     _transport->set_node_failure_reporter(
@@ -193,20 +232,24 @@ Network::Network(config::Config _conf) :
     // Setup the router
     switch (config.router) {
         case opt::router::Type::onion_requests:
-            _router = std::make_unique<OnionRequestRouter>(
+            _router = _loop->make_shared<OnionRequestRouter>(
                     std::move(build_onion_request_router_config(config, file_server_config)),
-                    _loop,
-                    _disk_loop,
+                    *_loop,
+                    *_disk_loop,
                     _snode_pool,
                     _transport);
             break;
 
         case opt::router::Type::session_router:
+#ifdef ENABLE_NETWORKING_SROUTER
             _router = SessionRouter::make(
                     std::move(build_session_router_config(config, file_server_config)),
                     _loop,
                     _snode_pool,
                     _transport);
+#else
+            throw std::runtime_error{"Session Router support is not enabled in this build!"};
+#endif
             break;
 
         case opt::router::Type::direct:
@@ -242,11 +285,40 @@ Network::Network(config::Config _conf) :
     _router->on_status_changed = [this] { _recalculate_status(); };
     _transport->on_status_changed = [this] { _recalculate_status(); };
 
+    // Pass the transport's inbound signals through to whoever owns us.  Read each hook once into
+    // a local: our owner may replace it, and these fire on the loop rather than from the thread
+    // that would be doing the replacing.
+    _transport->on_server_push = [this](const ed25519_pubkey& node,
+                                        std::string_view endpoint,
+                                        std::span<const std::byte> body) {
+        if (auto cb = on_server_push)
+            cb(node, endpoint, body);
+    };
+    _transport->on_connection_established = [this](const ed25519_pubkey& node) {
+        if (auto cb = on_connection_established)
+            cb(node);
+    };
+    _transport->on_connection_lost = [this](const ed25519_pubkey& node) {
+        if (auto cb = on_connection_lost)
+            cb(node);
+    };
+
     // Perform a clock resync
-    _loop->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
+    _jq->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
 }
 
 Network::~Network() {
+    // A Network is singly owned, so this runs on whichever thread its owner dropped it from -- and
+    // it must not be the loop thread, because the loops are joined at the bottom of this function
+    // and a thread cannot join itself.  The only way to get here on the loop is for an owner to
+    // destroy its Network from inside a callback we handed it, so say so rather than leaving the
+    // std::system_error from the join to explain it.
+    if (_loop->inside())
+        log::critical(
+                cat,
+                "Network is being destroyed from its own loop thread -- most likely by dropping it "
+                "from inside one of its own callbacks.  This is about to abort.");
+
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         // Need to ensure the destruction of the router and transport objects don't trigger
@@ -262,9 +334,18 @@ Network::~Network() {
 
     // Explicitly destroy in dependency order while _loop is still alive. Their destructors post
     // final cleanup via call_get so the loop must be running when they destruct.
+    //
+    // This has to happen before the queue below is stopped, for two reasons: these destructors are
+    // what guarantee that no callback of ours is still held anywhere (which is what lets those
+    // callbacks capture `this` bare), and a component finishing up may still post onto our queue --
+    // which throws once the queue has been stopped.
     _router.reset();
     _snode_pool.reset();
     _transport.reset();
+
+    // Nothing can reach us any more, so cancel whatever is left queued here rather than letting it
+    // run against members that are about to go.
+    _loop->call_get([this] { _jq->stop(); });
 
     // Now shut down the loops (these destructors join their threads)
     _disk_loop.reset();
@@ -275,7 +356,7 @@ Network::~Network() {
 
 void Network::clear_cache() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq->call_get([this] {
         if (_snode_pool)
             _snode_pool->clear_cache();
         if (_router)
@@ -289,7 +370,7 @@ void Network::suspend() {
     // Use 'call_get' to force this to be synchronous.  Some of these suspend() calls queue things
     // on the disk loop, but they don't have to worry about synchronizing because we flush queued
     // disk loop jobs before we finish.
-    _loop->call_get([this] {
+    _jq->call_get([this] {
         _suspended = true;
 
         if (_snode_pool)
@@ -323,7 +404,7 @@ void Network::suspend() {
 
 void Network::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this, automatically_reconnect] {
+    _jq->call_get([this, automatically_reconnect] {
         if (!_suspended)
             return;
 
@@ -340,7 +421,7 @@ void Network::resume(bool automatically_reconnect) {
                 std::chrono::steady_clock::now() - _last_successful_clock_resync;
 
         if (time_since_last_resync >= config.min_resume_clock_resync_interval) {
-            _loop->call_soon([this] {
+            _jq->call_soon([this] {
                 log::info(
                         cat,
                         "Performing clock resync as enough time has passed since the last resync.");
@@ -355,7 +436,7 @@ void Network::resume(bool automatically_reconnect) {
 
 void Network::close_connections() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _close_connections(); });
+    _jq->call_get([this] { _close_connections(); });
 }
 
 // MARK: Interface
@@ -364,21 +445,21 @@ ConnectionStatus Network::get_status() {
     return _status.load();
 }
 
-std::vector<PathInfo> Network::get_active_paths() {
+std::optional<PathInfo> Network::get_path_to(const service_node& node) {
     if (_router)
-        return _router->get_active_paths();
+        return _router->get_path_to(node);
 
-    return {};
+    return std::nullopt;
 }
 
 void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         bool ignore_strike_count,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
-    _loop->call([this,
-                 pubkey = std::move(swarm_pubkey),
-                 ignore_strike_count,
-                 cb = std::move(callback)] {
+    _jq->call([this,
+               pubkey = std::move(swarm_pubkey),
+               ignore_strike_count,
+               cb = std::move(callback)] {
         if (!_snode_pool) {
             log::warning(
                     cat,
@@ -393,7 +474,7 @@ void Network::get_swarm(
 
 void Network::get_random_nodes(
         uint16_t count, std::function<void(std::vector<service_node> nodes)> callback) {
-    _loop->call([this, count, cb = std::move(callback)] {
+    _jq->call([this, count, cb = std::move(callback)] {
         if (!_snode_pool) {
             log::warning(
                     cat,
@@ -443,61 +524,54 @@ void Network::send_request(Request request, network_response_callback_t callback
 
     try {
         auto processed_request = _preprocess_request(std::move(request));
-        auto router_callback =
-                [weak_self = weak_from_this(),
-                 this,
-                 original_req = processed_request,
-                 cb = std::move(callback)](
-                        bool success, bool timeout, int16_t status_code, auto headers, auto body) {
-                    auto self = weak_self.lock();
-                    if (!self)
-                        return;
+        // Bare `this`: the router is destroyed by ~Network before our queue is stopped, so it
+        // cannot still be holding this callback by the time any of our state goes.
+        auto router_callback = [this, original_req = processed_request, cb = std::move(callback)](
+                                       bool success,
+                                       bool timeout,
+                                       int16_t status_code,
+                                       auto headers,
+                                       auto body) {
+            const auto dest_is_snode =
+                    std::holds_alternative<service_node>(original_req.destination);
 
-                    const auto dest_is_snode =
-                            std::holds_alternative<service_node>(original_req.destination);
+            // If we got a successful response (with a body) and the request was sent to a
+            // service node then we should update the network state based on the response
+            // (Note: we don't want to do this for server requests because they could
+            // include values in different formats, eg. the "Session Network" API returns
+            // `t` in seconds)
+            if (success && body && dest_is_snode)
+                _update_network_state(*body);
 
-                    // If we got a successful response (with a body) and the request was sent to a
-                    // service node then we should update the network state based on the response
-                    // (Note: we don't want to do this for server requests because they could
-                    // include values in different formats, eg. the "Session Network" API returns
-                    // `t` in seconds)
-                    if (success && body && dest_is_snode)
-                        _update_network_state(*body);
+            int16_t final_status_code = status_code;
 
-                    int16_t final_status_code = status_code;
+            if (body)
+                if (auto uniform_error = response::find_uniform_batch_error(*body))
+                    final_status_code = *uniform_error;
 
-                    if (body)
-                        if (auto uniform_error = response::find_uniform_batch_error(*body))
-                            final_status_code = *uniform_error;
+            // If we got a 406 from a snode, or a 425 from a server, then the device clock
+            // is out of sync so we need to kick off a clock resync request
+            if ((final_status_code == ERROR_NOT_ACCEPTABLE && dest_is_snode) ||
+                (final_status_code == ERROR_TOO_EARLY && !dest_is_snode)) {
+                _resync_clock(std::move(original_req), std::move(cb));
+                return;
+            }
 
-                    // If we got a 406 from a snode, or a 425 from a server, then the device clock
-                    // is out of sync so we need to kick off a clock resync request
-                    if ((final_status_code == ERROR_NOT_ACCEPTABLE && dest_is_snode) ||
-                        (final_status_code == ERROR_TOO_EARLY && !dest_is_snode)) {
-                        _resync_clock(std::move(original_req), std::move(cb));
-                        return;
-                    }
+            // A 421 says this node does not hold the account we asked about, and its body
+            // carries the swarm that does.  Take the correction -- it is our cache and the
+            // answer is authoritative -- but do not act on it: which member to ask next,
+            // and whether to ask at all, is the caller's to decide, and only the caller
+            // can know which node it ended up talking to.
+            if (final_status_code == 421 && dest_is_snode && original_req.swarm_pubkey && body)
+                _adopt_swarm_from_421(*original_req.swarm_pubkey, *body);
 
-                    // If we got a 421 then our swarm info is out of data so we need to refresh our
-                    // cache, the original request might succeed after this refresh so we should
-                    // just automatically retry
-                    if (final_status_code == 421) {
-                        _handle_421_retry(std::move(original_req), std::move(cb));
-                        return;
-                    }
-
-                    // For debugging purposes we want to add a log if this was a successful request
-                    // after we did an automatic retry
-                    if (original_req.retry_count > 0)
-                        log::info(
-                                cat,
-                                "[Request {}] Received valid response after 421 retry.",
-                                original_req.request_id);
-
-                    auto final_success =
-                            (success && final_status_code >= 200 && final_status_code <= 299);
-                    cb(final_success, timeout, status_code, std::move(headers), std::move(body));
-                };
+            // `final_status_code`, not the raw one: a batch whose subrequests all failed
+            // the same way arrives here as a transport-level 200, and reporting that
+            // would leave the caller unable to tell a misdirected request from any other
+            // failure -- which is exactly the decision it is now responsible for making.
+            auto final_success = (success && final_status_code >= 200 && final_status_code <= 299);
+            cb(final_success, timeout, final_status_code, std::move(headers), std::move(body));
+        };
 
         _router->send_request(std::move(processed_request), std::move(router_callback));
     } catch (const std::exception& e) {
@@ -506,29 +580,16 @@ void Network::send_request(Request request, network_response_callback_t callback
 }
 
 void Network::upload(UploadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), this, user_callback](
+    request.on_complete = [this, user_callback](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         if (auto* status_code = std::get_if<int16_t>(&result)) {
             // Handle 425 (clock out of sync)
             // If we got a 425 (no need to handle a 406 as we only ever upload to a server),
@@ -551,33 +612,54 @@ void Network::upload(UploadRequest request) {
             user_callback(std::move(result), timeout);
     };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     _router->upload(std::move(request));
+#pragma GCC diagnostic pop
+}
+
+void Network::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
+        return;
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
+        return;
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
+        return;
+
+    auto user_callback = request.on_complete;
+    request.on_complete =
+            [this, user_callback](
+                    std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result,
+                    bool timeout) {
+                if (auto* status_code = std::get_if<int16_t>(&result)) {
+                    if (*status_code == ERROR_TOO_EARLY) {
+                        log::info(cat, "File upload received 425, triggering clock resync.");
+                        _resync_clock(std::nullopt, nullptr);
+
+                        if (user_callback)
+                            user_callback(*status_code, timeout);
+                        return;
+                    }
+                }
+
+                if (user_callback)
+                    user_callback(std::move(result), timeout);
+            };
+
+    _router->upload_file(std::move(request), seed);
 }
 
 void Network::download(DownloadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), this, user_callback, req = request](
+    request.on_complete = [this, user_callback, req = request](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
         if (auto* status_code = std::get_if<int16_t>(&result)) {
             // If we got a 425 (no need to handle a 406 as we only ever download from a server),
             // then the device clock is out of sync so we need to kick off a clock resync request
@@ -617,7 +699,7 @@ void Network::_close_connections() {
 }
 
 void Network::_recalculate_status() {
-    _loop->call([this] {
+    _jq->call([this] {
         if (!_transport || !_router)
             return _update_status(ConnectionStatus::disconnected);
 
@@ -704,6 +786,13 @@ Request Network::_preprocess_request(Request request) {
 }
 
 void Network::_update_network_state(const std::string& body) {
+    // Not every storage server endpoint answers in JSON: `monitor` is handled outside the RPC
+    // dispatch and replies with bt, which carries no clock or fork versions to read anyway.
+    // Recognised rather than parsed and complained about, since a subscription renews on a timer
+    // and would otherwise log a warning every time.
+    if (!body.empty() && (body.front() == 'd' || body.front() == 'l'))
+        return;
+
     try {
         auto json = nlohmann::json::parse(body);
         const nlohmann::json* target_json = &json;
@@ -770,7 +859,10 @@ void Network::_update_network_state(const std::string& body) {
 
             if (new_versions != old_versions)
                 on_network_info_changed(
-                        _network_time_offset.load(), new_versions.hardfork, new_versions.softfork);
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                                AdjustedClock::get_offset()),
+                        new_versions.hardfork,
+                        new_versions.softfork);
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse network state from response: {}", e.what());
@@ -779,105 +871,46 @@ void Network::_update_network_state(const std::string& body) {
 
 // MARK: Specific Error Handling
 
-void Network::_handle_421_retry(
-        Request original_request, network_response_callback_t final_callback) {
-    if (original_request.retry_count >= config.redirect_retry_count) {
-        log::error(
+// Takes the swarm a 421 hands back and writes it into the cache, so that whoever decides to try
+// again resolves against the corrected membership rather than the stale one that misdirected us.
+//
+// Only the cache is touched.  Choosing another member, or giving up, is the caller's: it is the
+// only party that can know which node it ended up talking to, and a substitution made down here
+// is invisible to it.
+void Network::_adopt_swarm_from_421(const x25519_pubkey& swarm_pubkey, std::string_view body) {
+    try {
+        auto json = nlohmann::json::parse(body);
+
+        // A batch collapses to a uniform 421, in which case the swarm sits inside the first
+        // subrequest's body rather than at the top level.
+        if (auto results = json.find("results");
+            results != json.end() && results->is_array() && !results->empty())
+            if (auto b = results->front().find("body"); b != results->front().end())
+                json = *b;
+
+        auto snodes = json.find("snodes");
+        if (snodes == json.end() || !snodes->is_array() || snodes->empty())
+            return;
+
+        std::vector<service_node> nodes;
+        nodes.reserve(snodes->size());
+        for (const auto& n : *snodes)
+            nodes.push_back(service_node::from_json(n));
+
+        swarm::swarm_id_t swarm_id = swarm::INVALID_SWARM_ID;
+        if (auto s = json.find("swarm"); s != json.end() && s->is_string())
+            swarm_id = std::stoull(s->get<std::string>(), nullptr, 16);
+
+        log::info(
                 cat,
-                "Request {} received 421 but exceeded max retry count.",
-                original_request.request_id);
-        return final_callback(
-                false,
-                false,
-                ERROR_MISDIRECTED_REQUEST,
-                {content_type_plain_text},
-                "Exceeded retry limit for 421 error");
+                "Adopting the {}-node swarm a 421 reported for {}",
+                nodes.size(),
+                swarm_pubkey.hex());
+
+        _snode_pool->set_swarm(swarm_pubkey, swarm_id, std::move(nodes));
+    } catch (const std::exception& e) {
+        log::warning(cat, "Could not read the swarm out of a 421 response: {}", e.what());
     }
-
-    // Shouldn't automatically retry if the destination isn't a node (we on'y want to auto-retry due
-    // to a node being in the wrong swarm)
-    auto* original_dest_node = std::get_if<service_node>(&original_request.destination);
-    if (!original_dest_node)
-        return final_callback(
-                false,
-                false,
-                ERROR_MISDIRECTED_REQUEST,
-                {content_type_plain_text},
-                "Received 421 from a non-service-node destination");
-
-    // A 421 says the account we asked about is not in this node's swarm, so recovering means
-    // re-resolving *that account's* swarm.  Nothing about the node we asked can tell us which
-    // account that was, so a request that did not record one cannot be redirected.
-    if (!original_request.swarm_pubkey) {
-        log::warning(
-                cat,
-                "Request {} received 421 but carries no swarm pubkey to re-resolve.",
-                original_request.request_id);
-        return final_callback(
-                false,
-                false,
-                ERROR_MISDIRECTED_REQUEST,
-                {content_type_plain_text},
-                "421 Misdirected Request for a request with no swarm");
-    }
-
-    // If we got a 421 it means our snode cache is outdated (because the swarm the destination node
-    // belongs to doesn't match our cache anymore)
-    log::info(
-            cat,
-            "Request {} received 421 from node {}, refreshing swarm if stale.",
-            original_request.request_id,
-            original_dest_node->to_string());
-
-    auto failed_node_copy = *original_dest_node;
-    std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
-    _snode_pool->refresh_if_needed(
-            std::move(nodes_to_exclude),
-            [this,
-             req_to_retry = std::move(original_request),
-             cb = std::move(final_callback),
-             failed_node = failed_node_copy] {
-                auto swarm_pubkey = *req_to_retry.swarm_pubkey;
-
-                _snode_pool->get_swarm(
-                        swarm_pubkey,
-                        false,
-                        [this,
-                         req_to_retry = std::move(req_to_retry),
-                         cb = std::move(cb),
-                         failed_node](swarm::swarm_id_t, std::vector<service_node> swarm_nodes) {
-                            // Extract a single random index from the vector indices, but excluding
-                            // the index of the failing node:
-                            size_t new_target;
-                            auto out = std::ranges::sample(
-                                    std::views::iota(0, static_cast<int>(swarm_nodes.size())) |
-                                            std::views::filter([&](int i) {
-                                                return swarm_nodes[i] != failed_node;
-                                            }),
-                                    &new_target,
-                                    1,
-                                    csrng);
-
-                            if (out == &new_target)
-                                return cb(
-                                        false,
-                                        false,
-                                        ERROR_MISDIRECTED_REQUEST,
-                                        {content_type_plain_text},
-                                        "421 Misdirected Request, but no other nodes in swarm to "
-                                        "retry");
-
-                            log::info(
-                                    cat,
-                                    "Request {} retrying 421 error on new node {}.",
-                                    req_to_retry.request_id,
-                                    swarm_nodes[new_target].to_string());
-                            auto final_request = req_to_retry;
-                            final_request.retry_count++;
-                            final_request.destination = std::move(swarm_nodes[new_target]);
-                            this->send_request(std::move(final_request), std::move(cb));
-                        });
-            });
 }
 
 void Network::_resync_clock(
@@ -911,7 +944,7 @@ void Network::_resync_clock(
     if (original_request && request_callback) {
         // If we don't have a resync request queue then create one
         if (!_clock_resync_request_queue)
-            _clock_resync_request_queue = detail::RequestQueue::make(_loop);
+            _clock_resync_request_queue = std::make_shared<detail::RequestQueue>(*_loop);
 
         _clock_resync_request_queue->add(std::move(*original_request), std::move(request_callback));
     }
@@ -981,7 +1014,7 @@ void Network::_launch_next_clock_out_of_sync_request(
                     std::vector<std::pair<std::string, std::string>> /*headers*/,
                     std::optional<std::string> response) {
                 auto end_steady = std::chrono::steady_clock::now();
-                auto end_system = sysclock_now_ms();
+                auto end_system = clock_now_ms();
 
                 // If the resync was cancelled or completed while we were in-flight, do nothing
                 if (!_current_clock_resync_id || *_current_clock_resync_id != request_id) {
@@ -1079,7 +1112,7 @@ void Network::_on_clock_resync_complete(const uint8_t /*total_requests*/) {
             median_offset = (middle_values_sum / 2);
         }
 
-        _network_time_offset = median_offset;
+        AdjustedClock::set_offset(median_offset);
         _last_successful_clock_resync = std::chrono::steady_clock::now();
         log::info(
                 cat, "[Request {}] Network offset set to: {}ms", refresh_id, median_offset.count());
@@ -1136,20 +1169,9 @@ struct session_response_handle_cpp_t {
 
 namespace {
 
-inline std::shared_ptr<session::network::Network> unbox(network_object* network_) {
+inline session::network::Network* unbox(network_object* network_) {
     assert(network_ && network_->internals);
-    return *static_cast<std::shared_ptr<session::network::Network>*>(network_->internals);
-}
-
-inline bool set_error(char* error, const std::exception& e) {
-    if (!error)
-        return false;
-
-    std::string msg = e.what();
-    if (msg.size() > 255)
-        msg.resize(255);
-    std::memcpy(error, msg.c_str(), msg.size() + 1);
-    return false;
+    return static_cast<session::network::Network*>(network_->internals);
 }
 
 }  // namespace
@@ -1194,12 +1216,9 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
-    config.file_server_use_stream_encryption = cpp_defaults.file_server_use_stream_encryption;
-
     config.increase_no_file_limit = cpp_defaults.increase_no_file_limit;
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
-    config.redirect_retry_count = cpp_defaults.redirect_retry_count;
     config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
     config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
     config.num_nodes_to_check_for_network_offset =
@@ -1242,17 +1261,24 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.quic_handshake_timeout_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_handshake_timeout)
                     .count();
+    config.quic_tunnel_handshake_timeout_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                    cpp_defaults.quic_tunnel_handshake_timeout)
+                    .count();
     config.quic_keep_alive_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
-    config.quic_disable_mtu_discovery = cpp_defaults.quic_disable_mtu_discovery;
+    config.quic_disable_mtu_discovery = cpp_defaults.quic_max_udp_payload.has_value();
+    config.quic_max_udp_payload = cpp_defaults.quic_max_udp_payload.value_or(0);
 
     return config;
 }
 
 LIBSESSION_C_API bool session_network_init(
         network_object** network, const session_network_config* config, char* error) {
-    if (!network || !config)
-        return set_error(error, std::invalid_argument{"network or config were null."});
+    if (!network || !config) {
+        session::copy_c_str(error, 256, "network or config were null.");
+        return false;
+    }
 
     try {
         // Build the configuration options (ordered this way for the debug logs to make the most
@@ -1314,9 +1340,6 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(
                     opt::file_server_max_file_size(config->custom_file_server_max_file_size));
 
-        cpp_opts.emplace_back(
-                opt::file_server_use_stream_encryption(config->file_server_use_stream_encryption));
-
         // General
         if (config->increase_no_file_limit)
             cpp_opts.emplace_back(opt::increase_no_file_limit{});
@@ -1328,9 +1351,6 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(opt::retry_delay{
                     std::chrono::milliseconds{config->min_retry_delay_ms},
                     std::chrono::milliseconds{config->max_retry_delay_ms}});
-
-        // A `0` value is valid for this option
-        cpp_opts.emplace_back(opt::redirect_retry_count{config->redirect_retry_count});
 
         if (config->num_nodes_to_check_for_network_offset > 0)
             cpp_opts.emplace_back(opt::num_nodes_to_check_for_network_offset{
@@ -1427,30 +1447,37 @@ LIBSESSION_C_API bool session_network_init(
                     cpp_opts.emplace_back(opt::quic_handshake_timeout{
                             std::chrono::seconds{config->quic_handshake_timeout_seconds}});
 
+                if (config->quic_tunnel_handshake_timeout_seconds > 0)
+                    cpp_opts.emplace_back(opt::quic_tunnel_handshake_timeout{
+                            std::chrono::seconds{config->quic_tunnel_handshake_timeout_seconds}});
+
                 if (config->quic_keep_alive_seconds > 0)
                     cpp_opts.emplace_back(opt::quic_keep_alive{
                             std::chrono::seconds{config->quic_keep_alive_seconds}});
 
-                if (config->quic_disable_mtu_discovery)
-                    cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});
+                if (config->quic_max_udp_payload > 0)
+                    cpp_opts.emplace_back(opt::quic_max_udp_payload{config->quic_max_udp_payload});
+                else if (config->quic_disable_mtu_discovery)
+                    cpp_opts.emplace_back(opt::quic_max_udp_payload{1200});
 
                 break;
         }
 
         // Construct the Network instance
         Config final_config(cpp_opts);
-        auto n = std::make_shared<Network>(std::move(final_config));
+        auto n = std::make_unique<Network>(std::move(final_config));
         auto n_object = std::make_unique<network_object>();
-        n_object->internals = new std::shared_ptr<Network>(n);
+        n_object->internals = n.release();
         *network = n_object.release();
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        session::copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
 LIBSESSION_C_API void session_network_free(network_object* network) {
-    delete static_cast<std::shared_ptr<session::network::Network>*>(network->internals);
+    delete static_cast<session::network::Network*>(network->internals);
     delete network;
 }
 
@@ -1556,110 +1583,6 @@ LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object* ne
     return static_cast<CONNECTION_STATUS>(unbox(network)->get_status());
 }
 
-LIBSESSION_C_API void session_network_get_active_paths(
-        network_object* network, session_path_info** out_paths, size_t* out_paths_len) {
-    if (!network || !out_paths || !out_paths_len)
-        return;
-
-    *out_paths = nullptr;
-    *out_paths_len = 0;
-
-    try {
-        std::vector<PathInfo> cpp_paths = unbox(network)->get_active_paths();
-        if (cpp_paths.empty())
-            return;
-
-        // Calculate the size of the data
-        size_t total_size = cpp_paths.size() * sizeof(session_path_info);
-        size_t total_nodes = 0;
-        for (const auto& path : cpp_paths)
-            total_nodes += path.nodes.size();
-        total_size += total_nodes * sizeof(network_service_node);
-
-        size_t total_metadata_size = 0;
-        for (const auto& p : cpp_paths) {
-            std::visit(
-                    [&]<typename T>(const T& /*md*/) {
-                        if constexpr (std::is_same_v<T, OnionPathMetadata>)
-                            total_metadata_size += sizeof(session_onion_path_metadata);
-                        else {
-                            static_assert(std::is_same_v<T, SessionRouterTunnelMetadata>);
-                            total_metadata_size += sizeof(session_router_tunnel_metadata);
-                        }
-                    },
-                    p.metadata);
-        }
-        total_size += total_metadata_size;
-
-        // Allocate and assign the memory
-        unsigned char* buffer = static_cast<unsigned char*>(std::malloc(total_size));
-        if (!buffer)
-            return;
-
-        auto* c_paths_array = reinterpret_cast<session_path_info*>(buffer);
-        auto* current_node_ptr =
-                reinterpret_cast<network_service_node*>(c_paths_array + cpp_paths.size());
-        unsigned char* current_metadata_ptr =
-                reinterpret_cast<unsigned char*>(current_node_ptr + total_nodes);
-
-        for (size_t i = 0; i < cpp_paths.size(); ++i) {
-            const auto& cpp_path = cpp_paths[i];
-            auto& c_path = c_paths_array[i];
-
-            new (&c_path) session_path_info{};
-
-            c_path.nodes = current_node_ptr;
-            c_path.nodes_count = cpp_path.nodes.size();
-            for (const auto& cpp_node : cpp_path.nodes) {
-                new (current_node_ptr) network_service_node{};
-                cpp_node.into(*current_node_ptr);
-                current_node_ptr++;
-            }
-
-            // Copy metadata
-            std::visit(
-                    [&]<typename T>(const T& m) {
-                        if constexpr (std::is_same_v<T, OnionPathMetadata>) {
-                            auto* meta = reinterpret_cast<session_onion_path_metadata*>(
-                                    current_metadata_ptr);
-                            new (meta) session_onion_path_metadata{};
-                            meta->category = static_cast<SESSION_NETWORK_PATH_CATEGORY>(m.category);
-                            c_path.onion_metadata = meta;
-                            current_metadata_ptr += sizeof(session_onion_path_metadata);
-                        } else {
-                            static_assert(std::is_same_v<T, SessionRouterTunnelMetadata>);
-                            auto* meta = reinterpret_cast<session_router_tunnel_metadata*>(
-                                    current_metadata_ptr);
-                            new (meta) session_router_tunnel_metadata{};
-                            strncpy(meta->destination_pubkey,
-                                    m.destination_pubkey.c_str(),
-                                    sizeof(meta->destination_pubkey) - 1);
-                            meta->destination_pubkey[sizeof(meta->destination_pubkey) - 1] = '\0';
-                            strncpy(meta->destination_snode_address,
-                                    m.destination_snode_address.c_str(),
-                                    sizeof(meta->destination_snode_address) - 1);
-                            meta->destination_snode_address
-                                    [sizeof(meta->destination_snode_address) - 1] = '\0';
-                            c_path.session_router_metadata = meta;
-                            current_metadata_ptr += sizeof(session_router_tunnel_metadata);
-                        }
-                    },
-                    cpp_path.metadata);
-        }
-
-        *out_paths = c_paths_array;
-        *out_paths_len = cpp_paths.size();
-    } catch (...) {
-        *out_paths = nullptr;
-        *out_paths_len = 0;
-    }
-}
-
-LIBSESSION_C_API void session_network_paths_free(session_path_info* paths) {
-    if (paths)
-        std::free(paths);
-}
-
 LIBSESSION_C_API void session_network_get_swarm(
         network_object* network,
         const char* swarm_pubkey_hex,
@@ -1671,7 +1594,7 @@ LIBSESSION_C_API void session_network_get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
             ignore_strike_count,
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }
@@ -1684,7 +1607,7 @@ LIBSESSION_C_API void session_network_get_random_nodes(
     assert(callback);
     unbox(network)->get_random_nodes(
             count, [cb = std::move(callback), ctx](std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }
@@ -1745,9 +1668,9 @@ LIBSESSION_C_API void session_network_send_request(
             throw std::invalid_argument(
                     "Invalid request: Must have either 'snode_dest' or 'server_dest' set.");
 
-        std::optional<std::vector<unsigned char>> body;
+        std::optional<std::vector<std::byte>> body;
         if (params->body && params->body_size > 0)
-            body.emplace(params->body, params->body + params->body_size);
+            body = to_vector(to_byte_span(params->body, params->body_size));
 
         std::optional<std::string> request_id;
         if (params->request_id)
@@ -1840,9 +1763,9 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         const auto on_complete_fn = callbacks->on_complete;
         const auto ctx = callbacks->ctx;
 
-        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<unsigned char> {
-            std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
-            size_t bytes = next_data_fn(buffer.data(), buffer.size(), ctx);
+        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<std::byte> {
+            std::vector<std::byte> buffer(64 * 1024);  // 64KB chunks
+            size_t bytes = next_data_fn(to_unsigned(buffer.data()), buffer.size(), ctx);
 
             if (bytes == 0 || bytes == static_cast<size_t>(-1))
                 return {};
@@ -1873,8 +1796,11 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                     result);
         };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         handle->cancelled = cpp_request.cancelled;
         unbox(network)->upload(std::move(cpp_request));
+#pragma GCC diagnostic pop
 
         return handle.release();
     } catch (...) {
@@ -1889,7 +1815,6 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t /*partial_min_interval_ms*/,
         int8_t desired_path_index) {
 
     if (!network || !download_url || !callbacks)
@@ -1917,7 +1842,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         if (on_data_fn)
             cpp_request.on_data = [on_data_fn, ctx](
                                           const file_metadata& metadata,
-                                          std::vector<unsigned char> data) {
+                                          std::span<const std::byte> data) {
                 session_file_metadata c_meta{};
                 std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
                 c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
@@ -1925,7 +1850,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 c_meta.uploaded_timestamp = epoch_seconds(metadata.uploaded);
                 c_meta.expiry_timestamp = epoch_seconds(metadata.expiry);
 
-                on_data_fn(&c_meta, data.data(), data.size(), ctx);
+                on_data_fn(&c_meta, to_unsigned(data.data()), data.size(), ctx);
             };
 
         cpp_request.on_complete = [on_complete_fn,

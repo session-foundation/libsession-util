@@ -30,8 +30,8 @@ void check_session_id(std::string_view session_id, std::string_view prefix) {
     if (!(session_id.size() == 64 + prefix.size() && oxenc::is_hex(session_id) &&
           session_id.substr(0, prefix.size()) == prefix))
         throw std::invalid_argument{
-                "Invalid session ID: expected 66 hex digits starting with " + std::string{prefix} +
-                "; got " + std::string{session_id}};
+                "Invalid session ID: expected 66 hex digits starting with {}; got {}"_format(
+                        prefix, session_id)};
 }
 
 SessionIDPrefix get_session_id_prefix(std::string_view id) {
@@ -57,9 +57,9 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
     return oxenc::from_hex(session_id);
 }
 
-std::array<unsigned char, 32> session_id_pk(std::string_view session_id, std::string_view prefix) {
+b32 session_id_pk(std::string_view session_id, std::string_view prefix) {
     check_session_id(session_id, prefix);
-    std::array<unsigned char, 32> pk;
+    b32 pk;
     session_id.remove_prefix(2);
     oxenc::from_hex(session_id.begin(), session_id.end(), pk.begin());
     return pk;
@@ -72,8 +72,8 @@ void check_encoded_pubkey(std::string_view pk) {
         throw std::invalid_argument{"Invalid encoded pubkey: expected hex, base32z or base64"};
 }
 
-std::vector<unsigned char> decode_pubkey(std::string_view pk) {
-    std::vector<unsigned char> pubkey;
+std::vector<std::byte> decode_pubkey(std::string_view pk) {
+    std::vector<std::byte> pubkey;
     pubkey.reserve(32);
     if (pk.size() == 64 && oxenc::is_hex(pk))
         oxenc::from_hex(pk.begin(), pk.end(), std::back_inserter(pubkey));
@@ -147,28 +147,6 @@ std::optional<std::string> maybe_string(const session::config::dict& d, const ch
     return std::nullopt;
 }
 
-uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s) {
-    uint64_t result = 0;
-    constexpr size_t bits_available = sizeof(result) * 8;
-    for (auto& v : s) {
-        auto* val = std::get_if<int64_t>(&v);
-        if (val && (*val >= 0 && *val < bits_available))
-            result |= (1ULL << *val);
-    }
-    return result;
-}
-
-void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset) {
-    constexpr size_t bits_available = sizeof(bitset) * 8;
-    for (size_t index = 0; index < bits_available; index++) {
-        uint64_t bit = bitset & (1ULL << index);
-        if (bit)
-            field.set_insert(index);
-        else
-            field.set_erase(index);
-    }
-}
-
 std::string string_or_empty(const session::config::dict& d, const char* key) {
     if (auto* s = maybe_scalar<std::string>(d, key))
         return *s;
@@ -187,21 +165,19 @@ std::string_view sv_or_empty(const session::config::dict& d, const char* key) {
     return ""sv;
 }
 
-std::optional<std::span<const unsigned char>> maybe_span(
+std::optional<std::span<const std::byte>> maybe_span(
         const session::config::dict& d, const char* key) {
-    std::optional<std::span<const unsigned char>> ret;
+    std::optional<std::span<const std::byte>> ret;
     if (auto* s = maybe_scalar<std::string>(d, key))
-        ret.emplace(reinterpret_cast<const unsigned char*>(s->data()), s->size());
+        ret.emplace(reinterpret_cast<const std::byte*>(s->data()), s->size());
     return ret;
 }
 
-std::optional<std::vector<unsigned char>> maybe_vector(
+std::optional<std::vector<std::byte>> maybe_vector(
         const session::config::dict& d, const char* key) {
-    std::optional<std::vector<unsigned char>> result;
+    std::optional<std::vector<std::byte>> result;
     if (auto* s = maybe_scalar<std::string>(d, key))
-        result.emplace(
-                reinterpret_cast<const unsigned char*>(s->data()),
-                reinterpret_cast<const unsigned char*>(s->data()) + s->size());
+        result = to_vector(*s);
     return result;
 }
 

@@ -14,17 +14,13 @@ class TestSnodePool : public SnodePool {
 
     TestSnodePool(
             config::SnodePool config,
-            std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<oxen::quic::Loop> disk_loop,
+            oxen::quic::Loop& loop,
+            oxen::quic::Loop& disk_loop,
             network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
-            SnodePool(
-                    std::move(config),
-                    std::move(loop),
-                    std::move(disk_loop),
-                    std::move(direct_fetcher)) {}
+            SnodePool(std::move(config), loop, disk_loop, std::move(direct_fetcher)) {}
 
     void reset_state_with_cache(std::vector<service_node> cache) {
-        _loop->call_get([this, cache] {
+        _jq.call_get([this, cache] {
             _snode_cache = cache;
             _snode_strikes.clear();
         });
@@ -37,7 +33,7 @@ class TestSnodePool : public SnodePool {
     }
 
     void debug_queue_post_refresh_callback(std::function<void()> cb) {
-        _loop->call_get([this, cb = std::move(cb)]() mutable {
+        _jq.call_get([this, cb = std::move(cb)]() mutable {
             _after_snode_cache_refresh.push_back(std::move(cb));
         });
     }
@@ -54,7 +50,7 @@ class TestSnodePool : public SnodePool {
     // best-effort.  The return value is what actually makes it safe: it confirms the capacity
     // really is tight rather than letting the test quietly stop exercising the bug.
     bool debug_remove_post_refresh_callback_spare_capacity() {
-        return _loop->call_get([this] {
+        return _jq.call_get([this] {
             auto exact_sized_copy = _after_snode_cache_refresh;
             _after_snode_cache_refresh = std::move(exact_sized_copy);
             return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
@@ -62,16 +58,24 @@ class TestSnodePool : public SnodePool {
     }
 
     size_t pending_post_refresh_callbacks() {
-        return _loop->call_get([this] { return _after_snode_cache_refresh.size(); });
+        return _jq.call_get([this] { return _after_snode_cache_refresh.size(); });
     }
 
     // Called from the test thread, so this also covers `_update_cache` being entered from off the
     // loop thread
     void update_cache(std::vector<service_node> nodes) { _update_cache("test", std::move(nodes)); }
 
+    // Puts a swarm straight into the cache so get_swarm answers from it rather than resolving one.
+    void seed_swarm(const x25519_pubkey& pubkey, std::vector<service_node> nodes) {
+        _jq.call_get([&] {
+            _swarm_cache[pubkey] = {swarm::swarm_id_t{0}, std::move(nodes)};
+            return 0;
+        });
+    }
+
     void debug_on_refresh_complete(std::vector<std::vector<std::byte>> raw_results) {
         auto total_requests = static_cast<uint8_t>(raw_results.size());
-        _loop->call_get([&] {
+        _jq.call_get([&] {
             _on_refresh_complete("test", std::move(raw_results), false, true, total_requests);
         });
     }
@@ -79,7 +83,7 @@ class TestSnodePool : public SnodePool {
 
 // Encodes nodes the way the storage server returns them, so they can be fed to
 // `_on_refresh_complete`: 51 bytes per node, all multi-byte fields big-endian
-std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes) {
+static std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes) {
     std::vector<std::byte> result;
     result.reserve(nodes.size() * 51);
 
@@ -90,7 +94,7 @@ std::vector<std::byte> to_snode_cache_bin(const std::vector<service_node>& nodes
 
     for (const auto& node : nodes) {
         for (auto byte : node.view_remote_key())
-            result.push_back(static_cast<std::byte>(byte));
+            result.push_back(byte);
 
         append(node.swarm_id, 8);
         append(node.ip.addr, 4);
@@ -119,10 +123,10 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
-    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
-    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
+    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hex_b;
+    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hex_b;
     std::vector<service_node> snode_cache;
     std::vector<service_node> unused_nodes;
 
@@ -160,7 +164,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
 
     // Should return a result in a different order (since this is random, it's possible that it
@@ -217,7 +221,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     unused_nodes = snode_pool->get_unused_nodes(20);
     std::sort(unused_nodes.begin(), unused_nodes.end());
@@ -243,7 +247,7 @@ TEST_CASE("Network", "[network][update_cache]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     std::vector<service_node> snode_cache;
 
     for (uint16_t i = 0; i < 5; ++i)
@@ -257,7 +261,7 @@ TEST_CASE("Network", "[network][update_cache]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
 
     // Should tolerate a post-refresh callback registering another post-refresh callback (which is
     // what a deferred `get_swarm` does when the refresh left the cache empty) rather than
@@ -299,7 +303,7 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     std::vector<service_node> snode_cache;
 
     for (uint16_t i = 0; i < 20; ++i)
@@ -313,7 +317,7 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto disk_loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, *loop, *disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     REQUIRE(snode_pool->size() == 20);
 
@@ -335,4 +339,104 @@ TEST_CASE("Network", "[network][refresh_min_cache_size]") {
     std::vector<service_node> enough(snode_cache.begin(), snode_cache.begin() + 12);
     snode_pool->debug_on_refresh_complete({to_snode_cache_bin(enough)});
     CHECK(snode_pool->size() == 12);
+}
+
+TEST_CASE("Network", "[network][swarm_version_preference]") {
+    constexpr std::array<uint16_t, 3> old_ss{2, 11, 0};
+    constexpr std::array<uint16_t, 3> new_ss{2, 11, 1};
+
+    auto make_config = [](std::optional<std::array<uint16_t, 3>> prefer) {
+        session::network::config::SnodePool config = {
+                std::nullopt,
+                std::nullopt,
+                std::chrono::minutes{5},
+                std::chrono::minutes{5},
+                false,
+                network::opt::retry_delay{50ms, 200ms},
+                opt::netid::Target::testnet,
+                {},
+                0,
+                0,
+                3,
+                0,
+                3};
+        config.prefer_min_version = prefer;
+        return config;
+    };
+
+    // Alternating, so that grouping by version can only come from the preference rather than from
+    // the order they were put in.
+    auto member = [](uint8_t n, std::array<uint16_t, 3> version) {
+        return service_node{
+                ed25519_pubkey::from_hex("{:02x}{}"_format(n, std::string(62, '0'))),
+                oxen::quic::ipv4{"192.168.0.{}"_format(n)},
+                static_cast<uint16_t>(20000 + n),
+                static_cast<uint16_t>(30000 + n),
+                version,
+                0};
+    };
+    std::vector<service_node> swarm;
+    for (uint8_t i = 0; i < 6; i++)
+        swarm.push_back(member(i, i % 2 ? new_ss : old_ss));
+
+    auto pubkey = x25519_pubkey::from_hex(std::string(64, 'a'));
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+
+    auto ordered = [&](TestSnodePool& pool) {
+        std::vector<service_node> got;
+        pool.get_swarm(pubkey, false, [&got](auto, std::vector<service_node> nodes) {
+            got = std::move(nodes);
+        });
+        // get_swarm answers from the cache on the pool's own queue; this waits for that to drain.
+        pool.pending_post_refresh_callbacks();
+        return got;
+    };
+
+    SECTION("preferred versions come first") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+
+        auto got = ordered(*pool);
+        REQUIRE(got.size() == swarm.size());
+
+        // Asserted as a boundary rather than a fixed order: each subset keeps its shuffled order,
+        // so which preferred node comes first is deliberately not fixed.
+        for (size_t i = 0; i < got.size(); i++)
+            CHECK((got[i].storage_server_version >= new_ss) == (i < 3));
+    }
+
+    SECTION("a swarm with nothing preferred is still usable") {
+        std::vector<service_node> all_old;
+        for (uint8_t i = 0; i < 4; i++)
+            all_old.push_back(member(i, old_ss));
+
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, all_old);
+
+        // Ordering, not filtering: preferring what none of them are must not empty the swarm.
+        CHECK(ordered(*pool).size() == all_old.size());
+    }
+
+    SECTION("without a preference nothing is lost") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(std::nullopt), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+        CHECK(ordered(*pool).size() == swarm.size());
+    }
+
+    SECTION("strikes still outrank the version") {
+        auto pool = std::make_shared<TestSnodePool>(make_config(new_ss), *loop, *disk_loop);
+        pool->seed_swarm(pubkey, swarm);
+
+        // A node that has actually failed us is worse than one merely predicted to be unreachable,
+        // so striking out every preferred member puts them behind the rest.
+        for (const auto& n : swarm)
+            if (n.storage_server_version >= new_ss)
+                pool->record_node_failure(n, /*permanent=*/true);
+
+        auto got = ordered(*pool);
+        REQUIRE(!got.empty());
+        CHECK(got.front().storage_server_version == old_ss);
+    }
 }

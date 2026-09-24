@@ -1,0 +1,50 @@
+#pragma once
+
+#include <functional>
+#include <optional>
+#include <session/expected.hpp>
+#include <string>
+
+namespace session {
+
+/// Passed where a handler would go, to say "wait until this is done and give me the answer"
+/// instead.
+///
+/// Every asynchronous method has a blocking twin taking one of these.  The work is the same and
+/// happens in the same place -- on the owning event loop -- so the only difference is who waits:
+/// the twin blocks the calling thread until the answer is ready, and *throws* what the handler
+/// form would have reported through its `error` argument.
+///
+/// A tag rather than a second class, and rather than an overload with no handler at all, because
+/// the point is that it be visible where it is used.  Blocking is a decision about the calling
+/// thread, so it belongs at the call site: a render loop must not do it, and a review can grep for
+/// it, neither of which works when the choice was made wherever the variable was declared.
+///
+/// Calling one from a handler is safe rather than a deadlock -- the loop runs the work inline when
+/// it is already the current thread -- but it is still waiting, and anything else the loop owes is
+/// waiting behind it.  That inlining is also what lets code already on the loop use the blocking
+/// form and pay nothing for it, which is why there is no third "I am already on the loop" overload
+/// of anything.
+struct await_t {};
+inline constexpr await_t await{};
+
+/// A handler an application passes to one of the asynchronous methods, written in terms of what
+/// that method produces: `result_function<int64_t>` is handed either a message id or the reason
+/// there isn't one, and `result_function<>` is handed either "that worked" or the reason it did
+/// not.
+///
+/// One parameter rather than two, which is the point: the value and the failure are the same
+/// object, so there is no default-constructed value sitting beside an error waiting to be mistaken
+/// for an answer.
+///
+/// **Every such handler is invoked exactly once**, unless the object it was given to is destroyed
+/// before its work runs, so a caller is never left waiting for an answer that is not coming.  That
+/// is what the error side is for: a call that has been dispatched has no caller left to throw to.
+///
+/// A handler carrying several values names them at the declaration -- `result_function<std::tuple<
+/// device::Info, bool>>`, or better a struct -- rather than getting them from an arity-dependent
+/// parameter list.  Unpacked at the call site with `auto& [info, fresh] = *r;`.
+template <typename T = void>
+using result_function = std::function<void(Expected<T>)>;
+
+}  // namespace session

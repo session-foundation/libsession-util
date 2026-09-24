@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <oxen/quic/address.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -64,14 +66,14 @@ class Builder {
     };
 
     void set_destination(network::network_destination destination);
-    void add_hop(std::span<const unsigned char> remote_key);
+    void add_hop(std::span<const std::byte, 32> remote_key);
     void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) {
         hops_.push_back(keys);
     }
 
-    std::vector<unsigned char> build(std::vector<unsigned char> payload);
-    std::vector<unsigned char> generate_onion_blob(
-            const std::optional<std::vector<unsigned char>>& plaintext_body);
+    std::vector<std::byte> build(std::vector<std::byte> payload);
+    std::vector<std::byte> generate_onion_blob(
+            const std::optional<std::vector<std::byte>>& plaintext_body);
 
   private:
     std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};
@@ -91,8 +93,7 @@ class Builder {
     std::optional<std::vector<std::pair<std::string, std::string>>> headers_ = std::nullopt;
     std::optional<std::vector<std::pair<std::string, std::string>>> query_params_ = std::nullopt;
 
-    std::vector<unsigned char> _generate_payload(
-            std::optional<std::vector<unsigned char>> body) const;
+    std::vector<std::byte> _generate_payload(std::optional<std::vector<std::byte>> body) const;
 };
 
 }  // namespace session::onionreq

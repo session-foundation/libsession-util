@@ -12,6 +12,10 @@
 #include "session/network/service_node.hpp"
 #include "swarm.hpp"
 
+namespace session {
+class TestHelper;
+}
+
 namespace session::network {
 
 namespace config {
@@ -31,6 +35,13 @@ namespace config {
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint8_t cache_min_num_refresh_presence_to_include_node;
         uint16_t cache_node_strike_threshold;
+
+        /// Storage server version at or above which a swarm member is preferred, or nullopt to
+        /// treat every member alike.
+        ///
+        /// Deliberately a version rather than a reason: what the version *means* belongs to
+        /// whoever sets this, and this layer only has to order by it.
+        std::optional<std::array<uint16_t, 3>> prefer_min_version;
     };
 }  // namespace config
 
@@ -40,16 +51,18 @@ class empty_file_exception : public std::runtime_error {
 };
 
 class SnodePool : public std::enable_shared_from_this<SnodePool> {
+    friend class session::TestHelper;  // for unit tests
+
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
     using fetcher_connectivity_check_t = std::function<bool()>;
 
     SnodePool(
             config::SnodePool config,
-            std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<oxen::quic::Loop> disk_loop,
+            oxen::quic::Loop& loop,
+            oxen::quic::Loop& disk_loop,
             network_fetcher_t direct_fetcher);
-    ~SnodePool() = default;
+    virtual ~SnodePool();
 
     void suspend();
     void resume();
@@ -81,6 +94,17 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             bool ignore_strike_count,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
 
+    /// Replaces the cached swarm for an account with one a storage server told us authoritatively,
+    /// as a 421 body does.
+    ///
+    /// Overrides the locally computed membership, which is only as fresh as the snode cache
+    /// (`cache_expiration`, hours) and is exactly what a 421 says was wrong.  The override lives
+    /// until the next snode cache refresh recomputes everything.
+    virtual void set_swarm(
+            session::network::x25519_pubkey swarm_pubkey,
+            swarm::swarm_id_t swarm_id,
+            std::vector<service_node> nodes);
+
     virtual std::vector<service_node> get_unused_nodes(
             size_t count, const std::vector<service_node>& exclude = {});
 
@@ -89,8 +113,9 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     bool _suspended = false;
     config::SnodePool _config;
-    std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<oxen::quic::Loop> _disk_loop;
+    oxen::quic::Loop& _loop;
+    // Only ever given jobs that capture what they need by value, so it needs no queue of its own.
+    oxen::quic::Loop& _disk_loop;
     network_fetcher_t _direct_fetcher;
     std::optional<network_fetcher_t> _routed_fetcher;
     std::optional<fetcher_connectivity_check_t> _routed_fetcher_connectivity_check;
@@ -114,6 +139,14 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     std::vector<service_node> _refresh_candidate_nodes;
     std::vector<std::vector<std::byte>> _snode_refresh_results;
     std::vector<std::function<void()>> _after_snode_cache_refresh;
+
+    /// This pool's own jobs, rather than the loop's shared queue, so that ~SnodePool can take them
+    /// away from the loop before anything is torn down: `stop()` waits out whatever is running and
+    /// cancels the rest, including anything scheduled with call_later.  That is what lets the jobs
+    /// capture `this` bare.
+    ///
+    /// Declared last so that it is also the first member destroyed.
+    oxen::quic::JobQueue _jq{_loop};
 
     // Disk I/O functions
     void _load_from_disk();

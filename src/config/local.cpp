@@ -1,7 +1,5 @@
 #include "session/config/local.h"
 
-#include <sodium/crypto_generichash_blake2b.h>
-
 #include "internal.hpp"
 #include "session/config/error.h"
 #include "session/config/local.hpp"
@@ -11,8 +9,8 @@
 using namespace session::config;
 
 Local::Local(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }

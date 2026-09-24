@@ -6,7 +6,7 @@
 #include <oxen/log.hpp>
 #include <type_traits>
 
-#include "network_opt.hpp"
+#include "session/network/network_opt.hpp"
 #include "session/types.hpp"
 
 namespace session::network::config {
@@ -26,13 +26,18 @@ struct Config {
     std::optional<uint16_t> custom_file_server_port = std::nullopt;
     std::optional<std::string> custom_file_server_pubkey_hex = std::nullopt;
     std::optional<uint64_t> custom_file_server_max_file_size = std::nullopt;
-    bool file_server_use_stream_encryption = false;
+    std::optional<std::string> custom_file_server_srouter_address = std::nullopt;
+    std::optional<uint16_t> custom_file_server_srouter_port = std::nullopt;
+
+    // QUIC file server options
+    std::optional<std::string> quic_file_server_ed_pubkey;
+    std::optional<std::string> quic_file_server_address;
+    std::optional<uint16_t> quic_file_server_port;
 
     // General options
     bool increase_no_file_limit = false;
     uint8_t path_length = 3;
     bool enforce_subnet_diversity = true;
-    uint8_t redirect_retry_count = 1;
     opt::retry_delay retry_delay = opt::retry_delay(200ms, 5s);
     uint8_t num_nodes_to_check_for_network_offset = 3;
     std::chrono::minutes min_resume_clock_resync_interval = 10min;
@@ -62,9 +67,22 @@ struct Config {
     std::chrono::days onionreq_edge_node_cache_duration = std::chrono::days{10};
 
     // Quic Transport Options
-    std::chrono::milliseconds quic_handshake_timeout{3s};
+
+    /// How long a QUIC handshake straight out to a node's own address gets: the guard node of an
+    /// onion request, a direct-mode destination, a connectivity check.  One internet round trip and
+    /// a little slack.
+    std::chrono::milliseconds quic_handshake_timeout{5s};
+
+    /// How long a QUIC handshake gets when its packets go through a Session Router tunnel.
+    ///
+    /// A separate figure because it measures something else entirely: the connection is nominally
+    /// to ::1, but every packet of it crosses the whole tunnel, so the budget has to cover a
+    /// multi-hop round trip rather than a direct one.  That it currently sits at a value other
+    /// constants here also happen to use means nothing -- move either one on its own merits.
+    std::chrono::milliseconds quic_tunnel_handshake_timeout{10s};
+
     std::chrono::seconds quic_keep_alive{10s};
-    bool quic_disable_mtu_discovery = false;
+    std::optional<size_t> quic_max_udp_payload;
 
     template <typename... Opt>
         requires(sizeof...(Opt) > 0 && (opt::is_option<std::decay_t<Opt>> && ...))
@@ -90,13 +108,12 @@ struct Config {
     void handle_config_opt(opt::file_server_port fsp);
     void handle_config_opt(opt::file_server_pubkey_hex fsph);
     void handle_config_opt(opt::file_server_max_file_size fsmfs);
-    void handle_config_opt(opt::file_server_use_stream_encryption fsuse);
+    void handle_config_opt(opt::file_server_srouter fssr);
 
     // General options
     void handle_config_opt(opt::increase_no_file_limit infl);
     void handle_config_opt(opt::path_length pl);
     void handle_config_opt(opt::disable_subnet_diversity dsd);
-    void handle_config_opt(opt::redirect_retry_count rrc);
     void handle_config_opt(opt::retry_delay rd);
     void handle_config_opt(opt::num_nodes_to_check_for_network_offset nncno);
     void handle_config_opt(opt::min_resume_clock_resync_interval mrcri);
@@ -112,10 +129,16 @@ struct Config {
     void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
 
+    // QUIC file server options
+    void handle_config_opt(opt::quic_file_server_ed_pubkey qfep);
+    void handle_config_opt(opt::quic_file_server_address qfa);
+    void handle_config_opt(opt::quic_file_server_port qfp);
+
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);
+    void handle_config_opt(opt::quic_tunnel_handshake_timeout qtht);
     void handle_config_opt(opt::quic_keep_alive qka);
-    void handle_config_opt(opt::quic_disable_mtu_discovery qdmd);
+    void handle_config_opt(opt::quic_max_udp_payload qmup);
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_strike_threshold pst);

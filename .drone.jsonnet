@@ -18,7 +18,48 @@ local default_deps_nocxx = [
 
 local default_deps = ['g++'] + default_deps_nocxx;
 
-local default_test_deps = libngtcp2_deps;
+// Everything we can link against rather than compiling our own copy of, for builds that are not
+// deliberately static (see `static_deps` in debian_build).  Two reasons: such a build is much
+// faster, and it is the only thing that tests us against the library versions distros actually
+// ship -- Debian 12's fmt 9, for instance, which our own code has to stay compatible with.
+//
+// liboxen-quic-dev pulls in liboxen-logging-dev, which is older than we accept
+// (OXEN_LOGGING_MIN_VERSION in external/CMakeLists.txt); the submodule is used for that one and
+// builds against the system fmt/spdlog, which is what puts fmt 9 in front of our code.
+//
+// A too-old system library is not an error: cmake falls back to building that one dependency.
+// libsodium is that case on Debian 12 and Ubuntu 22.04, which ship less than the 1.0.21 we need.
+local default_system_deps = [
+  'libevent-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'liboxenc-dev',
+  'libsodium-dev',
+  'libspdlog-dev',
+  'libsqlite3-dev',
+  'libutf8proc-dev',
+  'libzstd-dev',
+  'nettle-dev',
+];
+
+// Filters out packages from `deps` that are known not to link on a full llvm-with-libc++ build
+// (mostly due to incompatibilities in some C++ linking):
+local llvm_deps(deps) = std.setDiff(std.set(deps), std.set([
+  'libprotobuf-dev',
+  'libfmt-dev',
+  'liboxen-quic-dev',
+  'libspdlog-dev',
+]));
+
+local default_test_deps = libngtcp2_deps + default_system_deps;
+
+// s390x, our big-endian target, cross-compiled against multiarch :s390x libraries and tested under
+// qemu.  deb.session.foundation publishes nothing for s390x, so its packages are left to submodules.
+local s390x_libs = std.map(function(p) p + ':s390x',
+                           std.setDiff(std.set(default_test_deps), std.set(['liboxen-quic-dev', 'liboxenc-dev']))
+                           + ['libsimdutf-dev', 'pkgconf']);
+local s390x_test_deps = s390x_libs + ['qemu-user'];
+local s390x_deps = ['crossbuild-essential-s390x', 'libcli11-dev', 'nlohmann-json3-dev'] + s390x_test_deps;
 
 local docker_base = 'registry.oxen.rocks/';
 
@@ -38,10 +79,14 @@ local add_stf_repo(image) = [
   'eatmydata ' + apt_get_quiet + ' update',
 ];
 
+// Enables a multiarch architecture's packages; has to come before the `apt-get update`.
+local add_foreign_arch(arch) = if arch != '' then ['dpkg --add-architecture ' + arch] else [];
+
 // Fresh-container apt bootstrap shared by every post-build test step: eatmydata, optional STF repo,
 // upgrade, then install `pkgs`. When `pkgs` is empty the repo/upgrade block is skipped entirely
 // (only eatmydata is installed), matching the original inline behaviour.
-local apt_setup(image, pkgs, stf_repo=true) =
+local apt_setup(image, pkgs, stf_repo=true, foreign_arch='') =
+  add_foreign_arch(foreign_arch) +
   [apt_get_quiet + ' install -y eatmydata'] +
   (if std.length(pkgs) > 0 then
      (if stf_repo then add_stf_repo(image) else []) + [
@@ -57,10 +102,10 @@ local debian_pipeline(name,
                       deps=default_deps,
                       stf_repo=true,
                       kitware_repo=''/* ubuntu codename, if wanted */,
+                      foreign_arch=''/* multiarch architecture to install packages of, e.g. s390x */,
                       allow_fail=false,
                       cmake_pkg='cmake',
                       build=['echo "Error: drone build argument not set"', 'exit 1'],
-                      extra_setup=[],
                       extra_steps=[])
       = {
   kind: 'pipeline',
@@ -78,6 +123,7 @@ local debian_pipeline(name,
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+      ] + add_foreign_arch(foreign_arch) + [
         apt_get_quiet + ' update',
         apt_get_quiet + ' install -y eatmydata',
       ] + (
@@ -89,7 +135,7 @@ local debian_pipeline(name,
           'echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ ' + kitware_repo + ' main" >/etc/apt/sources.list.d/kitware.list',
           'eatmydata ' + apt_get_quiet + ' update',
         ] else []
-      ) + extra_setup + [
+      ) + [
         'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + cmake_pkg + ' make git ccache ca-certificates ' + std.join(' ', deps),
       ] + build,
@@ -102,6 +148,8 @@ local debian_build(name,
                    image,
                    arch='amd64',
                    deps=default_deps,
+                   system_deps=default_system_deps,
+                   static_deps=false/* build our own dependencies instead of using the distro's */,
                    test_deps=default_test_deps,
                    build_type='Release',
                    lto=false,
@@ -113,16 +161,18 @@ local debian_build(name,
                    tests=true,
                    stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
-                   extra_setup=[],
+                   foreign_arch=''/* multiarch architecture to install packages of, e.g. s390x */,
+                   test_runner=''/* prefix for running test binaries, e.g. an emulator */,
                    extra_steps=[],
                    allow_fail=false)
       = debian_pipeline(
   name,
   image,
   arch=arch,
-  deps=deps,
+  deps=deps + (if static_deps then [] else system_deps),
   stf_repo=stf_repo,
   kitware_repo=kitware_repo,
+  foreign_arch=foreign_arch,
   allow_fail=allow_fail,
   build=[
     'mkdir build',
@@ -130,6 +180,7 @@ local debian_build(name,
     'cmake .. -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' ' +
     (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
     (if shared_libs then '-DBUILD_SHARED_LIBS=ON ' else '') +
+    '-DBUILD_STATIC_DEPS=' + (if static_deps then 'ON ' else 'OFF ') +
     '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
@@ -137,17 +188,16 @@ local debian_build(name,
     ci_dep_mirror(local_mirror),
     'make VERBOSE=1 -j' + jobs,
   ],
-  extra_setup=extra_setup,
   extra_steps=(if tests then
                  [{
                    name: 'tests',
                    image: image,
                    pull: 'always',
                    [if allow_fail then 'failure']: 'ignore',
-                   commands: apt_setup(image, test_deps, stf_repo=stf_repo) + [
+                   commands: apt_setup(image, test_deps, stf_repo=stf_repo, foreign_arch=foreign_arch) + [
                      'cd build',
-                     './tests/testLogging --colour-mode ansi -d yes',
-                     './tests/testAll --colour-mode ansi -d yes',
+                     test_runner + './tests/testLogging --colour-mode ansi -d yes',
+                     test_runner + './tests/testAll --colour-mode ansi -d yes',
                    ],
                  }] else []) + extra_steps
 );
@@ -201,6 +251,16 @@ local windows_cross_pipeline(name,
                  }] else [])
 );
 
+local live_test_step(image, mode) = {
+  name: 'live tests (' + mode + ')',
+  image: image,
+  pull: 'always',
+  commands: apt_setup(image, default_test_deps) + [
+    'cd build',
+    './tests/testLive --' + mode + ' --log-level warning --colour-mode ansi -d yes "[file]"',
+  ],
+};
+
 // Live Pro-backend integration test: build testAll with the dev-server hook, stand up an ephemeral
 // backend (throwaway postgres + flask, provider_dry_run) via tests/pro_backend/run-dev-backend.sh,
 // and run the [pro_live] suite against it. The backend is a separate Python service, checked out at
@@ -225,7 +285,7 @@ local pro_backend_pkgs = [
   'git',
   'curl',
   'ca-certificates',
-] + default_test_deps;
+];
 
 local pro_backend_live_pipeline(name, image) = debian_build(
   name,
@@ -239,7 +299,7 @@ local pro_backend_live_pipeline(name, image) = debian_build(
     name: 'pro-backend live tests',
     image: image,
     pull: 'always',
-    commands: apt_setup(image, pro_backend_pkgs) + [
+    commands: apt_setup(image, pro_backend_pkgs + default_test_deps) + [
       // Check out + provision the backend (venv reuses the apt-installed python3-* via system site
       // packages; only the pip-only provider libraries are installed).
       'git clone --depth=1 --branch ' + pro_backend_ref + ' ' + pro_backend_git + ' /opt/pro-backend',
@@ -262,15 +322,22 @@ local clang(version) = debian_build(
               ' -DCMAKE_CXX_COMPILER=clang++-' + version
 );
 
-local full_llvm(version) = debian_build(
-  'Debian sid/llvm-' + version,
+local full_llvm(version, cxx=null) = debian_build(
+  'Debian sid/llvm-' + version + (if cxx == null then '' else '/C++' + cxx),
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version, ' lld-' + version, ' libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
+  system_deps=llvm_deps(default_system_deps),
   shared_libs=false,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
               ' -DCMAKE_CXX_FLAGS="-stdlib=libc++ -fcolor-diagnostics" ' +
+              (if cxx == null then '' else '-DCMAKE_CXX_STANDARD=' + cxx + ' ') +
+              ' -DOXEN_LOGGING_FORCE_SUBMODULES=ON ' +
+              std.join(' ', [
+                '-DDEPS_FORCE_' + m + '_SUBMODULE=ON'
+                for m in ['protobuf-lite', 'liboxenquic', 'liboxenmq']
+              ]) +
               std.join(' ', [
                 '-DCMAKE_' + type + '_LINKER_FLAGS=-fuse-ld=lld-' + version
                 for type in ['EXE', 'MODULE', 'SHARED']
@@ -369,7 +436,7 @@ local static_build(name,
     kind: 'pipeline',
     type: 'docker',
     steps: [{
-      name: 'build',
+      name: 'formatting',
       image: docker_base + 'lint',
       pull: 'always',
       commands: [
@@ -409,21 +476,61 @@ local static_build(name,
   // Various debian builds
   debian_build('Debian sid', docker_base + 'debian-sid'),
 
+  // Debian sid with session-router + live file transfer tests
+  local live_image = docker_base + 'debian-sid';
+  debian_build(
+    'Debian sid (live tests)',
+    live_image,
+    cmake_extra='-DENABLE_NETWORKING=ON -DENABLE_NETWORKING_SROUTER=ON -DBUILD_LIVE_TESTS=ON',
+  ) + {
+    steps: super.steps + [
+      live_test_step(live_image, 'onionreq'),
+      live_test_step(live_image, 'srouter'),
+      live_test_step(live_image, 'direct'),
+    ],
+  },
+
   // Live Pro-backend integration tests (ephemeral backend + [pro_live]).
   pro_backend_live_pipeline('Debian sid (Pro backend live)', docker_base + 'debian-sid'),
 
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
+
+  // C++23, which is what `session::Expected` is written against: under it `expected.hpp` resolves
+  // to `std::expected` rather than the local stand-in, so these compile every use in the project
+  // against the real thing.  That is what keeps the stand-in a strict subset -- a use that has
+  // drifted outside it fails here rather than waiting for whoever eventually raises the standard.
+  //
+  // Both libstdc++ and libc++, because the two disagree about plenty and a subset that only holds
+  // against one of them is not a subset.
+  debian_build('Debian sid/C++23', docker_base + 'debian-sid', cmake_extra='-DCMAKE_CXX_STANDARD=23'),
+  full_llvm(23, cxx=23),
+
   clang(19),
   full_llvm(19),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_build('Debian 12', docker_base + 'debian-bookworm'),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
   debian_build('Ubuntu LTS', docker_base + 'ubuntu-lts'),
+  // The one build that compiles every dependency itself rather than taking the distro's, on the
+  // oldest distro we support: what the release artifacts do, and the only thing that notices when
+  // a dependency we vendor stops building.
+  debian_build('Ubuntu 22.04 (static deps)', docker_base + 'ubuntu-jammy', static_deps=true),
 
   // ARM builds (ARM64 and armhf)
   debian_build('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', jobs=4),
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
+
+  // Big-endian:
+  debian_build('Debian forky (s390x cross)',
+               docker_base + 'debian-forky-s390x-cross',
+               deps=s390x_deps,
+               system_deps=[],
+               test_deps=s390x_test_deps,
+               stf_repo=false,
+               foreign_arch='s390x',
+               test_runner='qemu-s390x ',
+               cmake_extra='-DCMAKE_TOOLCHAIN_FILE=../cmake/debian-cross-s390x-toolchain.cmake '),
 
 
   mac_pipeline('Static iOS', arch='arm64', build=[
@@ -433,7 +540,7 @@ local static_build(name,
   ]),
 
   // Macos builds:
-  mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
+  //mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
   mac_builder('macOS Arm64 (Debug)', arch='arm64', build_type='Debug'),
 

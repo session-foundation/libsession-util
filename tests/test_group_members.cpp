@@ -1,11 +1,11 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <chrono>
 #include <session/config/groups/members.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <string_view>
 
 #include "utils.hpp"
@@ -24,43 +24,42 @@ constexpr bool is_prime100(int i) {
 
 TEST_CASE("Group Members", "[config][groups][members]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<std::vector<unsigned char>> enc_keys{
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes};
+    std::vector<std::vector<std::byte>> enc_keys{
+            to_vector("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b)};
 
-    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Members gmem1{ed_pk, ed_sk, std::nullopt};
 
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
     for (const auto& k : enc_keys)
-        gmem1.add_key(k, false);
+        gmem1.add_key(std::span{k}.first<32>(), false);
 
     enc_keys.insert(
             enc_keys.begin(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
-    enc_keys.push_back("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes);
-    enc_keys.push_back("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hexbytes);
-    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+            to_vector("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
+    enc_keys.push_back(
+            to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
+    enc_keys.push_back(
+            to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
+    groups::Members gmem2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
-        gmem2.add_key(k, false);
+        gmem2.add_key(std::span{k}.first<32>(), false);
 
     std::vector<std::string> sids;
     while (sids.size() < 256) {
-        std::array<unsigned char, 33> sid;
+        b33 sid;
         for (auto& s : sid)
-            s = sids.size();
-        sid[0] = 0x05;
+            s = static_cast<std::byte>(sids.size());
+        sid[0] = std::byte{0x05};
         sids.push_back(oxenc::to_hex(sid.begin(), sid.end()));
     }
 
@@ -71,7 +70,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.name = "Admin {}"_format(i);
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
-                "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+                to_vector("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b);
         m.profile_updated = std::chrono::sys_seconds{1s};
         gmem1.set(m);
     }
@@ -81,7 +80,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.set_name("Member {}"_format(i));
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
-                "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+                to_vector("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b);
         m.profile_updated = session::to_sys_seconds(2);
         gmem1.set(m);
     }
@@ -102,7 +101,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(gmem1.needs_dump());
     CHECK_FALSE(gmem1.needs_push());
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash1", p1.at(0));
     CHECK(gmem2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(gmem2.needs_push());
@@ -205,7 +204,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     gmem2.confirm_pushed(s2, {"fakehash2"});
     merge_configs.emplace_back("fakehash2", p2.at(0));  // not clearing it first!
     CHECK(gmem1.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
-    gmem1.add_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
+    gmem1.add_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b);
     CHECK(gmem1.merge(merge_configs) == std::unordered_set{{"fakehash1"s, "fakehash2"s}});
 
     CHECK(gmem1.get(sids[23]).value().name == "Member 23");
@@ -218,9 +217,12 @@ TEST_CASE("Group Members", "[config][groups][members]") {
             CHECK(m.name == ((i == 20 || i == 21 || i >= 50)
                                      ? ""
                                      : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
-            CHECK(m.profile_picture.key ==
-                  (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
-                          : ""_hexbytes));
+            if (i < 20)
+                CHECK(std::ranges::equal(
+                        m.profile_picture.key,
+                        "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
+            else
+                CHECK(m.profile_picture.key.empty());
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
             if (i < 5)
                 CHECK(m.profile_updated.time_since_epoch() == 1s);
@@ -302,9 +304,12 @@ TEST_CASE("Group Members", "[config][groups][members]") {
             CHECK(m.name == ((i == 20 || i == 21 || i >= 50)
                                      ? ""
                                      : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
-            CHECK(m.profile_picture.key ==
-                  (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
-                          : ""_hexbytes));
+            if (i < 20)
+                CHECK(std::ranges::equal(
+                        m.profile_picture.key,
+                        "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
+            else
+                CHECK(m.profile_picture.key.empty());
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
             if (i < 5)
                 CHECK(m.profile_updated.time_since_epoch() == 1s);
@@ -371,18 +376,15 @@ TEST_CASE("Group Members", "[config][groups][members]") {
 
 TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Members gmem1{ed_pk, ed_sk, std::nullopt};
 
     auto memberId1 = "050000000000000000000000000000000000000000000000000000000000000000";
     auto memberId2 = "051111111111111111111111111111111111111111111111111111111111111111";
@@ -401,7 +403,7 @@ TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
 
     auto dumped = gmem1.dump();
 
-    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), dumped};
+    groups::Members gmem2{ed_pk, ed_sk, dumped};
 
     CHECK(gmem2.get_status(gmem1.get_or_construct(memberId1)) ==
           groups::member::Status::invite_sending);

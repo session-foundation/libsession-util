@@ -4,7 +4,7 @@
 #include <oxen/log/format.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
 #include "session/network/session_network_types.hpp"
 
 using namespace oxen;
@@ -26,6 +26,10 @@ namespace {
             case RequestCategory::standard_small: return true;
             case RequestCategory::file: return false;
             case RequestCategory::file_small: return true;
+            // Small enough to qualify for the reserved stream, and deliberately kept off it: a
+            // config push is the one swarm request that can be large, and stream 0 also carries
+            // the polls, the stores and the server's pushes back to us.
+            case RequestCategory::config: return false;
         }
         return false;  // Shouldn't happen
     }
@@ -33,16 +37,22 @@ namespace {
 
 constexpr auto ALPN = "oxenstorage"sv;
 
-QuicTransport::QuicTransport(config::QuicTransport config, std::shared_ptr<oxen::quic::Loop> loop) :
+QuicTransport::QuicTransport(config::QuicTransport config, oxen::quic::Loop& loop) :
         _config{std::move(config)}, _loop{loop} {
     log::trace(cat, "Initializing.");
     _recreate_endpoint();
 }
 
 QuicTransport::~QuicTransport() {
-    // Use 'call_get' to force this to be synchronous
-    if (_loop)
-        _loop->call_get([this] { _close_connections(); });
+    // Nothing queued here runs after this, and whatever was running has finished by the time it
+    // returns -- so no job of ours can be part-way through when the members below go.
+    _jq.stop();
+
+    // Our own queue is stopped, so this last piece of teardown goes on the loop's.
+    // _close_connections resets the endpoint, and the endpoint's deleter destroys it *on the loop*,
+    // so once this returns libquic can no longer call into the connection callbacks below -- which
+    // is what lets those callbacks hold a bare `this`.
+    _loop.call_get([this] { _close_connections(); });
     log::debug(cat, "Destroyed.");
 }
 
@@ -50,7 +60,7 @@ QuicTransport::~QuicTransport() {
 
 void QuicTransport::suspend() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         if (!_suspended)
             return;
 
@@ -62,7 +72,7 @@ void QuicTransport::suspend() {
 
 void QuicTransport::resume(bool /*automatically_reconnect*/) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _jq.call_get([this] {
         // Recreate the endpoint before updating the `_suspended` flag to avoid the chance that
         // something will try to use it before we are ready
         _recreate_endpoint();
@@ -73,13 +83,12 @@ void QuicTransport::resume(bool /*automatically_reconnect*/) {
 
 void QuicTransport::close_connections() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _close_connections(); });
+    _jq.call_get([this] { _close_connections(); });
 }
 
 void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) {
-    _loop->call([weak_self = weak_from_this(), r = std::move(reporter)] {
-        if (auto self = weak_self.lock())
-            self->_report_node_failure.emplace(std::move(r));
+    _jq.call([this, r = std::move(reporter)]() mutable {
+        _report_node_failure.emplace(std::move(r));
     });
 }
 
@@ -91,16 +100,7 @@ void QuicTransport::verify_connectivity(
         std::function<void(bool success, std::optional<uint64_t> error_code)> callback) {
     // For Quic, a successful connection IS a successful ping so we can just check for an existing
     // connection and, if one doesn't exist, try to establish one
-    _loop->call([weak_self = weak_from_this(),
-                 this,
-                 node = std::move(node),
-                 cb = std::move(callback),
-                 request_id,
-                 category]() {
-        auto self = weak_self.lock();
-        if (!self)
-            return;
-
+    _jq.call([this, node = std::move(node), cb = std::move(callback), request_id, category]() {
         const auto pubkey_hex = node.remote_pubkey.hex();
 
         // If we already have a connection we can stop here
@@ -113,46 +113,40 @@ void QuicTransport::verify_connectivity(
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
             _establish_connection(
-                    {node.remote_pubkey, node.host(), node.omq_port}, request_id, category);
+                    {node.remote_pubkey.view(), node.host(), node.omq_port},
+                    request_id,
+                    category,
+                    false);
     });
 }
 
 void QuicTransport::add_failure_listener(
         const ed25519_pubkey& pubkey, std::function<void()> listener) {
-    _loop->call([weak_self = weak_from_this(),
-                 pk_hex = pubkey.hex(),
-                 l = std::move(listener)]() mutable {
-        if (auto self = weak_self.lock())
-            self->_failure_listeners[pk_hex].push_back(std::move(l));
+    _jq.call([this, pk_hex = pubkey.hex(), l = std::move(listener)]() mutable {
+        _failure_listeners[pk_hex].push_back(std::move(l));
     });
 }
 
 void QuicTransport::remove_failure_listeners(const ed25519_pubkey& pubkey) {
-    _loop->call([weak_self = weak_from_this(), pk_hex = pubkey.hex()] {
-        if (auto self = weak_self.lock())
-            self->_failure_listeners.erase(pk_hex);
-    });
+    _jq.call([this, pk_hex = pubkey.hex()] { _failure_listeners.erase(pk_hex); });
 }
 
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
     log::trace(cat, "Dispatching request {} to loop.", request.request_id);
-    _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
-        if (auto self = weak_self.lock())
-            self->_send_request_internal(std::move(req), std::move(cb));
+    _jq.call([this, req = std::move(request), cb = std::move(callback)]() mutable {
+        _send_request_internal(std::move(req), std::move(cb));
     });
 }
 
 // MARK: Internal Logic
 
 void QuicTransport::_recreate_endpoint() {
-    // The optional must CONTAIN the option to have any effect: libquic's optional-taking
-    // handle_ep_opt overload does nothing when the optional is empty, so a default-constructed
-    // std::optional<disable_mtu_discovery>{} silently leaves discovery enabled.
     _endpoint = quic::Endpoint::endpoint(
-            *_loop,
+            _loop,
             quic::Address{},
-            (_config.disable_mtu_discovery ? std::make_optional<quic::opt::disable_mtu_discovery>()
-                                           : std::nullopt));
+            (_config.max_udp_payload
+                     ? std::make_optional<quic::opt::max_udp_payload>(*_config.max_udp_payload)
+                     : std::nullopt));
 }
 
 void QuicTransport::_close_connections() {
@@ -237,7 +231,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
                             cat,
                             "[Request {}]: Resolving service_node to RemoteAddress.",
                             request_id);
-                    remote.emplace(arg.remote_pubkey, arg.host(), arg.omq_port);
+                    remote.emplace(arg.remote_pubkey.view(), arg.host(), arg.omq_port);
                 }
             },
             request.destination);
@@ -280,15 +274,19 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
             "[Request {}] No connection to {}, initiating new connection.",
             request.request_id,
             remote_pubkey_hex);
+    // Everything the connect needs has to be read before the request is moved into the queue.
     std::string initiating_req_id = request.request_id;
+    auto category = request.category;
+    bool tunnelled = request.tunnelled;
     _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(*remote, initiating_req_id, request.category);
+    _establish_connection(*remote, initiating_req_id, category, tunnelled);
 }
 
 void QuicTransport::_establish_connection(
         const oxen::quic::RemoteAddress& address,
         const std::string& initiating_req_id,
-        const RequestCategory /*category*/) {
+        const RequestCategory /*category*/,
+        bool tunnelled) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
 
     try {
@@ -297,8 +295,8 @@ void QuicTransport::_establish_connection(
         if (!_endpoint)
             throw std::runtime_error{"Network is invalid"};
 
-        auto conn_key_pair = ed25519::ed25519_key_pair();
-        auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
+        auto [conn_pk, conn_sk] = ed25519::keypair();
+        auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_sk));
 
         // If we are starting a connection attempt then transition to the "connecting" state
         if (_status.load() == ConnectionStatus::unknown ||
@@ -315,14 +313,13 @@ void QuicTransport::_establish_connection(
                 address,
                 creds,
                 oxen::quic::opt::outbound_alpn(ALPN),
-                oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
+                oxen::quic::opt::handshake_timeout{
+                        tunnelled ? _config.tunnel_handshake_timeout : _config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
-                [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
-                        oxen::quic::Connection& conn) {
-                    auto self = weak_self.lock();
-                    if (!self)
-                        return;
-
+                // libquic hands these a live Connection, so they run inline on the loop rather than
+                // as jobs of ours.  ~QuicTransport destroys the endpoint on the loop before the
+                // members below are touched, so there is no window in which this can fire late.
+                [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
                     log::info(
                             cat,
                             "[Request {}] Successfully established connection to {}.",
@@ -332,6 +329,32 @@ void QuicTransport::_establish_connection(
                     auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
                     auto conn_id = conn.reference_id();
                     auto stream_id = stream->stream_id();
+
+                    // Anything the far end sends us of its own accord arrives here.  Registered
+                    // generically rather than per endpoint name because what those names mean is
+                    // the storage server's business, not the transport's.
+                    //
+                    // Caught rather than left to propagate: this runs inside libquic's stream
+                    // machinery, where an exception would tear down the connection for a fault in
+                    // a consumer's handler.
+                    stream->register_generic_handler(
+                            [this, address_pubkey_hex](oxen::quic::message msg) {
+                                if (!on_server_push)
+                                    return;
+                                try {
+                                    on_server_push(
+                                            ed25519_pubkey::from_hex(address_pubkey_hex),
+                                            msg.endpoint(),
+                                            msg.body<std::byte>());
+                                } catch (const std::exception& e) {
+                                    log::error(
+                                            cat,
+                                            "Handler for pushed '{}' from {} threw: {}",
+                                            msg.endpoint(),
+                                            address_pubkey_hex,
+                                            e.what());
+                                }
+                            });
                     auto it = _pending_verification_callbacks.find(address_pubkey_hex);
                     decltype(it->second) verification_callbacks;
                     if (it != _pending_verification_callbacks.end()) {
@@ -361,12 +384,26 @@ void QuicTransport::_establish_connection(
                             _send_on_connection(
                                     conn_id, address_pubkey_hex, std::move(req), std::move(cb));
                     }
+
+                    // Last, so that anything already waiting on this connection goes out ahead of
+                    // whatever the listener sends, and so that the connection is in
+                    // `_active_connection_ids` by the time it does.
+                    if (on_connection_established) {
+                        try {
+                            on_connection_established(ed25519_pubkey::from_hex(address_pubkey_hex));
+                        } catch (const std::exception& e) {
+                            log::error(
+                                    cat,
+                                    "Connection-established listener for {} threw: {}",
+                                    address_pubkey_hex,
+                                    e.what());
+                        }
+                    }
                 },
-                [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
+                [this, address_pubkey_hex, initiating_req_id](
                         oxen::quic::Connection&, uint64_t error_code) {
-                    if (auto self = weak_self.lock())
-                        self->_fail_connection(
-                                address_pubkey_hex, initiating_req_id, error_code, std::nullopt);
+                    _fail_connection(
+                            address_pubkey_hex, initiating_req_id, error_code, std::nullopt);
                 });
     } catch (const std::exception& e) {
         _fail_connection(address_pubkey_hex, initiating_req_id, std::nullopt, e.what());
@@ -486,17 +523,12 @@ void QuicTransport::_send_on_connection(
             request.endpoint,
             payload,
             timeout,
-            [weak_self = weak_from_this(),
-             this,
+            [this,
              cb = std::move(callback),
              conn_id,
              remote_pubkey_hex,
              stream_id = target_stream->stream_id(),
              req_id = request.request_id](quic::message resp) {
-                auto self = weak_self.lock();
-                if (!self)
-                    return;
-
                 log::trace(cat, "[Request {}] Received response.", req_id);
 
                 // Since the request completed it's round-trip if it isn't the "reserverd" stream
@@ -536,7 +568,7 @@ void QuicTransport::_send_on_connection(
                         final_timeout = result->second;
                     }
 
-                    log::debug(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
+                    log::warning(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
                     return cb(
                             false,
                             final_timeout,
@@ -629,8 +661,17 @@ void QuicTransport::_fail_connection(
         auto to_fail = std::move(it->second);
         _failure_listeners.erase(it);
 
-        for (const auto& listener : it->second)
+        for (const auto& listener : to_fail)
             listener();
+    }
+
+    if (on_connection_lost) {
+        try {
+            on_connection_lost(ed25519_pubkey::from_hex(address_pubkey_hex));
+        } catch (const std::exception& e) {
+            log::error(
+                    cat, "Connection-lost listener for {} threw: {}", address_pubkey_hex, e.what());
+        }
     }
 
     // If we have no longer have any active connections then we are disconnected

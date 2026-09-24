@@ -110,7 +110,7 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 ///
 /// - `data` -- the buffer of data to encrypt.
 ///
-/// - `domain` -- domain separator; uploads of funamentally different types should use a different
+/// - `domain` -- domain separator; uploads of fundamentally different types should use a different
 ///   value, so that an identical upload used for different purposes will have unrelated key/nonce
 ///   values.
 ///
@@ -125,7 +125,7 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is true).
 ///
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -150,7 +150,7 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
 ///
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is true).
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -173,7 +173,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
 ///
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
 /// MAX_REGULAR_SIZE.
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
@@ -197,7 +197,7 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
 /// MAX_REGULAR_SIZE.
 /// Throws std::runtime_error if the file size changes between first and second passes.
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
@@ -220,7 +220,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
 /// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
 /// MAX_REGULAR_SIZE (unless `allow_large` is given).  Throws on I/O error.  If decryption fails
 /// then any partially written output file will be removed.
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
@@ -264,6 +264,89 @@ size_t decrypt(
         std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
         std::span<std::byte> out);
 
+/// Sizes of the legacy attachment encryption scheme's pieces: a 32-byte AES-256 key followed by a
+/// 32-byte HMAC-SHA256 key, a 16-byte CBC IV, and a full-length (untruncated) HMAC.
+constexpr size_t LEGACY_KEY_SIZE = 64;
+constexpr size_t LEGACY_IV_SIZE = 16;
+constexpr size_t LEGACY_MAC_SIZE = 32;
+constexpr size_t LEGACY_DIGEST_SIZE = 32;
+
+/// The largest encrypted attachment the file server will store, and so the most any legacy
+/// attachment can be: unlike the stream scheme, legacy decryption has to hold the whole ciphertext
+/// at once, because the MAC and digest cover all of it and must be checked before any of it is
+/// decrypted.  Anything larger has to use the stream scheme, which decrypts incrementally.
+constexpr size_t LEGACY_MAX_ENCRYPTED_SIZE = 10223616;
+
+/// API: crypto/attachment::legacy_decrypt
+///
+/// Decrypts an attachment encrypted with the scheme Session used before the stream one: AES-256-CBC
+/// under a random key, authenticated by an HMAC over the IV and ciphertext, and again by a SHA-256
+/// digest carried separately in the AttachmentPointer.  Every Session client still sends these, so
+/// this is the path most received attachments take.
+///
+/// The layout is `IV || AES-256-CBC(PKCS#7) || HMAC-SHA256(IV || ciphertext)`, with `digest` the
+/// SHA-256 of all three.  Both are checked, in constant time, before anything is decrypted.
+///
+/// Inputs:
+/// - `encrypted` -- the downloaded file, entire.  At most LEGACY_MAX_ENCRYPTED_SIZE.
+/// - `key` -- the 64-byte key from the pointer: AES key then HMAC key.
+/// - `digest` -- the 32-byte digest from the pointer.
+/// - `unpadded_size` -- the pointer's `size`, i.e. the sender's claim about how long the file is
+///   before the zero padding that hides its true length.  Zero means the sender did not say, which
+///   only clients predating the field do, and leaves the padding in place; any other value must be
+///   no larger than what was decrypted, or the pointer is lying and this throws.
+///
+/// Outputs:
+/// - std::vector<std::byte> of decrypted, de-padded data.
+///
+/// Throws std::runtime_error if the input is too large or malformed, if either authenticator fails,
+/// or if `unpadded_size` does not describe the decrypted data.
+std::vector<std::byte> legacy_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_KEY_SIZE> key,
+        std::span<const std::byte, LEGACY_DIGEST_SIZE> digest,
+        size_t unpadded_size);
+
+/// Sizes of the legacy *display picture* scheme, which is not the legacy attachment one above:
+/// AES-256-GCM under a 32-byte key, with a 12-byte nonce and the 16-byte tag both carried in the
+/// data.
+constexpr size_t LEGACY_DISPLAY_PIC_KEY_SIZE = 32;
+constexpr size_t LEGACY_DISPLAY_PIC_NONCE_SIZE = 12;
+constexpr size_t LEGACY_DISPLAY_PIC_TAG_SIZE = 16;
+
+/// API: crypto/attachment::legacy_display_pic_decrypt
+///
+/// Decrypts a display picture — a profile or group avatar — encrypted with the scheme Session used
+/// before the stream one.
+///
+/// "Display picture" rather than "profile picture" because it is both: the other clients apply this
+/// to a group's avatar as well as a person's.  It has nothing to do with picture *attachments*,
+/// which are attachments and use the attachment scheme.
+///
+/// This is a *third* format, unrelated to `legacy_decrypt` above despite both being "the old way".
+/// Attachments used AES-256-CBC with a bolted-on HMAC, a 64-byte key and a digest carried
+/// separately; display pictures used AES-256-GCM with a 32-byte key and nothing out of band.  Same
+/// file server, same clients, same era, two schemes — Session inherited both from Signal, where
+/// attachments and profile material were unrelated subsystems, and the stream scheme is what
+/// finally unified them.
+///
+/// The layout is `nonce || AES-256-GCM(plaintext) || tag`, and nothing in it says which format it
+/// is: that is decided by what was being downloaded and by whether its url carried the `d` fragment
+/// that means stream encryption.  Which is why choosing belongs in one place — see
+/// `Client::_download_decrypted` — rather than at each call site.
+///
+/// Inputs:
+/// - `encrypted` -- the downloaded file, entire.
+/// - `key` -- the 32-byte key from the profile pic or group info.
+///
+/// Outputs:
+/// - std::vector<std::byte> of decrypted data.  No padding is involved in this scheme.
+///
+/// Throws std::runtime_error if the tag does not verify or the input is too short to hold one.
+std::vector<std::byte> legacy_display_pic_decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, LEGACY_DISPLAY_PIC_KEY_SIZE> key);
+
 /// API: crypto/attachment::Decryptor
 ///
 /// Object-based interfaced to streaming decryption.  The basic usage is to construct the object
@@ -288,7 +371,7 @@ class Decryptor {
     bool failed = false;
     bool finished = false;
     bool hit_final = false;
-    cleared_uc32 key;
+    cleared_b32 key;
     unsigned char st_data[52];  // crypto_secretstream_xchacha20poly1305_state data
 
     void process_header(std::span<const std::byte, 1 + ENCRYPT_HEADER> chunk);
@@ -315,6 +398,140 @@ class Decryptor {
     ///
     /// Throws std::logic_error if called after a successful finalize().
     [[nodiscard]] bool finalize();
+};
+
+/// API: crypto/attachment::Encryptor
+///
+/// Streaming two-phase encryptor for attachments.  Encryption is deterministic: the same seed and
+/// data always produce the same key, nonce, and ciphertext, which allows the file server to
+/// deduplicate identical uploads.
+///
+/// **Phase 1 (key derivation):** Construct the object and call `update()` with the plaintext data
+/// (in any number of pieces).  This hashes the data to derive the encryption key and nonce.
+/// Normally this is the file contents itself (so that the same file always produces the same
+/// encryption key); however, feeding different data (e.g. random bytes) is permitted for
+/// non-deterministic encryption where deduplication is not desired.  No encrypted output is
+/// produced during this phase.
+///
+/// **Phase 2 (encryption):** Call `start_encryption()` to finalize key derivation and transition to
+/// encryption mode.  Then call `next()` repeatedly to pull encrypted chunks (the encryptor reads
+/// from the data source provided to `start_encryption()`).  Each call returns a span of encrypted
+/// output valid until the next `next()` call, or an empty span when encryption is complete.
+///
+/// The `from_file()` factory handles the common case of encrypting a file: it opens the file, runs
+/// phase 1, seeks back, and returns an Encryptor ready for `next()` calls with the file as the
+/// data source.
+class Encryptor {
+    alignas(64) std::byte hash_st_data[384];  // crypto_generichash_blake2b_state
+    cleared_array<std::byte, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE> nonce_key;
+    std::byte ss_st_data[52];  // crypto_secretstream_xchacha20poly1305_state
+
+    // Phase 1 state
+    size_t hashed_size = 0;
+    bool phase1_done = false;
+    // Set by the key-taking constructor: there is no key to derive, so phase 1 is skipped entirely
+    // and start_encryption() must not finalize a hash that was never started.
+    bool key_given = false;
+
+    // Phase 2 state
+    std::function<size_t(std::span<std::byte> buffer)> source;
+    size_t encrypt_size = 0;
+    size_t encrypted_so_far = 0;
+    size_t padding = 0;
+    size_t padding_remaining = 0;
+    bool header_emitted = false;
+    bool done = false;
+
+    // Internal buffers for producing encrypted output
+    std::vector<std::byte> plaintext_buf;
+    std::array<std::byte, 1 + ENCRYPT_HEADER + ENCRYPTED_CHUNK_TOTAL> out_buf;
+    size_t out_size = 0;
+
+    // Produces the next chunk of encrypted output into out_buf.  Returns false when done.
+    bool produce_next();
+
+  public:
+    /// Returns the data size: during phase 1 this is the number of bytes fed to update_key();
+    /// after start_encryption() this is the target plaintext size for phase 2 (either the
+    /// phase 1 total, or the override if one was given to start_encryption()).
+    size_t data_size() const { return phase1_done ? encrypt_size : hashed_size; }
+
+    /// Constructs an encryptor for the given seed and domain.
+    ///
+    /// `seed` must be at least 32 bytes; typically the user's Session seed.  `domain` is the
+    /// domain separator (ATTACHMENT or PROFILE_PIC).
+    Encryptor(std::span<const std::byte> seed, Domain domain);
+
+    /// Constructs an encryptor that uses a key we choose rather than one derived from the content,
+    /// for encrypting something to our own disk rather than to a file server.
+    ///
+    /// Phase 1 does not apply and update_key() must not be called: there is nothing to derive.  Go
+    /// straight to start_encryption(), which then *requires* its `encrypt_size` argument, since
+    /// without phase 1 nothing else knows how much is coming.
+    ///
+    /// The nonce is random per encryption rather than derived.  That is not a detail: the same key
+    /// is used for every file, so a derived-from-content nonce would repeat the keystream for
+    /// anything encrypted twice, and a fixed one would repeat it for everything.  The consequence
+    /// is that this is *not* deterministic — encrypting the same bytes twice gives different output
+    /// — which is the opposite of what the seed-based constructor is for, and is right here: file
+    /// server deduplication is exactly what a local cache does not want.
+    ///
+    /// Output is the same `'S'`-prefixed chunked format, so `decrypt(data, key)` reads it back
+    /// unchanged, padding included.  Padding is kept rather than skipped: it hides a plaintext's
+    /// exact size from whoever holds the ciphertext, and a local disk is held by backups, disk
+    /// images and whoever ends up with the machine.  An exact size identifies a file — against a
+    /// known image, or against an upload someone watched go out — so the reason for padding it on
+    /// the way to a file server applies here too.
+    explicit Encryptor(std::span<const std::byte, ENCRYPT_KEY_SIZE> key);
+
+    /// Phase 1: feed plaintext data into key derivation (hashing).
+    /// The data is hashed to derive the encryption key; normally this should be the actual file
+    /// contents that will be encrypted in phase 2.
+    void update_key(std::span<const std::byte> data);
+
+    /// Transition from phase 1 to phase 2.  Finalizes the key derivation and prepares for
+    /// encryption.
+    ///
+    /// `allow_large` permits data larger than MAX_REGULAR_SIZE.
+    ///
+    /// `encrypt_size` overrides the expected plaintext size for phase 2.  If omitted, the size
+    /// from phase 1 (sum of update() calls) is used.
+    ///
+    /// `source` is a pull-based data source for phase 2: it is called with a buffer to fill and
+    /// must fill it completely; returning fewer bytes than requested signals the end of data.
+    /// Phase 2 is then driven by next() calls which pull from this source.
+    ///
+    /// Returns the decryption key (in a cleared buffer).
+    cleared_b32 start_encryption(
+            std::function<size_t(std::span<std::byte> buffer)> source,
+            bool allow_large = false,
+            std::optional<size_t> encrypt_size = std::nullopt);
+
+    /// Pull the next chunk of encrypted output.  Returns a non-owning span that is valid until
+    /// the next call to next().  Returns an empty span when all data has been encrypted.
+    std::span<const std::byte> next();
+
+    /// Runs both phases from a file: hashes the file contents (phase 1), then sets up
+    /// streaming encryption with the file as the data source (phase 2).  After this call,
+    /// next() returns encrypted chunks.  The file is held open internally for phase 2 reads.
+    ///
+    /// Must be called on a freshly constructed Encryptor (i.e. before any update_key() calls).
+    ///
+    /// If `progress` is provided, it is called periodically during phase 1 with (bytes_read,
+    /// total_size).  If the callback throws, the operation is aborted and the exception
+    /// propagates to the caller.
+    cleared_b32 load_key_from_file(
+            const std::filesystem::path& file,
+            bool allow_large = false,
+            std::function<void(int64_t bytes_read, int64_t total_size)> progress = nullptr);
+
+    /// Factory: constructs an Encryptor, runs load_from_file, and returns the ready Encryptor
+    /// along with the decryption key.
+    static std::pair<Encryptor, cleared_b32> from_file(
+            std::span<const std::byte> seed,
+            Domain domain,
+            const std::filesystem::path& file,
+            bool allow_large = false);
 };
 
 /// API: crypto/attachment::decrypt

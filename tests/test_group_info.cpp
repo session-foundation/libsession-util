@@ -1,11 +1,11 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <session/config/groups/info.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 #include <string_view>
 
@@ -14,39 +14,40 @@
 using namespace std::literals;
 using namespace oxenc::literals;
 using namespace session::config;
+using namespace session;
 
 TEST_CASE("Group Info settings", "[config][groups][info]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<std::vector<unsigned char>> enc_keys{
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes};
+    std::vector<std::vector<std::byte>> enc_keys;
+    enc_keys.push_back(
+            to_vector("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b));
 
-    groups::Info ginfo1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Info ginfo1{ed_pk, ed_sk, std::nullopt};
 
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
     for (const auto& k : enc_keys)
-        ginfo1.add_key(k, false);
+        ginfo1.add_key(std::span{k}.first<32>(), false);
 
     enc_keys.insert(
             enc_keys.begin(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
-    enc_keys.push_back("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes);
-    enc_keys.push_back("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hexbytes);
-    groups::Info ginfo2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+            to_vector("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
+    enc_keys.push_back(
+            to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
+    enc_keys.push_back(
+            to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
+    groups::Info ginfo2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
-        ginfo2.add_key(k, false);
+        ginfo2.add_key(std::span{k}.first<32>(), false);
 
     ginfo1.set_name("GROUP Name");
     CHECK(ginfo1.is_dirty());
@@ -64,7 +65,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo1.needs_dump());
     CHECK_FALSE(ginfo1.needs_push());
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash1", p1[0]);
     CHECK(ginfo2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(ginfo2.needs_push());
@@ -73,7 +74,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
 
     ginfo2.set_profile_pic(
             "http://example.com/12345",
-            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b);
     ginfo2.set_expiry_timer(1h);
     constexpr int64_t create_time{1682529839};
     ginfo2.set_created(create_time);
@@ -96,9 +97,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     // This fails because ginfo1 doesn't yet have the new key that ginfo2 used (bbb...)
     CHECK(ginfo1.merge(merge_configs) == std::unordered_set<std::string>{});
 
-    ginfo1.add_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
+    ginfo1.add_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b);
     ginfo1.add_key(
-            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes,
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b,
             /*prepend=*/false);
 
     CHECK(ginfo1.merge(merge_configs) == std::unordered_set{{"fakehash2"s}});
@@ -108,8 +109,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
 
     CHECK(ginfo1.get_name() == "Better name!");
     CHECK(ginfo1.get_profile_pic().url == "http://example.com/12345");
-    CHECK(ginfo1.get_profile_pic().key ==
-          "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
+    CHECK(std::ranges::equal(
+            ginfo1.get_profile_pic().key,
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
     CHECK(ginfo1.get_expiry_timer() == 1h);
     CHECK(ginfo1.get_created() == create_time);
     CHECK(ginfo1.get_delete_before() == create_time + 50 * 86400);
@@ -123,8 +125,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo2.merge(merge_configs) == std::unordered_set{{"fakehash3"s}});
     CHECK(ginfo2.get_name() == "Better name!");
     CHECK(ginfo2.get_profile_pic().url == "http://example.com/12345");
-    CHECK(ginfo2.get_profile_pic().key ==
-          "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
+    CHECK(std::ranges::equal(
+            ginfo2.get_profile_pic().key,
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
     CHECK(ginfo2.get_expiry_timer() == 1h);
     CHECK(ginfo2.get_created() == create_time);
     CHECK(ginfo2.get_delete_before() == create_time + 50 * 86400);
@@ -144,31 +147,28 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
 
 TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<std::vector<unsigned char>> enc_keys1;
+    std::vector<std::vector<std::byte>> enc_keys1;
     enc_keys1.push_back(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes);
-    std::vector<std::vector<unsigned char>> enc_keys2;
+            to_vector("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b));
+    std::vector<std::vector<std::byte>> enc_keys2;
     enc_keys2.push_back(
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
+            to_vector("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
     enc_keys2.push_back(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes);
+            to_vector("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b));
 
     // This Info object has only the public key, not the priv key, and so cannot modify things:
-    groups::Info ginfo{session::to_span(ed_pk), std::nullopt, std::nullopt};
+    groups::Info ginfo{ed_pk, std::nullopt, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo.add_key(k, false);
+        ginfo.add_key(std::span{k}.first<32>(), false);
 
     REQUIRE_THROWS_WITH(
             ginfo.set_name("Super Group!"), "Unable to make changes to a read-only config object");
@@ -177,10 +177,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(!ginfo.is_dirty());
 
     // This one is good and has the right signature:
-    groups::Info ginfo_rw{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Info ginfo_rw{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_rw.add_key(k, false);
+        ginfo_rw.add_key(std::span{k}.first<32>(), false);
 
     ginfo_rw.set_name("Super Group!!");
     CHECK(ginfo_rw.is_dirty());
@@ -195,15 +195,15 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(ginfo_rw.needs_dump());
     CHECK_FALSE(ginfo_rw.needs_push());
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> merge_configs;
     merge_configs.emplace_back("fakehash1", to_push.at(0));
     CHECK(ginfo.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(ginfo.needs_push());
 
-    groups::Info ginfo_rw2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Info ginfo_rw2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_rw2.add_key(k, false);
+        ginfo_rw2.add_key(std::span{k}.first<32>(), false);
 
     CHECK(ginfo_rw2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(ginfo.needs_push());
@@ -218,22 +218,16 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     // Deliberately use the wrong signing key so that what we produce encrypts successfully but
     // doesn't verify
-    const auto seed_bad1 =
-            "0023456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    std::array<unsigned char, 32> ed_pk_bad1;
-    std::array<unsigned char, 64> ed_sk_bad1;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk_bad1.data(),
-            ed_sk_bad1.data(),
-            reinterpret_cast<const unsigned char*>(seed_bad1.data()));
+    const auto seed_bad1 = "0023456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    auto [ed_pk_bad1, ed_sk_bad1] = ed25519::keypair(seed_bad1);
 
-    groups::Info ginfo_bad1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Info ginfo_bad1{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_bad1.add_key(k, false);
+        ginfo_bad1.add_key(std::span{k}.first<32>(), false);
 
     ginfo_bad1.merge(merge_configs);
-    ginfo_bad1.set_sig_keys(session::to_span(ed_sk_bad1));
+    ginfo_bad1.set_sig_keys(ed_sk_bad1);
     ginfo_bad1.set_name("Bad name, BAD!");
     auto [s_bad, p_bad, o_bad] = ginfo_bad1.push();
 
@@ -310,10 +304,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     CHECK(ginfo.needs_dump());
     auto dump = ginfo.dump();
-    groups::Info ginfo2{session::to_span(ed_pk), std::nullopt, dump};
+    groups::Info ginfo2{ed_pk, std::nullopt, dump};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo2.add_key(k, false);
+        ginfo2.add_key(std::span{k}.first<32>(), false);
 
     CHECK(!ginfo.needs_dump());
     CHECK(!ginfo2.needs_dump());
@@ -328,10 +322,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(o5.empty());
 
     // This account has a different primary decryption key
-    groups::Info ginfo_rw3{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
+    groups::Info ginfo_rw3{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys2)  // Just for testing, as above.
-        ginfo_rw3.add_key(k, false);
+        ginfo_rw3.add_key(std::span{k}.first<32>(), false);
 
     CHECK(ginfo_rw3.merge(merge_configs) == std::unordered_set{{"fakehash23"s}});
     CHECK(ginfo_rw3.get_name() == "Super Group 2");
@@ -348,7 +342,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     ginfo_rw3.set_profile_pic(
             "http://example.com/12345",
-            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b);
     CHECK(ginfo_rw3.needs_push());
     auto [s7, t7, o7] = ginfo_rw3.push();
     CHECK(s7 == s6 + 1);
@@ -360,11 +354,12 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     // If we don't have the new "bbb" key loaded yet, this will fail:
     CHECK(ginfo.merge(merge_configs) == std::unordered_set<std::string>{});
 
-    ginfo.add_key(enc_keys2.front());
+    ginfo.add_key(std::span{enc_keys2.front()}.first<32>());
     CHECK(ginfo.merge(merge_configs) == std::unordered_set{{"fakehash7"s}});
 
     auto pic = ginfo.get_profile_pic();
     CHECK_FALSE(pic.empty());
     CHECK(pic.url == "http://example.com/12345");
-    CHECK(pic.key == "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
+    CHECK(std::ranges::equal(
+            pic.key, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
 }

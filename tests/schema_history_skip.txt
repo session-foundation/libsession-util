@@ -1,0 +1,33 @@
+# Revisions to skip in schema_history_check.sh, one short hash per line with a reason.
+#
+# For commits whose full_schema.sql was broken or mid-rework and was never released, so no database
+# can have been created from it.  A file rather than a flag so that removing an entry is a
+# reviewable change rather than a silent one.
+#
+# Format:  <short-hash>  <reason>
+
+# The attachment-availability branch: every commit of it except the last, which is the only state
+# of it anything can start from.
+#
+# It grew its schema over four migrations while it was being built and collapsed them into one
+# (client 005_attachment_availability) before merging, so a database made partway through has some
+# of those four recorded and cannot take the replacement.  None exists outside the branch, which is
+# the whole reason they were collapsed -- one migration per merged change, not one per commit.
+#
+# Listed in full rather than only the commits that touched full_schema.sql.  The walk skips before
+# it deduplicates, so omitting one merely promotes it to stand for the schema of the commit before
+# it; and "no intermediate state of this work is a starting point" is the rule worth writing down,
+# whichever commits happened to carry the schema.
+e7a17b9e  attachment-availability, mid-branch
+0d555328  attachment-availability, mid-branch
+6fde73a5  attachment-availability, mid-branch
+a5a04a44  attachment-availability, mid-branch
+32e59159  attachment-availability, mid-branch
+acd0d4c0  attachment-availability, mid-branch
+2ea60e86  attachment-availability, mid-branch
+50526798  attachment-availability, mid-branch
+6013a715  attachment-availability, mid-branch
+9f3d393a  attachment-availability, mid-branch
+9f6cd961  attachment-availability, mid-branch
+4a062b4d  attachment-availability, mid-branch
+fdccb881  attachment-availability, mid-branch

@@ -3,12 +3,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <session/util.hpp>
 
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
+#include "session/pro_backend.hpp"
 
 TEST_CASE("Ed25519 key pair generation", "[ed25519][keypair]") {
     // Generate two random key pairs and make sure they don't match
-    auto [pk1, sk1] = session::ed25519::ed25519_key_pair();
-    auto [pk2, sk2] = session::ed25519::ed25519_key_pair();
+    auto [pk1, sk1] = session::ed25519::keypair();
+    auto [pk2, sk2] = session::ed25519::keypair();
 
     CHECK(pk1.size() == 32);
     CHECK(sk1.size() == 64);
@@ -20,14 +21,12 @@ TEST_CASE("Ed25519 key pair generation seed", "[ed25519][keypair]") {
     using namespace session;
 
     constexpr auto ed_seed1 =
-            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_u;
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
     constexpr auto ed_seed2 =
-            "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_u;
-    constexpr auto ed_seed_invalid = "010203040506070809"_hex_u;
+            "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
 
-    auto [pk1, sk1] = session::ed25519::ed25519_key_pair(ed_seed1);
-    auto [pk2, sk2] = session::ed25519::ed25519_key_pair(ed_seed2);
-    CHECK_THROWS(session::ed25519::ed25519_key_pair(ed_seed_invalid));
+    auto [pk1, sk1] = session::ed25519::keypair(ed_seed1);
+    auto [pk2, sk2] = session::ed25519::keypair(ed_seed2);
 
     CHECK(pk1.size() == 32);
     CHECK(sk1.size() == 64);
@@ -50,15 +49,13 @@ TEST_CASE("Ed25519 seed for private key", "[ed25519][seed]") {
     using namespace session;
 
     constexpr auto ed_sk1 =
-            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab78862834829a"
-            "87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_u;
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"
+            "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_b;
     constexpr auto ed_sk2 =
-            "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_u;
-    constexpr auto ed_sk_invalid = "010203040506070809"_hex_u;
+            "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_b;
 
-    auto seed1 = session::ed25519::seed_for_ed_privkey(ed_sk1);
-    auto seed2 = session::ed25519::seed_for_ed_privkey(ed_sk2);
-    CHECK_THROWS(session::ed25519::seed_for_ed_privkey(ed_sk_invalid));
+    auto seed1 = session::ed25519::extract_seed(ed_sk1);
+    auto seed2 = session::ed25519::extract_seed(ed_sk2);
 
     CHECK(oxenc::to_hex(seed1) ==
           "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -95,13 +92,13 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
     //
     // clang-format on
 
-    constexpr auto seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hex_u;
-    constexpr auto seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hex_u;
-    constexpr auto seed_invalid = "010203040506070809"_hex_u;
+    constexpr auto seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hex_b;
+    constexpr auto seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hex_b;
 
-    auto sk1 = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed1);
-    auto sk2 = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed2);
-    CHECK_THROWS(session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed_invalid));
+    auto [pk1, sk1] =
+            session::ed25519::derive_subkey(seed1, session::pro_backend::pro_subkey_domain);
+    auto [pk2, sk2] =
+            session::ed25519::derive_subkey(seed2, session::pro_backend::pro_subkey_domain);
 
     CHECK(sk1.size() == 64);
     CHECK(sk1 != sk2);
@@ -121,12 +118,12 @@ TEST_CASE("Ed25519", "[ed25519][signature]") {
     using namespace session;
 
     constexpr auto ed_seed =
-            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_u;
-    constexpr auto ed_pk = "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_u;
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    constexpr auto ed_pk = "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_b;
     constexpr auto ed_invalid = "010203040506070809"_hex_u;
 
     auto sig1 = session::ed25519::sign(ed_seed, to_span("hello"));
-    CHECK_THROWS(session::ed25519::sign(ed_invalid, to_span("hello")));
+    CHECK_THROWS(session::ed25519::sign({ed_invalid.data(), ed_invalid.size()}, to_span("hello")));
 
     auto expected_sig_hex =
             "e03b6e87a53d83f202f2501e9b52193dbe4a64c6503f88244948dee53271"
@@ -134,6 +131,32 @@ TEST_CASE("Ed25519", "[ed25519][signature]") {
     CHECK(oxenc::to_hex(sig1) == expected_sig_hex);
 
     CHECK(session::ed25519::verify(sig1, ed_pk, to_span("hello")));
-    CHECK_THROWS(session::ed25519::verify(ed_invalid, ed_pk, to_span("hello")));
-    CHECK_THROWS(session::ed25519::verify(ed_pk, ed_invalid, to_span("hello")));
+}
+
+TEST_CASE("Ed25519 pubkey validity", "[ed25519][pubkey]") {
+    using namespace session;
+
+    auto valid = [](std::string_view hex) {
+        auto bytes = oxenc::from_hex(hex);
+        REQUIRE(bytes.size() == 32);
+        return ed25519::is_valid_pubkey(to_span<const std::byte>(bytes).first<32>());
+    };
+
+    // A real key, and the pubkey of a known seed
+    CHECK(valid("8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"));
+    CHECK(valid(oxenc::to_hex(ed25519::keypair().first)));
+
+    // Not a point on the curve.  Most 32-byte values are not: only about 6% are points on the
+    // main subgroup, which is what makes this check worth doing on anything received.
+    CHECK_FALSE(valid("0123456789abcdef0123456789abcdef00000000000000000000000000000000"));
+
+    // On the curve but of small order, so not a usable key: the identity and one of order 8
+    CHECK_FALSE(valid("0000000000000000000000000000000000000000000000000000000000000000"));
+    CHECK_FALSE(valid("0100000000000000000000000000000000000000000000000000000000000000"));
+    CHECK_FALSE(valid("26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"));
+
+    // An X25519 pubkey is not an Ed25519 one, which is the mistake this guards against: these two
+    // are the same key in its two forms, and only the Ed form is a point here.
+    CHECK(valid("929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602"));
+    CHECK_FALSE(valid("16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d"));
 }

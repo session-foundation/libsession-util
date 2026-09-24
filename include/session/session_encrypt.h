@@ -239,7 +239,7 @@ typedef struct session_decrypt_group_message_result {
     size_t index;         // Index of the key that successfully decrypted the message
     char session_id[66];  // In hex
     span_u8 plaintext;    // Decrypted message on success. Must be freed by calling the CRT's `free`
-    char error_len_incl_null_terminator;
+    size_t error_len_incl_null_terminator;
 } session_decrypt_group_message_result;
 
 /// API: crypto/session_decrypt_group_message
@@ -343,7 +343,7 @@ LIBSESSION_EXPORT bool session_decrypt_push_notification(
 /// Inputs:
 /// - `plaintext_in` -- [in] the data to encrypt.
 /// - `plaintext_len` -- [in] the length of `plaintext_in`.
-/// - `enc_key_in` -- [in] the key to use for encryption (32 bytes).
+/// - `key_in` -- [in] the 32-byte symmetric key.
 /// - `ciphertext_out` -- [out] Pointer-pointer to an output buffer; a new buffer is allocated, the
 ///   encrypted data written to it, and then the pointer to that buffer is stored here.
 ///   This buffer must be `free()`d by the caller when done with it *unless* the function returns
@@ -356,7 +356,7 @@ LIBSESSION_EXPORT bool session_decrypt_push_notification(
 LIBSESSION_EXPORT bool session_encrypt_xchacha20(
         const unsigned char* plaintext_in,
         size_t plaintext_len,
-        const unsigned char* enc_key_in, /* 32 bytes */
+        const unsigned char* key_in, /* 32 bytes */
         unsigned char** ciphertext_out,
         size_t* ciphertext_len);
 
@@ -367,7 +367,7 @@ LIBSESSION_EXPORT bool session_encrypt_xchacha20(
 /// Inputs:
 /// - `ciphertext_in` -- [in] the data to decrypt.
 /// - `ciphertext_len` -- [in] the length of `ciphertext_in`.
-/// - `enc_key_in` -- [in] the key to use for decryption (32 bytes).
+/// - `key_in` -- [in] the 32-byte symmetric key.
 /// - `plaintext_out` -- [out] Pointer-pointer to an output buffer; a new buffer is allocated, the
 ///   decrypted data written to it, and then the pointer to that buffer is stored here.
 ///   This buffer must be `free()`d by the caller when done with it *unless* the function returns
@@ -380,7 +380,7 @@ LIBSESSION_EXPORT bool session_encrypt_xchacha20(
 LIBSESSION_EXPORT bool session_decrypt_xchacha20(
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
-        const unsigned char* enc_key_in, /* 32 bytes */
+        const unsigned char* key_in, /* 32 bytes */
         unsigned char** plaintext_out,
         size_t* plaintext_len);
 

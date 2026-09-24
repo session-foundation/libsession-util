@@ -7,6 +7,6 @@
 int main() {
     if (std::mt19937_64{}() == 123) {
         auto& k = *reinterpret_cast<session::config::groups::Keys*>(12345);
-        k.encrypt_message(std::span<const unsigned char>{});
+        k.encrypt_message(std::span<const std::byte>{});
     }
 }

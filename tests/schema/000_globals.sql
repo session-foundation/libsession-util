@@ -1,0 +1,3 @@
+CREATE TABLE ext_globals (
+    id INTEGER PRIMARY KEY NOT NULL
+) STRICT;

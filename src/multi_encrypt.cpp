@@ -2,120 +2,77 @@
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <session/multi_encrypt.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_generichash_blake2b.h>
-#include <sodium/crypto_scalarmult_curve25519.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/randombytes.h>
 
+#include <session/crypto/x25519.hpp>
+#include <session/encrypt.hpp>
 #include <session/multi_encrypt.hpp>
+#include <session/random.hpp>
 #include <stdexcept>
+
+#include "session/hash.hpp"
+#include "session/util.hpp"
 
 namespace session {
 
-const size_t encrypt_multiple_message_overhead = crypto_aead_xchacha20poly1305_ietf_ABYTES;
+const size_t encrypt_multiple_message_overhead = encryption::XCHACHA20_ABYTES;
 
 namespace detail {
 
     void encrypt_multi_key(
-            std::array<unsigned char, 32>& key,
-            const unsigned char* a,
-            const unsigned char* A,
-            const unsigned char* B,
+            std::span<std::byte, 32> key,
+            std::span<const std::byte, 32> a,
+            std::span<const std::byte, 32> A,
+            std::span<const std::byte, 32> B,
             bool encrypting,
             std::string_view domain) {
 
-        std::array<unsigned char, 32> buf;
-        if (0 != crypto_scalarmult_curve25519(buf.data(), a, B))
-            throw std::invalid_argument{"Unable to compute shared encrypted key: invalid pubkey?"};
-
-        static_assert(crypto_aead_xchacha20poly1305_ietf_KEYBYTES == 32);
-
-        crypto_generichash_blake2b_state st;
-        crypto_generichash_blake2b_init(
-                &st,
-                reinterpret_cast<const unsigned char*>(domain.data()),
-                std::min<size_t>(domain.size(), crypto_generichash_blake2b_KEYBYTES_MAX),
-                32);
-
-        crypto_generichash_blake2b_update(&st, buf.data(), buf.size());
+        auto buf = x25519::scalarmult(a, B);
 
         // If we're encrypting then a/A == sender, B = recipient
         // If we're decrypting then a/A = recipient, B = sender
         // We always need the same sR || S || R or rS || S || R, so if we're decrypting we need to
         // put B before A in the hash;
-        const auto* S = encrypting ? A : B;
-        const auto* R = encrypting ? B : A;
-        crypto_generichash_blake2b_update(&st, S, 32);
-        crypto_generichash_blake2b_update(&st, R, 32);
-        crypto_generichash_blake2b_final(&st, key.data(), 32);
+        const auto& S = encrypting ? A : B;
+        const auto& R = encrypting ? B : A;
+        hash::blake2b_key(key, domain, buf, S, R);
     }
 
     void encrypt_multi_impl(
-            std::vector<unsigned char>& out,
-            std::span<const unsigned char> msg,
-            const unsigned char* key,
-            const unsigned char* nonce) {
+            std::vector<std::byte>& out,
+            std::span<const std::byte> msg,
+            std::span<const std::byte, 32> key,
+            std::span<const std::byte, 24> nonce) {
 
-        //        auto key = encrypt_multi_key(a, A, B, true, domain);
-
-        out.resize(msg.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
-        if (0 !=
-            crypto_aead_xchacha20poly1305_ietf_encrypt(
-                    out.data(), nullptr, msg.data(), msg.size(), nullptr, 0, nullptr, nonce, key))
-            throw std::runtime_error{"XChaCha20 encryption failed!"};
+        out.resize(msg.size() + encryption::XCHACHA20_ABYTES);
+        encryption::xchacha20poly1305_encrypt(out, msg, nonce, key);
     }
 
     bool decrypt_multi_impl(
-            std::vector<unsigned char>& out,
-            std::span<const unsigned char> ciphertext,
-            const unsigned char* key,
-            const unsigned char* nonce) {
+            std::vector<std::byte>& out,
+            std::span<const std::byte> ciphertext,
+            std::span<const std::byte, 32> key,
+            std::span<const std::byte, 24> nonce) {
 
-        if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        if (ciphertext.size() < encryption::XCHACHA20_ABYTES)
             return false;
 
-        out.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
-        return 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                            out.data(),
-                            nullptr,
-                            nullptr,
-                            ciphertext.data(),
-                            ciphertext.size(),
-                            nullptr,
-                            0,
-                            nonce,
-                            key);
-    }
-
-    std::pair<sodium_cleared<std::array<unsigned char, 32>>, std::array<unsigned char, 32>> x_keys(
-            std::span<const unsigned char> ed25519_secret_key) {
-        if (ed25519_secret_key.size() != 64)
-            throw std::invalid_argument{"Ed25519 secret key is not the expected 64 bytes"};
-
-        std::pair<sodium_cleared<std::array<unsigned char, 32>>, std::array<unsigned char, 32>> ret;
-        auto& [x_priv, x_pub] = ret;
-
-        crypto_sign_ed25519_sk_to_curve25519(x_priv.data(), ed25519_secret_key.data());
-        if (0 != crypto_sign_ed25519_pk_to_curve25519(x_pub.data(), ed25519_secret_key.data() + 32))
-            throw std::runtime_error{"Failed to convert Ed25519 key to X25519: invalid secret key"};
-
-        return ret;
+        out.resize(ciphertext.size() - encryption::XCHACHA20_ABYTES);
+        return encryption::xchacha20poly1305_decrypt(out, ciphertext, nonce, key);
     }
 
 }  // namespace detail
 
-std::optional<std::vector<unsigned char>> decrypt_for_multiple(
-        const std::vector<std::span<const unsigned char>>& ciphertexts,
-        std::span<const unsigned char> nonce,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
-        std::span<const unsigned char> sender_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple(
+        const std::vector<std::span<const std::byte>>& ciphertexts,
+        std::span<const std::byte> nonce,
+        std::span<const std::byte> privkey,
+        std::span<const std::byte> pubkey,
+        std::span<const std::byte> sender_pubkey,
         std::string_view domain) {
 
     auto it = ciphertexts.begin();
     return decrypt_for_multiple(
-            [&]() -> std::optional<std::span<const unsigned char>> {
+            [&]() -> std::optional<std::span<const std::byte>> {
                 if (it == ciphertexts.end())
                     return std::nullopt;
                 return *it++;
@@ -127,21 +84,21 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple(
             domain);
 }
 
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        const std::vector<std::span<const unsigned char>>& messages,
-        const std::vector<std::span<const unsigned char>>& recipients,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
+std::vector<std::byte> encrypt_for_multiple_simple(
+        const std::vector<std::span<const std::byte>>& messages,
+        const std::vector<std::span<const std::byte>>& recipients,
+        std::span<const std::byte, 32> privkey,
+        std::span<const std::byte, 32> pubkey,
         std::string_view domain,
-        std::optional<std::span<const unsigned char>> nonce,
+        std::optional<std::span<const std::byte, 24>> nonce,
         int pad) {
 
     oxenc::bt_dict_producer d;
 
-    std::array<unsigned char, 24> random_nonce;
+    std::array<std::byte, 24> random_nonce;
     if (!nonce) {
-        randombytes_buf(random_nonce.data(), random_nonce.size());
-        nonce.emplace(random_nonce.data(), random_nonce.size());
+        random::fill(random_nonce);
+        nonce.emplace(random_nonce);
     } else if (nonce->size() != 24) {
         throw std::invalid_argument{"Invalid nonce: nonce must be 24 bytes"};
     }
@@ -158,16 +115,16 @@ std::vector<unsigned char> encrypt_for_multiple_simple(
                 privkey,
                 pubkey,
                 domain,
-                [&](std::span<const unsigned char> encrypted) {
+                [&](std::span<const std::byte> encrypted) {
                     enc_list.append(encrypted);
                     msg_count++;
                 });
 
         if (pad > 1 && !messages.empty()) {
             const auto pad_size = messages.front().size() + encrypt_multiple_message_overhead;
-            std::vector<unsigned char> junk(pad_size);
+            std::vector<std::byte> junk(pad_size);
             for (; msg_count % pad != 0; msg_count++) {
-                randombytes_buf(junk.data(), junk.size());
+                random::fill(junk);
                 enc_list.append(to_string(junk));
             }
         }
@@ -176,38 +133,38 @@ std::vector<unsigned char> encrypt_for_multiple_simple(
     return to_vector(d.span<unsigned char>());
 }
 
-std::vector<unsigned char> encrypt_for_multiple_simple(
-        const std::vector<std::span<const unsigned char>>& messages,
-        const std::vector<std::span<const unsigned char>>& recipients,
-        std::span<const unsigned char> ed25519_secret_key,
+std::vector<std::byte> encrypt_for_multiple_simple(
+        const std::vector<std::span<const std::byte>>& messages,
+        const std::vector<std::span<const std::byte>>& recipients,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
         std::string_view domain,
-        std::span<const unsigned char> nonce,
+        std::optional<std::span<const std::byte, 24>> nonce,
         int pad) {
 
-    auto [x_privkey, x_pubkey] = detail::x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = ed25519::x25519_keypair(ed25519_secret_key);
 
     return encrypt_for_multiple_simple(
-            messages, recipients, to_span(x_privkey), to_span(x_pubkey), domain, nonce, pad);
+            messages, recipients, x_privkey, x_pubkey, domain, nonce, pad);
 }
 
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> privkey,
-        std::span<const unsigned char> pubkey,
-        std::span<const unsigned char> sender_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple(
+        std::span<const std::byte> encoded,
+        std::span<const std::byte, 32> privkey,
+        std::span<const std::byte, 32> pubkey,
+        std::span<const std::byte, 32> sender_pubkey,
         std::string_view domain) {
     try {
         oxenc::bt_dict_consumer d{encoded};
-        auto nonce = d.require<std::span<const unsigned char>>("#");
+        auto nonce = d.require<std::span<const std::byte>>("#");
         if (nonce.size() != 24)
             return std::nullopt;
         auto enc_list = d.require<oxenc::bt_list_consumer>("e");
 
         return decrypt_for_multiple(
-                [&]() -> std::optional<std::span<const unsigned char>> {
+                [&]() -> std::optional<std::span<const std::byte>> {
                     if (enc_list.is_finished())
                         return std::nullopt;
-                    return enc_list.consume<std::span<const unsigned char>>();
+                    return enc_list.consume<std::span<const std::byte>>();
                 },
                 nonce,
                 privkey,
@@ -219,38 +176,33 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
     }
 }
 
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> ed25519_secret_key,
-        std::span<const unsigned char> sender_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple(
+        std::span<const std::byte> encoded,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
+        std::span<const std::byte, 32> sender_pubkey,
         std::string_view domain) {
 
-    auto [x_privkey, x_pubkey] = detail::x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = ed25519::x25519_keypair(ed25519_secret_key);
 
-    return decrypt_for_multiple_simple(
-            encoded, to_span(x_privkey), to_span(x_pubkey), sender_pubkey, domain);
+    return decrypt_for_multiple_simple(encoded, x_privkey, x_pubkey, sender_pubkey, domain);
 }
 
-std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple_ed25519(
-        std::span<const unsigned char> encoded,
-        std::span<const unsigned char> ed25519_secret_key,
-        std::span<const unsigned char> sender_ed25519_pubkey,
+std::optional<std::vector<std::byte>> decrypt_for_multiple_simple_ed25519(
+        std::span<const std::byte> encoded,
+        const ed25519::PrivKeySpan& ed25519_secret_key,
+        std::span<const std::byte, 32> sender_ed25519_pubkey,
         std::string_view domain) {
 
-    std::array<unsigned char, 32> sender_pub;
-    if (sender_ed25519_pubkey.size() != 32)
-        throw std::invalid_argument{"Invalid sender Ed25519 pubkey: expected 32 bytes"};
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(sender_pub.data(), sender_ed25519_pubkey.data()))
-        throw std::runtime_error{"Failed to convert Ed25519 key to X25519: invalid secret key"};
+    auto sender_pub = ed25519::pk_to_x25519(sender_ed25519_pubkey);
 
-    return decrypt_for_multiple_simple(encoded, ed25519_secret_key, to_span(sender_pub), domain);
+    return decrypt_for_multiple_simple(encoded, ed25519_secret_key, sender_pub, domain);
 }
 
 }  // namespace session
 
 using namespace session;
 
-static unsigned char* to_c_buffer(std::span<const unsigned char> x, size_t* out_len) {
+static unsigned char* to_c_buffer(std::span<const std::byte> x, size_t* out_len) {
     auto* ret = static_cast<unsigned char*>(malloc(x.size()));
     *out_len = x.size();
     std::memcpy(ret, x.data(), x.size());
@@ -270,23 +222,23 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple(
         const unsigned char* nonce,
         int pad) {
 
-    std::vector<std::span<const unsigned char>> msgs, recips;
+    std::vector<std::span<const std::byte>> msgs, recips;
     msgs.reserve(n_messages);
     recips.reserve(n_recipients);
     for (size_t i = 0; i < n_messages; i++)
-        msgs.emplace_back(messages[i], message_lengths[i]);
+        msgs.emplace_back(to_byte_span(messages[i], message_lengths[i]));
     for (size_t i = 0; i < n_recipients; i++)
-        recips.emplace_back(recipients[i], 32);
-    std::optional<std::span<const unsigned char>> maybe_nonce;
+        recips.emplace_back(to_byte_span<32>(recipients[i]));
+    std::optional<std::span<const std::byte, 24>> maybe_nonce;
     if (nonce)
-        maybe_nonce.emplace(nonce, 24);
+        maybe_nonce.emplace(to_byte_span<24>(nonce));
 
     try {
         auto encoded = session::encrypt_for_multiple_simple(
                 msgs,
                 recips,
-                std::span<const unsigned char>{x25519_privkey, 32},
-                std::span<const unsigned char>{x25519_pubkey, 32},
+                to_byte_span<32>(x25519_privkey),
+                to_byte_span<32>(x25519_pubkey),
                 domain,
                 std::move(maybe_nonce),
                 pad);
@@ -309,8 +261,7 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
         int pad) {
 
     try {
-        auto [priv, pub] =
-                session::detail::x_keys(std::span<const unsigned char>{ed25519_secret_key, 64});
+        auto [priv, pub] = session::ed25519::x25519_keypair(to_byte_span<64>(ed25519_secret_key));
         return session_encrypt_for_multiple_simple(
                 out_len,
                 messages,
@@ -318,8 +269,8 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
                 n_messages,
                 recipients,
                 n_recipients,
-                priv.data(),
-                pub.data(),
+                to_unsigned(priv.data()),
+                to_unsigned(pub.data()),
                 domain,
                 nonce,
                 pad);
@@ -339,10 +290,10 @@ LIBSESSION_C_API unsigned char* session_decrypt_for_multiple_simple(
 
     try {
         if (auto decrypted = session::decrypt_for_multiple_simple(
-                    std::span<const unsigned char>{encoded, encoded_len},
-                    std::span<const unsigned char>{x25519_privkey, 32},
-                    std::span<const unsigned char>{x25519_pubkey, 32},
-                    std::span<const unsigned char>{sender_x25519_pubkey, 32},
+                    to_byte_span(encoded, encoded_len),
+                    to_byte_span<32>(x25519_privkey),
+                    to_byte_span<32>(x25519_pubkey),
+                    to_byte_span<32>(sender_x25519_pubkey),
                     domain)) {
             return to_c_buffer(*decrypted, out_len);
         }
@@ -362,9 +313,9 @@ LIBSESSION_C_API unsigned char* session_decrypt_for_multiple_simple_ed25519_from
 
     try {
         if (auto decrypted = session::decrypt_for_multiple_simple(
-                    std::span<const unsigned char>{encoded, encoded_len},
-                    std::span<const unsigned char>{ed25519_secret, 64},
-                    std::span<const unsigned char>{sender_x25519_pubkey, 32},
+                    to_byte_span(encoded, encoded_len),
+                    to_byte_span<64>(ed25519_secret),
+                    to_byte_span<32>(sender_x25519_pubkey),
                     domain)) {
             return to_c_buffer(*decrypted, out_len);
         }
@@ -384,9 +335,9 @@ LIBSESSION_C_API unsigned char* session_decrypt_for_multiple_simple_ed25519(
 
     try {
         if (auto decrypted = session::decrypt_for_multiple_simple_ed25519(
-                    std::span<const unsigned char>{encoded, encoded_len},
-                    std::span<const unsigned char>{ed25519_secret, 64},
-                    std::span<const unsigned char>{sender_ed25519_pubkey, 32},
+                    to_byte_span(encoded, encoded_len),
+                    to_byte_span<64>(ed25519_secret),
+                    to_byte_span<32>(sender_ed25519_pubkey),
                     domain)) {
             return to_c_buffer(*decrypted, out_len);
         }

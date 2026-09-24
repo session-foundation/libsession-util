@@ -53,13 +53,11 @@ typedef struct session_network_config {
     uint16_t custom_file_server_port;
     const char* custom_file_server_pubkey_hex;
     uint64_t custom_file_server_max_file_size;
-    bool file_server_use_stream_encryption;
 
     // General options
     bool increase_no_file_limit;
     uint8_t path_length;
     bool enforce_subnet_diversity;
-    uint8_t redirect_retry_count;
     uint64_t min_retry_delay_ms;
     uint64_t max_retry_delay_ms;
     uint8_t num_nodes_to_check_for_network_offset;
@@ -93,8 +91,14 @@ typedef struct session_network_config {
 
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
     uint32_t quic_handshake_timeout_seconds;
+    /// Handshake timeout for connections whose packets travel through a Session Router tunnel,
+    /// which have a multi-hop round trip to complete rather than a direct one.
+    uint32_t quic_tunnel_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
-    bool quic_disable_mtu_discovery;
+    bool quic_disable_mtu_discovery;  // deprecated: use quic_max_udp_payload instead
+    /// Maximum QUIC UDP payload size for PMTUD; 0 for default (no cap).
+    /// If quic_disable_mtu_discovery is true and this is 0, acts as if set to 1200.
+    size_t quic_max_udp_payload;
 
 } session_network_config;
 
@@ -217,11 +221,6 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
 
 LIBSESSION_EXPORT CONNECTION_STATUS session_network_get_status(network_object* network);
 
-LIBSESSION_EXPORT void session_network_get_active_paths(
-        network_object* network, session_path_info** out_paths, size_t* out_paths_len);
-
-LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
-
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object* network,
         const char* swarm_pubkey_hex,
@@ -282,7 +281,6 @@ LIBSESSION_EXPORT session_upload_handle_t* session_network_upload(
 /// - `stall_timeout_ms` -- [in] timeout if no progress for this duration
 /// - `request_timeout_ms` -- [in] timeout for the request itself
 /// - `overall_timeout_ms` -- [in] timeout including pre-flight operations (0 to ignore)
-/// - `partial_min_interval_ms` -- [in] minimum interval between on_data calls (default 250ms)
 ///
 /// Returns: handle to the download, or NULL on error. Caller must free with session_download_free()
 LIBSESSION_EXPORT session_download_handle_t* session_network_download(
@@ -292,7 +290,6 @@ LIBSESSION_EXPORT session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t partial_min_interval_ms,
         int8_t desired_path_index);
 
 /// Cancels an in-progress upload
