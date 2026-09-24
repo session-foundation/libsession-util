@@ -580,9 +580,6 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     // us in touch with something that isn't a registered service node
     CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, {key_for(200), key_for(201)}));
 
-    // Too few of the named nodes resolve to be a swarm
-    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 2)));
-
     auto current_swarm = [&] {
         std::vector<service_node> swarm;
         snode_pool->debug_run_on_loop([&] {
@@ -646,6 +643,20 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
     CHECK(current_swarm() == overridden);
     CHECK_FALSE(snode_pool->debug_refresh_in_progress());
+
+    // A redirect naming nodes we mostly haven't heard of is followed with the ones we have - they
+    // are the right swarm, where the one we had just rejected us - and asks for the refresh that
+    // can fill in the rest (from a fresh count, so the limit plays no part)
+    snode_pool->update_cache(snode_cache);
+    snode_pool->debug_age_pool(10min);
+    snode_pool->debug_age_evidence_refresh(10min);
+    auto partial = keys_of(elsewhere, 2);
+    partial.push_back(key_for(200));
+    partial.push_back(key_for(201));
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, partial));
+    CHECK(current_swarm() ==
+          sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 2)));
+    CHECK(snode_pool->debug_refresh_in_progress());
 }
 
 TEST_CASE("Network", "[network][strike_expiry]") {

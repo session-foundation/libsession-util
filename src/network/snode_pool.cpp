@@ -1254,15 +1254,20 @@ bool SnodePool::record_swarm_redirect(
             if (named.count(node.remote_pubkey))
                 resolved.push_back(node);
 
-        if (resolved.size() < _config.cache_min_swarm_size) {
+        if (resolved.empty()) {
             log::debug(
                     cat,
-                    "Ignoring redirect for {}: only {}/{} named nodes are in our pool.",
+                    "Ignoring redirect for {}: none of the {} named nodes are in our pool.",
                     swarm_pubkey.hex(),
-                    resolved.size(),
                     swarm_node_keys.size());
             return false;
         }
+
+        // Named nodes we don't have are ones our pool is too old to know, and when that leaves too
+        // few to work with only a refresh can fill them in; the ones we do have are still in the
+        // right swarm, where the swarm we had just rejected us, so they are followed meanwhile
+        const bool pool_missing_members =
+                resolved.size() < named.size() && resolved.size() < _config.cache_min_swarm_size;
 
         auto& [nodes, redirects] = _swarm_overrides[swarm_pubkey];
         nodes = std::move(resolved);
@@ -1280,13 +1285,14 @@ bool SnodePool::record_swarm_redirect(
                 swarm_pubkey.hex(),
                 redirects);
 
-        if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH) {
+        if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH || pool_missing_members) {
             log::warning(
                     cat,
-                    "{} has been redirected {} times since the pool was refreshed; asking for a "
-                    "refresh.",
+                    "Asking for a refresh for {}: {}.",
                     swarm_pubkey.hex(),
-                    redirects);
+                    pool_missing_members
+                            ? "its redirect names nodes our pool doesn't have"
+                            : "{} redirects since the pool was refreshed"_format(redirects));
             invalidate_swarm(swarm_pubkey);
         }
 

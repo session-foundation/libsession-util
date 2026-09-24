@@ -904,8 +904,10 @@ void Network::_handle_421_retry(
                                     req_to_retry = std::move(original_request),
                                     cb = std::move(final_callback),
                                     failed_node = failed_node_copy](bool swarm_resolved) mutable {
-        // Without a re-resolve the swarm cache still holds the mapping the 421 disproved, so the
-        // retry would go straight back to the swarm that just rejected us
+        // Without a re-resolve there is nothing better than the mapping the 421 disproved - a
+        // redirect naming any node we know would have been followed instead - so a retry would go
+        // straight back to the swarm that just rejected us.  The refresh has been asked for, and
+        // the account's next rejection asks again.
         if (!swarm_resolved)
             return cb(
                     false,
