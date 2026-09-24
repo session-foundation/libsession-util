@@ -44,6 +44,7 @@ if(ENABLE_NETWORKING)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_quic_transport.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
 endif()
 
