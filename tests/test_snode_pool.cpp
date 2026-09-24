@@ -583,51 +583,49 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     // Too few of the named nodes resolve to be a swarm
     CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 2)));
 
-    // Naming the swarm we already calculated is the node contradicting itself
-    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
+    auto current_swarm = [&] {
+        std::vector<service_node> swarm;
+        snode_pool->debug_run_on_loop([&] {
+            snode_pool->get_swarm(
+                    swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
+                        swarm = std::move(nodes);
+                    });
+        });
+        return sorted(std::move(swarm));
+    };
+    auto overridden = sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 4));
 
     // A usable redirect is taken, and - the point of all this - no pool refresh is started for it
     REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
     CHECK_FALSE(snode_pool->debug_refresh_in_progress());
-
-    std::vector<service_node> redirected;
-    snode_pool->debug_run_on_loop([&] {
-        snode_pool->get_swarm(
-                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
-                    redirected = std::move(nodes);
-                });
-    });
-    CHECK(sorted(redirected) ==
-          sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 4)));
+    CHECK(current_swarm() == overridden);
     CHECK_FALSE(snode_pool->debug_refresh_in_progress());
 
-    // Nodes that keep disagreeing must not bounce us forever; after the third we stop believing
-    // them and the calculated swarm is back, for the caller to fall back on refreshing the pool
-    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 5)));
+    // How the named swarm relates to the one we sent to says nothing, since swarms can be
+    // rearranged any way at all: a node that has left the overridden swarm names its current
+    // members, and one in it naming the calculated swarm is how a wrong redirect gets put right
     CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
-    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 5)));
+    CHECK(current_swarm() == overridden);
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
+    CHECK(current_swarm() == sorted(calculated));
 
-    std::vector<service_node> after_giving_up;
-    snode_pool->debug_run_on_loop([&] {
-        snode_pool->get_swarm(
-                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
-                    after_giving_up = std::move(nodes);
-                });
-    });
-    CHECK(sorted(after_giving_up) == sorted(calculated));
+    // Every redirect counts, though, so two sets of nodes that keep disagreeing can't bounce us
+    // between them forever; after the third we stop believing them and the calculated swarm is
+    // back, for the caller to fall back on refreshing the pool
+    CHECK_FALSE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
+    CHECK(current_swarm() == sorted(calculated));
 
     // A refreshed pool is ground truth again, so redirects correcting the old one are dropped
     REQUIRE(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 4)));
     snode_pool->update_cache(snode_cache);
+    CHECK(current_swarm() == sorted(calculated));
 
-    std::vector<service_node> after_refresh;
-    snode_pool->debug_run_on_loop([&] {
-        snode_pool->get_swarm(
-                swarm_pubkey, true, [&](swarm::swarm_id_t, std::vector<service_node> nodes) {
-                    after_refresh = std::move(nodes);
-                });
-    });
-    CHECK(sorted(after_refresh) == sorted(calculated));
+    // ... and the calculated swarm itself, or part of it, is followed like any other
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(calculated, 6)));
+    CHECK(current_swarm() == sorted(calculated));
+    auto remaining = std::vector<service_node>(calculated.begin() + 1, calculated.end());
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(remaining, 5)));
+    CHECK(current_swarm() == sorted(remaining));
 }
 
 TEST_CASE("Network", "[network][strike_expiry]") {

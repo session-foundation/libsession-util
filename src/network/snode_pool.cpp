@@ -1260,26 +1260,6 @@ bool SnodePool::record_swarm_redirect(
             return false;
         }
 
-        // A redirect naming the swarm we already calculated is the node contradicting itself - it
-        // rejected the request and then pointed us back at the nodes we asked through.  Refusing it
-        // sends the caller off to refresh the pool, which is the only thing that can help
-        auto computed = swarm::get_swarm(swarm_pubkey, _all_swarms);
-        if (computed.second.size() == resolved.size()) {
-            std::unordered_set<ed25519_pubkey> computed_keys;
-            for (const auto& node : computed.second)
-                computed_keys.insert(node.remote_pubkey);
-
-            if (std::ranges::all_of(resolved, [&computed_keys](const auto& node) {
-                    return computed_keys.count(node.remote_pubkey) > 0;
-                })) {
-                log::debug(
-                        cat,
-                        "Ignoring redirect for {}: it names the swarm we already calculated.",
-                        swarm_pubkey.hex());
-                return false;
-            }
-        }
-
         auto& [nodes, redirects] = _swarm_overrides[swarm_pubkey];
 
         if (++redirects > MAX_CONSECUTIVE_SWARM_REDIRECTS) {
