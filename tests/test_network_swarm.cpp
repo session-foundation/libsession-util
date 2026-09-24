@@ -374,6 +374,11 @@ TEST_CASE("Swarm", "[network][swarm][batch_request_accounts]") {
         CHECK(batch_request_accounts("sequence", bytes) == accounts);
         CHECK_FALSE(batch_request_accounts("retrieve", bytes));
 
+        // A sub-request naming no account takes the one the caller gave for the whole request,
+        // while those that name their own keep it
+        CHECK(batch_request_accounts("batch", bytes, account('c')) ==
+              std::vector<std::optional<x25519_pubkey>>{account('a'), account('c'), account('b')});
+
         std::string_view junk = "not json";
         CHECK_FALSE(batch_request_accounts(
                 "batch", {reinterpret_cast<const unsigned char*>(junk.data()), junk.size()}));

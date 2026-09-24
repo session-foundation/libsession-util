@@ -170,7 +170,9 @@ std::vector<response::subresponse> response::subresponses(const nlohmann::json& 
 }
 
 std::optional<std::vector<std::optional<x25519_pubkey>>> batch_request_accounts(
-        std::string_view endpoint, std::span<const unsigned char> body) {
+        std::string_view endpoint,
+        std::span<const unsigned char> body,
+        std::optional<x25519_pubkey> fallback) {
     if (endpoint != "batch" && endpoint != "sequence")
         return std::nullopt;
 
@@ -186,6 +188,8 @@ std::optional<std::vector<std::optional<x25519_pubkey>>> batch_request_accounts(
         auto& account = accounts.emplace_back();
         if (auto params = field(req, "params", &nlohmann::json::is_object))
             account = account_in(*params);
+        if (!account)
+            account = fallback;
     }
 
     return accounts;

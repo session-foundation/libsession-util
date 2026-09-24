@@ -272,10 +272,13 @@ using network_response_callback_t = std::function<void(
         std::optional<std::string> response)>;
 
 /// The accounts of each sub-request in a pregenerated `batch`/`sequence` body, in the form
-/// `Request::swarm_pubkeys` takes, for a request whose body was built by the caller.  Returns
-/// nullopt when `endpoint` is neither or the body can't be parsed.
+/// `Request::swarm_pubkeys` takes, for a request whose body was built by the caller.  A
+/// sub-request whose params name no account gets `fallback` instead: the account the caller said
+/// the request is for.  Returns nullopt when `endpoint` is neither or the body can't be parsed.
 std::optional<std::vector<std::optional<x25519_pubkey>>> batch_request_accounts(
-        std::string_view endpoint, std::span<const unsigned char> body);
+        std::string_view endpoint,
+        std::span<const unsigned char> body,
+        std::optional<x25519_pubkey> fallback = std::nullopt);
 
 namespace response {
     std::optional<std::pair<int16_t, bool>> parse_text_error(std::string_view body);

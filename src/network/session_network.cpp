@@ -1862,13 +1862,17 @@ LIBSESSION_C_API void session_network_send_request(
                 std::nullopt,
                 request_id};
 
+        std::optional<x25519_pubkey> swarm_pubkey;
+        if (params->swarm_pubkey_hex)
+            swarm_pubkey = x25519_pubkey::from_hex({params->swarm_pubkey_hex, 64});
+
         std::optional<std::vector<std::optional<x25519_pubkey>>> batch_accounts;
         if (request.body)
-            batch_accounts = batch_request_accounts(request.endpoint, *request.body);
+            batch_accounts = batch_request_accounts(request.endpoint, *request.body, swarm_pubkey);
         if (batch_accounts)
             request.swarm_pubkeys = std::move(*batch_accounts);
-        else if (params->swarm_pubkey_hex)
-            request.swarm_pubkeys = {x25519_pubkey::from_hex({params->swarm_pubkey_hex, 64})};
+        else if (swarm_pubkey)
+            request.swarm_pubkeys = {*swarm_pubkey};
 
         auto cpp_callback = [c_cb = callback, c_ctx = ctx](
                                     bool success,
