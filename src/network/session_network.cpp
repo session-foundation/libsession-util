@@ -411,8 +411,6 @@ void Network::get_random_nodes(
 
             return _snode_pool->refresh_if_needed(
                     nodes_to_exclude, [this, count, cb = std::move(cb)](bool refreshed) {
-                        // Retrying without a refresh would re-enter this same branch and recurse
-                        // until the stack gives out
                         if (!refreshed) {
                             log::warning(
                                     cat,
@@ -421,7 +419,20 @@ void Network::get_random_nodes(
                             return cb({});
                         }
 
-                        get_random_nodes(count, cb);
+                        // `refreshed` includes nothing having needed refreshing, which calls back
+                        // inline, so asking again of a pool that can't supply `count` would
+                        // re-enter this branch until the stack gives out
+                        auto nodes = _snode_pool->get_unused_nodes(count);
+                        if (nodes.size() < count) {
+                            log::warning(
+                                    cat,
+                                    "Cannot get {} random nodes: the pool has only {} to give.",
+                                    count,
+                                    nodes.size());
+                            return cb({});
+                        }
+
+                        cb(std::move(nodes));
                     });
         }
         cb(unused_nodes);

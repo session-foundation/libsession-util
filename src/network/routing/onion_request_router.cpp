@@ -1199,14 +1199,25 @@ void OnionRequestRouter::_build_path(
                     if (!self)
                         return;
 
-                    // Rebuilding without a refresh lands back in this same branch with the same
-                    // too-few nodes, so the queued requests would wait on a loop that cannot end
-                    if (!refreshed) {
+                    // Rebuilding lands back in this same branch unless the pool can now fill a
+                    // path, and `refreshed` includes nothing having needed refreshing, which calls
+                    // back inline - so rebuilding without checking first recurses until the stack
+                    // gives out
+                    std::optional<std::string_view> cannot_build;
+                    if (!refreshed)
+                        cannot_build = "the snode pool could not be refreshed";
+                    else if (auto pool = _snode_pool.lock();
+                             !pool ||
+                             pool->get_unused_nodes(_config.path_length, nodes_to_exclude).size() <
+                                     _config.path_length)
+                        cannot_build = "the snode pool has too few usable nodes";
+
+                    if (cannot_build) {
                         log::error(
                                 cat,
-                                "[Request {}]: Cannot build a path, the snode pool could not be "
-                                "refreshed.",
-                                initiating_req_id.value_or("internal"));
+                                "[Request {}]: Cannot build a path, {}.",
+                                initiating_req_id.value_or("internal"),
+                                *cannot_build);
                         _update_status();
 
                         auto queue_it = _request_queues.find(category);
@@ -1222,17 +1233,17 @@ void OnionRequestRouter::_build_path(
                             auto to_fail = queue_it->second->pop_all();
                             log::error(
                                     cat,
-                                    "Failing {} queued requests for '{}' paths; the snode pool "
-                                    "could not be refreshed.",
+                                    "Failing {} queued requests for '{}' paths; {}.",
                                     to_fail.size(),
-                                    to_string(category, _config.single_path_mode));
+                                    to_string(category, _config.single_path_mode),
+                                    *cannot_build);
 
                             for (const auto& [req, cb] : to_fail)
                                 cb(false,
                                    false,
                                    -1,
                                    {content_type_plain_text},
-                                   "Failed to refresh the snode pool to build a path.");
+                                   "Cannot build a path: {}."_format(*cannot_build));
                         }
                         return;
                     }
