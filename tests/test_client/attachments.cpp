@@ -3459,6 +3459,32 @@ TEST_CASE("Client: a request for an attachment can be withdrawn", "[client][atta
         CHECK(availability(id) == AttachmentAvailability::absent);
     }
 
+    SECTION("deleting the attachment withdraws every request for it") {
+        auto id = arrive();
+        show(id);
+        save(id);
+        sync(*c);
+        auto request = take_request();
+        serve_half(request);
+
+        auto how = GENERATE(as<std::string>{}, "message", "clear", "conversation");
+        if (how == "message")
+            CHECK(c->delete_message(id, await));
+        else if (how == "clear")
+            c->conversation(convo, await)->clear_messages(await);
+        else
+            c->conversation(convo, await)->delete_conversation(await);
+        sync(*c);
+
+        REQUIRE(shown);
+        CHECK(was_cancelled(*shown));
+        REQUIRE(saved.size() == 1);
+        CHECK(was_cancelled(saved[0]));
+        CHECK(*request.cancelled);
+        CHECK(std::filesystem::is_empty(out.path));
+        CHECK(partial_cache_files(dir.path).empty());
+    }
+
     SECTION("a request that has already finished is not withdrawn") {
         auto id = arrive();
         auto token = save(id);

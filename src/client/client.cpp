@@ -1116,6 +1116,7 @@ void Client::_attachment_data(
             caching,
             {token,
              message_id,
+             index,
              _attachment_progress(message_id, index, token, std::move(on_progress)),
              std::move(cb)});
 }
@@ -1525,10 +1526,10 @@ void Client::_refetch(std::shared_ptr<Transfer> t) {
     _start_transfer(std::move(name), std::move(again));
 }
 
-void Client::_cancel(uint64_t token) {
+void Client::_cancel(uint64_t token, std::string_view why) {
     if (token == 0)
         return;
-    const Error cancelled{err::download_cancelled, "cancelled"};
+    const Error cancelled{err::download_cancelled, std::string{why}};
 
     std::shared_ptr<Save> save;
     if (auto found = _saves.find(token); found != _saves.end())
@@ -1579,6 +1580,32 @@ void Client::_cancel(uint64_t token) {
             _saved(*save, unexpected{cancelled});
         });
     });
+}
+
+void Client::_withdraw_orphaned_requests() {
+    if (_in_flight.empty() && _saves.empty())
+        return;
+
+    auto c = core.database().conn();
+    auto gone = [&](int64_t message_id, size_t index) {
+        return !c.prepared_get<int64_t>(
+                "SELECT EXISTS(SELECT 1 FROM message_attachments WHERE message = ? AND idx = ?)",
+                message_id,
+                static_cast<int64_t>(index));
+    };
+
+    // Collected first: withdrawing one can end its transfer, which takes it out of `_in_flight`.
+    std::vector<uint64_t> tokens;
+    for (const auto& [name, t] : _in_flight)
+        for (const auto& w : t->waiting)
+            if (w.token && w.message_id && gone(*w.message_id, w.index))
+                tokens.push_back(w.token);
+    for (const auto& [token, s] : _saves)
+        if (!s->cancelled && gone(s->message_id, s->index))
+            tokens.push_back(token);
+
+    for (auto token : tokens)
+        _cancel(token, "the attachment was deleted");
 }
 
 bool Client::_abort_if_unwanted(std::map<std::string, std::shared_ptr<Transfer>>::iterator found) {
@@ -2327,6 +2354,7 @@ void Client::_clear_messages(const ConversationId& id) {
     _set_delete_before(id, now);
 
     if (emptied) {
+        _withdraw_orphaned_requests();
         _emit_history_replaced(id);
         _touch(id);
     }
@@ -2360,8 +2388,10 @@ void Client::_delete_conversation(const ConversationId& id, bool keep_messages) 
         _set_delete_before(id, now);
     _sync_conversation(id);
 
-    if (emptied)
+    if (emptied) {
+        _withdraw_orphaned_requests();
         _emit_history_replaced(id);
+    }
     if (hidden)
         _emit_lists_replaced();
 }
@@ -2393,6 +2423,7 @@ void Client::_delete_contact(const ConversationId& id) {
     _sync_contact(id);
 
     if (removed) {
+        _withdraw_orphaned_requests();
         _emit_conversation_removed(id);
         _emit_lists_replaced();
     }
@@ -2446,6 +2477,8 @@ bool Client::_delete_message(int64_t message_id, Deletion how_far) {
         convo = conversation_id_at(c, *convo_row);
         tx.commit();
     }
+
+    _withdraw_orphaned_requests();
 
     if (convo) {
         // Updated rather than removed: the row is still there, and a client that draws a gap where
@@ -3183,6 +3216,9 @@ WHERE id = ?1
         tx.commit();
     }
 
+    if (!cleared.empty() || !removed.empty())
+        _withdraw_orphaned_requests();
+
     for (const auto& id : added)
         _emit_conversation_added(id);
     for (const auto& id : cleared)
@@ -3539,6 +3575,9 @@ WHERE id = ?1 AND (exp_mode, exp_timer) IS NOT (?2, ?3)
 
         tx.commit();
     }
+
+    if (history_changed)
+        _withdraw_orphaned_requests();
 
     if (created)
         _emit_conversation_added(me);

@@ -396,6 +396,9 @@ class Client {
     /// the same file, a save, an auto-download -- since cancelling one of them is not cancelling
     /// the others.  A copy that was being written to the cache goes with it.
     ///
+    /// Deleting an attachment -- with its message, its conversation, or a delete-before
+    /// instruction from any device -- withdraws every request for it in the same way.
+    ///
     /// Nothing happens for a token that has already finished, or never existed.  One that finishes
     /// while this is on its way reports how it finished, so a save that is told it succeeded has
     /// its file.  An `attachment_data` answered from the cache is too quick to withdraw, and is
@@ -788,11 +791,12 @@ class Client {
     // Somebody wanting a file's bytes: a display, an auto-download, a picture fetch.
     //
     // `token` is what `cancel_attachment_transfer` finds it by, and 0 for a fetch nothing outside
-    // can name, which is therefore never withdrawn.  `message_id` is the message it was asked for,
-    // if it was, so that deleting the message can withdraw it.
+    // can name, which is therefore never withdrawn.  `message_id` and `index` are the attachment it
+    // was asked for, if it was one, so that deleting it can withdraw the request.
     struct Waiter {
         uint64_t token = 0;
         std::optional<int64_t> message_id;
+        size_t index = 0;
         transfer_progress progress;
         result_function<std::vector<std::byte>> cb;
     };
@@ -856,8 +860,13 @@ class Client {
     std::map<std::string, std::shared_ptr<Transfer>> _in_flight;
 
     // Withdraws the waiter or save holding `token`, wherever it is, and stops a transfer left with
-    // nobody on it.
-    void _cancel(uint64_t token);
+    // nobody on it.  `why` is the cancellation's message.
+    void _cancel(uint64_t token, std::string_view why = "cancelled");
+
+    // Withdraws every request for an attachment that no longer exists.  Called once whatever
+    // deleted it has committed, by everything that deletes messages or attachments: asked of the
+    // database rather than worked out at each of those, which delete in several different ways.
+    void _withdraw_orphaned_requests();
 
     // Stops `found`'s transfer and forgets it if nobody is left on it, discarding whatever it was
     // keeping; true if it did.
