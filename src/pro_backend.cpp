@@ -35,27 +35,6 @@ double epoch_seconds_double(session::sys_ms t) {
     return std::chrono::duration<double>(t.time_since_epoch()).count();
 }
 
-void json_require_hex(const nlohmann::json& j, std::string_view key, std::span<uint8_t> dest) {
-    auto hex = json_require<std::string_view>(j, key);
-    if (hex.starts_with("0X") || hex.starts_with("0x"))
-        hex = hex.substr(2);
-
-    size_t hex_avail = dest.size() * 2;
-    if (hex.size() != hex_avail)
-        throw session::parse_error_key{
-                key,
-                fmt::format(
-                        "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
-                        key,
-                        hex,
-                        hex_avail,
-                        hex.size())};
-
-    if (!oxenc::is_hex(hex))
-        throw session::parse_error_key{
-                key, fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
-    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
-}
 };  // namespace
 
 namespace session::pro_backend {
@@ -132,8 +111,8 @@ using namespace std::literals;
 // literal).
 constexpr ProviderURLs google_play_urls{
         .refund_platform_url = "https://support.google.com/googleplay/workflow/9813244?"sv,
-        .refund_support_url = "https://getsession.org/android-refund"sv,
-        .refund_status_url = "https://getsession.org/android-refund"sv,
+        .refund_support_url = "https://getsession.org/refund-android"sv,
+        .refund_status_url = "https://getsession.org/refund-android"sv,
         .update_subscription_url =
                 "https://play.google.com/store/account/subscriptions?package=network.loki.messenger"sv,
         .cancel_subscription_url =
@@ -255,7 +234,9 @@ namespace {
     // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
     // proof) from the already-extracted `result` object.
     void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
-        result.proof.version = json_require<uint8_t>(result_obj, "version");
+        // No `version` to read: the format is fixed by the endpoint we asked, and is bound into the
+        // proof's signature by its domain prefix rather than carried as a field. A future format is
+        // a new endpoint returning its own proof type, not a version bump on this response.
         result.proof.expiry_at = json_require<std::chrono::sys_seconds>(result_obj, "expiry_ts");
         json_require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
         json_require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
@@ -821,7 +802,6 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
 
         // Success and error responses fold into one path -- different fields populated.
         const auto& p = owned->proof;
-        result.proof.version = p.version;
         result.proof.expiry_ts = session::epoch_seconds(p.expiry_at);
         std::memcpy(
                 result.proof.revocation_tag.data, p.revocation_tag.data(), p.revocation_tag.size());
