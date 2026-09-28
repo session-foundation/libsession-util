@@ -9,6 +9,7 @@
 #include <session/config/user_profile.hpp>
 #include <session/util.hpp>
 #include <string_view>
+#include <thread>
 
 #include "utils.hpp"
 
