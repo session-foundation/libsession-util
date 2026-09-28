@@ -687,6 +687,18 @@ TEST_CASE("Network", "[network][swarm_redirect]") {
     CHECK(current_swarm() ==
           sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 2)));
     CHECK(snode_pool->debug_refresh_in_progress());
+
+    // A redirect naming too few nodes to be a swarm asks for the refresh whether or not any of the
+    // names were unknown.  One naming a single node we do know has no stale pool to explain it, and
+    // is the only thing serving the account until a refresh drops it, so it is the case that most
+    // wants one
+    snode_pool->update_cache(snode_cache);
+    snode_pool->debug_age_pool(10min);
+    snode_pool->debug_age_evidence_refresh(10min);
+    CHECK(snode_pool->record_swarm_redirect(swarm_pubkey, keys_of(elsewhere, 1)));
+    CHECK(current_swarm() ==
+          sorted(std::vector<service_node>(elsewhere.begin(), elsewhere.begin() + 1)));
+    CHECK(snode_pool->debug_refresh_in_progress());
 }
 
 TEST_CASE("Network", "[network][get_swarm_checks_age]") {

@@ -1285,11 +1285,12 @@ bool SnodePool::record_swarm_redirect(
             return false;
         }
 
-        // Named nodes we don't have are ones our pool is too old to know, and when that leaves too
-        // few to work with only a refresh can fill them in; the ones we do have are still in the
-        // right swarm, where the swarm we had just rejected us, so they are followed meanwhile
-        const bool pool_missing_members =
-                resolved.size() < named.size() && resolved.size() < _config.cache_min_swarm_size;
+        // Too few of the named nodes resolved to call the result a swarm: either our pool is too
+        // old to know the rest, or the redirect isn't describing one.  Only a refresh settles
+        // which, and the nodes we do have still beat the swarm that just rejected us, so they are
+        // followed meanwhile.  Deliberately not also requiring that some names were unknown - a
+        // redirect naming one node we do know is the shape with no stale pool to explain it.
+        const bool too_few_resolved = resolved.size() < _config.cache_min_swarm_size;
 
         auto& [nodes, redirects] = _swarm_overrides[swarm_pubkey];
         nodes = std::move(resolved);
@@ -1307,11 +1308,14 @@ bool SnodePool::record_swarm_redirect(
                 swarm_pubkey.hex(),
                 redirects);
 
-        if (pool_missing_members) {
+        if (too_few_resolved) {
             log::warning(
                     cat,
-                    "Asking for a refresh for {}: its redirect names nodes our pool doesn't have.",
-                    swarm_pubkey.hex());
+                    "Asking for a refresh for {}: only {} of the {} nodes its redirect named are "
+                    "ones we know.",
+                    swarm_pubkey.hex(),
+                    nodes.size(),
+                    named.size());
             invalidate_swarm(swarm_pubkey);
         } else if (redirects > SWARM_REDIRECTS_BEFORE_REFRESH) {
             // Past the limit every redirect asks again, for as long as the refresh stays
