@@ -4297,7 +4297,7 @@ static std::filesystem::path open_partial(std::ofstream& out, const std::filesys
     throw std::runtime_error{"Cannot write a scratch file beside {}"_format(dest.string())};
 }
 
-// `name (2).pdf`, not `name.pdf (2)`: only the first still opens on a double-click, and it is what
+// `name (1).pdf`, not `name.pdf (1)`: only the first still opens on a double-click, and it is what
 // browsers and both desktop file managers produce.
 static std::filesystem::path numbered(const std::filesystem::path& dest, int n) {
     auto out = dest;

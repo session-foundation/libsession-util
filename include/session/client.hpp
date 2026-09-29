@@ -432,7 +432,7 @@ class Client {
     /// free is something the caller decided when it asked its user; the rename happens when the
     /// download finishes, which may be minutes later, and anything that has appeared there in
     /// between is a file nobody agreed to lose.  So by default the finished file takes the next
-    /// free `name (2)` instead — before the extension, since only that still opens on a
+    /// free `name (1)` instead — before the extension, since only that still opens on a
     /// double-click.
     ///
     /// A caller whose user has *already* been shown what is there and said replace it passes
