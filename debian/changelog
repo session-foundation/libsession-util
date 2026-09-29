@@ -1,3 +1,9 @@
+libsession-util (1.6.7-1~ubuntu2610) stonking; urgency=medium
+
+  * Stonking deb
+
+ -- Jason Rhinelander <jason@session.foundation>  Tue, 29 Sep 2026 16:31:56 -0300
+
 libsession-util (1.6.7-1~ubuntu2604) resolute; urgency=medium
 
   [ Morgan Pretty ]
