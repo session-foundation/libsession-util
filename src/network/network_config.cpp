@@ -167,6 +167,10 @@ void Config::handle_config_opt(opt::min_resume_clock_resync_interval mrcri) {
             mrcri.duration.count());
 }
 
+void Config::handle_config_opt(opt::disk_loop dl) {
+    disk_loop = std::move(dl.loop);
+}
+
 // MARK: Snode Pool Options
 
 void Config::handle_config_opt(opt::cache_directory dir) {

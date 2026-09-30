@@ -184,7 +184,7 @@ Network::Network(config::Config _conf) :
 
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
-    _disk_loop = std::make_shared<quic::Loop>();
+    _disk_loop = config.disk_loop ? std::move(config.disk_loop) : std::make_shared<quic::Loop>();
     _jq.emplace(*_loop);
 
     // Setup the transport layer
@@ -347,7 +347,9 @@ Network::~Network() {
     // run against members that are about to go.
     _loop->call_get([this] { _jq->stop(); });
 
-    // Now shut down the loops (these destructors join their threads)
+    // Now shut down the loops, whose destructors join their threads.  A disk loop we were given is
+    // only let go of here, since it belongs to whoever gave it: what we left queued on it runs
+    // later, which is safe because every one of those jobs holds what it writes by value.
     _disk_loop.reset();
     _loop.reset();
 
